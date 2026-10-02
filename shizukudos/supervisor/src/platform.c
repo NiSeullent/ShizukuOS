@@ -41,6 +41,9 @@ static uint64_t pml4[512] __attribute__((aligned(4096)));
 static uint64_t pdpt[512] __attribute__((aligned(4096)));
 static uint64_t pd[MAX_GIB][512] __attribute__((aligned(4096)));
 static uint8_t window_is_ram[MAX_GIB * 512 / 8];
+static uint64_t vga_low_pt[512] __attribute__((aligned(4096)));
+static uint64_t vga_lfb_pt[8][512] __attribute__((aligned(4096)));
+static uint64_t vga_lfb_binding,vga_pat_binding;
 
 static shz_info_t *g_info;
 /* Private roots share only the immutable identity hierarchy built on the BSP.
@@ -105,6 +108,7 @@ static uint64_t build_paging(shz_info_t *info)
     uint64_t top = 4ull << 30, gib, i, addr;
     const uint8_t *map = (const uint8_t *)(uintptr_t)info->memmap_base;
     uint64_t off;
+    vga_lfb_binding=0;vga_pat_binding=0;
 
     for (off = 0; off + info->memmap_desc_size <= info->memmap_bytes; off += info->memmap_desc_size) {
         const uint32_t type = *(const uint32_t *)(map + off);
@@ -141,6 +145,34 @@ static uint64_t build_paging(shz_info_t *info)
         }
     }
     return gib;
+}
+
+int platform_vga_uc(uint64_t base,uint64_t bytes)
+{
+    uint64_t pat,uc_flags=0;unsigned slot;
+    if(bytes!=(16u<<20) || base<(128u<<20) || base>0x100000000ull-bytes ||
+       (base&(bytes-1)) || read_cr3()!=(uintptr_t)pml4)return -1;
+    pat=rdmsr(MSR_IA32_PAT);
+    for(slot=0;slot<8;++slot)if(((pat>>(slot*8))&255)==0)break;
+    if(slot==8)return -1; /* UC-minus is not substituted for UC. */
+    if(vga_lfb_binding)return vga_lfb_binding==base && vga_pat_binding==pat?0:-1;
+    /* Validate all nine identity large leaves before modifying any table. */
+    for(unsigned n=0;n<9;++n){uint64_t address=n?base+((uint64_t)(n-1)<<21):0;
+        uint64_t entry=pd[address>>30][(address>>21)&511];
+        if((entry&(PTE_P|PTE_RW|PTE_PS))!=(PTE_P|PTE_RW|PTE_PS) ||
+           (entry&0x000fffffffe00000ull)!=address)return -1;}
+    uc_flags=(slot&1?PTE_PWT:0)|(slot&2?PTE_PCD:0)|(slot&4?0x80ull:0);
+    uint64_t old=pd[0][0],attributes=(old&~0x000ffffffffff000ull)&~PTE_PS;
+    if(old&0x1000)attributes|=0x80; /* large PAT bit12 becomes 4 KiB bit7 */
+    for(unsigned n=0;n<512;++n)vga_low_pt[n]=((uint64_t)n<<12)|attributes;
+    for(unsigned n=0xa0;n<0xc0;++n)vga_low_pt[n]=((uint64_t)n<<12)|PTE_P|PTE_RW|uc_flags;
+    for(unsigned block=0;block<8;++block)for(unsigned n=0;n<512;++n)
+        vga_lfb_pt[block][n]=(base+((uint64_t)block<<21)+((uint64_t)n<<12))|PTE_P|PTE_RW|uc_flags;
+    pd[0][0]=(uintptr_t)vga_low_pt|PTE_P|PTE_RW;
+    for(unsigned block=0;block<8;++block){uint64_t address=base+((uint64_t)block<<21);
+        pd[address>>30][(address>>21)&511]=(uintptr_t)vga_lfb_pt[block]|PTE_P|PTE_RW;}
+    vga_lfb_binding=base;vga_pat_binding=pat;
+    write_cr3((uintptr_t)pml4);return 0;
 }
 
 void platform_init(shz_info_t *info)

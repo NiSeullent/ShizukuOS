@@ -32,17 +32,18 @@ def main():
               "VM_executed": False, "Windows98_executed": False}
     try:
         module.build_vbios()
+        _, ap_command = module.build_ap_trampoline()
         payload, payload_commands = module.build_payload()
         loader, loader_command = module.build_loader(payload)
         artifacts = {}
-        for name in ("BOOTX64.EFI", "payload.bin", "payload.elf", "vbios.bin"):
+        for name in ("BOOTX64.EFI", "payload.bin", "payload.elf", "vbios.bin", "ap-trampoline.bin"):
             path = output / name
             artifacts[name] = {"bytes": path.stat().st_size, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
         after = {str(p.relative_to(guards.ROOT)): guards.file_sha(p) for p in guards.source_files()}
         if pins != after:
             raise ValueError("ordinary Supervisor source changed during compilation")
         result.update(status="PASS_NATIVE_SUPERVISOR_COMPONENT_COMPILE_NOT_RUN", artifacts=artifacts,
-                      commands=[[str(x) for x in c] for c in [*payload_commands, loader_command]],
+                      commands=[[str(x) for x in c] for c in [ap_command, *payload_commands, loader_command]],
                       source_before_after_match=True)
     except BaseException as error:
         result["error"] = str(error)

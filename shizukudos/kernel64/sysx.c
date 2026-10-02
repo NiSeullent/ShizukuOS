@@ -52,17 +52,18 @@ static int32_t give_handle(process_t *p, kobject_t *o, uint64_t user_ptr, uint32
     return STATUS_SUCCESS;
 }
 
-static kobject_t *object_for_handle_access(process_t *p,uint64_t h,uint32_t *access)
+static kobject_t *object_for_handle_access(process_t *p,uint64_t h,uint32_t *access,int32_t *status)
 {
     kobject_t *o;
-    if(h==CURRENT_PROCESS_HANDLE){if(access)*access=0x1fffffu;ob_ref(p->object);return p->object;}
-    if(h==CURRENT_THREAD_HANDLE){if(access)*access=0x1fffffu;ob_ref(thread_current()->object);return thread_current()->object;}
-    return handle_ref(p,h,0,&o,access)?0:o;
+    if(h==CURRENT_PROCESS_HANDLE){if(access)*access=0x1fffffu;ob_ref(p->object);*status=STATUS_SUCCESS;return p->object;}
+    if(h==CURRENT_THREAD_HANDLE){if(access)*access=0x1fffffu;ob_ref(thread_current()->object);*status=STATUS_SUCCESS;return thread_current()->object;}
+    *status=handle_ref(p,h,0,&o,access);
+    return *status?0:o;
 }
 static kobject_t *object_for_wait(process_t *p,uint64_t h,int32_t *status)
 {
-    uint32_t access=0;kobject_t *o=object_for_handle_access(p,h,&access);
-    if(!o){*status=STATUS_INVALID_HANDLE;return 0;}
+    uint32_t access=0;kobject_t *o=object_for_handle_access(p,h,&access,status);
+    if(!o)return 0;
     if((o->type==OB_EVENT || o->type==OB_SEMAPHORE) && !shz_sync_rights_present(access,SHZ_SYNCHRONIZE)){
         ob_deref(o);*status=STATUS_ACCESS_DENIED;return 0;
     }
@@ -294,10 +295,10 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
     }
     case SYS_NtDuplicateObject: {                           /* (srcproc, srchandle, dstproc, PHANDLE dst, access, attrs, options) */
         uint32_t granted = 0;
-        kobject_t *o = object_for_handle_access(p, a2, &granted);
+        kobject_t *o = object_for_handle_access(p, a2, &granted, &st);
         uint32_t access = (uint32_t)stack_arg(p, r, 5);
         const uint32_t options = (uint32_t)stack_arg(p, r, 7);
-        if (!o) return STATUS_INVALID_HANDLE;
+        if (!o) return st;
         if (options & 2) access = granted;                 /* DUPLICATE_SAME_ACCESS */
         st = STATUS_SUCCESS;
         if (o->type == OB_SECTION && !(options & 2)) {

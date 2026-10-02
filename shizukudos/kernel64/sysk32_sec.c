@@ -15,15 +15,17 @@ extern int64_t stack_arg(process_t *p, struct regs *r, unsigned n);
 #define STATUS_NO_TOKEN ((int32_t)0xC000007C)
 #define STATUS_NOT_FOUND ((int32_t)0xC0000225)
 
-static process_t *proc_ref_of(process_t *cur, uint64_t h, kobject_t **ref)
+static process_t *proc_ref_of(process_t *cur, uint64_t h, kobject_t **ref, int32_t *status)
 {
     kobject_t *o;
     process_t *t;
     *ref = 0;
-    if (h == CURRENT_PROCESS_HANDLE) return cur;
-    if (handle_ref(cur, h, OB_PROCESS, &o, 0)) return 0;
+    *status = STATUS_SUCCESS;
+    if (h == CURRENT_PROCESS_HANDLE) { if (!cur) *status = STATUS_INVALID_HANDLE; return cur; }
+    *status = handle_ref(cur, h, OB_PROCESS, &o, 0);
+    if (*status) return 0;
     t = o->u.proc.p;
-    if (!t || !t->used || t->object != o || t->teardown) { ob_deref(o); return 0; }   /* gone: the slot may be reused */
+    if (!t || !t->used || t->object != o || t->teardown) { ob_deref(o); *status = STATUS_INVALID_HANDLE; return 0; }   /* gone: the slot may be reused */
     *ref = o;
     return t;
 }
@@ -90,9 +92,9 @@ static int32_t sys_token(process_t *p, struct regs *r, uint64_t op, uint64_t a2,
     switch (op) {
     case SHZ_TOK_OPEN_PROCESS: {
         kobject_t *pref, *tok;
-        process_t *t = proc_ref_of(p, a2, &pref);
         int32_t st;
-        if (!t) return STATUS_INVALID_HANDLE;
+        process_t *t = proc_ref_of(p, a2, &pref, &st);
+        if (!t) return st;
         tok = process_token(t);
         if (!tok) { proc_unref(pref); return STATUS_NO_MEMORY; }
         ob_ref(tok);
@@ -105,7 +107,10 @@ static int32_t sys_token(process_t *p, struct regs *r, uint64_t op, uint64_t a2,
         kobject_t *to = 0, *tok;
         uint64_t f;
         if (a2 == CURRENT_THREAD_HANDLE) t = thread_current();
-        else if (handle_ref(p, a2, OB_THREAD, &to, 0)) return STATUS_INVALID_HANDLE;
+        else {
+            int32_t st = handle_ref(p, a2, OB_THREAD, &to, 0);
+            if (st) return st;
+        }
         f = irq_save();
         if (to) t = to->u.thr.t;
         tok = t ? t->impersonation : 0;
@@ -170,7 +175,10 @@ static int32_t sys_token(process_t *p, struct regs *r, uint64_t op, uint64_t a2,
             if (((shz_token_info *)tok->u.token.t)->type != 2) { ob_deref(tok); return (int32_t)0xC000005C; }   /* STATUS_BAD_TOKEN_TYPE */
         }
         if (!a2 || a2 == CURRENT_THREAD_HANDLE) t = thread_current();
-        else if (handle_ref(p, a2, OB_THREAD, &to, 0)) { if (tok) ob_deref(tok); return STATUS_INVALID_HANDLE; }
+        else {
+            int32_t st = handle_ref(p, a2, OB_THREAD, &to, 0);
+            if (st) { if (tok) ob_deref(tok); return st; }
+        }
         f = irq_save();
         if (to) t = to->u.thr.t;
         if (!t) { irq_restore(f); if (to) ob_deref(to); if (tok) ob_deref(tok); return STATUS_THREAD_IS_TERMINATING; }

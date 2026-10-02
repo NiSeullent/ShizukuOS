@@ -22,6 +22,8 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[3]
 GLYPHS = tuple("shizukudos/csmwrap/video/" + name for name in
                ("cp437.c", "cp437.h", "font8x8_basic.h"))
+AP_INPUTS = ("shizukudos/kernel32/service_policy.h", "shizukudos/kernel64/smp_acpi.c",
+             "shizukudos/kernel64/smp_acpi.h", "shizukudos/boot_profile/win98_foundation.h")
 
 
 class CompileSourceBindingTests(unittest.TestCase):
@@ -32,7 +34,7 @@ class CompileSourceBindingTests(unittest.TestCase):
         suffixes = {".c", ".h", ".asm", ".ld", ".py"}
         sources = {p for folder in ("shizukudos/supervisor", "shizukudos/abi", "shizukudos/uefi")
                    for p in (ROOT / folder).rglob("*") if p.is_file() and p.suffix in suffixes}
-        sources.update(ROOT / p for p in (*GLYPHS, "shizukudos/tools/shzlib.py",
+        sources.update(ROOT / p for p in (*GLYPHS, *AP_INPUTS, "shizukudos/tools/shzlib.py",
                                          "shizukudos/kernel64/standalone/memholes.h"))
         for source in sources:
             copied = self.root / source.relative_to(ROOT)
@@ -62,6 +64,12 @@ class CompileSourceBindingTests(unittest.TestCase):
             built_calls.append("vbios")
             (self.out / "vbios.bin").write_bytes(b"mock vbios\n")
 
+        def ap_trampoline():
+            built_calls.append("ap_trampoline")
+            data = b"mock trampoline: no compiler was executed\n"
+            (self.out / "ap-trampoline.bin").write_bytes(data)
+            return data, ["mock-build-boundary", "ap_trampoline"]
+
         def payload():
             built_calls.append("payload")
             (self.out / "payload.bin").write_bytes(mocked_payload)
@@ -90,6 +98,7 @@ class CompileSourceBindingTests(unittest.TestCase):
                 # its compiler boundary. compile.py and source_files stay real.
                 self.real_loader.exec_module(module)
                 module.build_vbios = vbios
+                module.build_ap_trampoline = ap_trampoline
                 module.build_payload = payload
                 module.build_loader = loader
 
@@ -112,7 +121,7 @@ class CompileSourceBindingTests(unittest.TestCase):
                 runner.main()
             except ValueError as caught:
                 error = caught
-        self.assertEqual(built_calls, ["vbios", "payload", "loader"])
+        self.assertEqual(built_calls, ["vbios", "ap_trampoline", "payload", "loader"])
         result = json.loads((self.out / "result.json").read_text())
         self.assertFalse(result["VM_executed"])
         self.assertFalse(result["Windows98_executed"])
@@ -124,7 +133,8 @@ class CompileSourceBindingTests(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(result["status"], "PASS_NATIVE_SUPERVISOR_COMPONENT_COMPILE_NOT_RUN")
         self.assertTrue(result["source_before_after_match"])
-        self.assertEqual(result["commands"], [["mock-build-boundary", "payload"],
+        self.assertEqual(result["commands"], [["mock-build-boundary", "ap_trampoline"],
+                                              ["mock-build-boundary", "payload"],
                                               ["mock-build-boundary", "loader"]])
 
     def assert_mutation_fails(self, changed):
@@ -149,6 +159,18 @@ class CompileSourceBindingTests(unittest.TestCase):
 
     def test_cp437_font_mutation_is_rejected(self):
         self.assert_mutation_fails(GLYPHS[2])
+
+    def test_kernel32_service_policy_mutation_is_rejected(self):
+        self.assert_mutation_fails(AP_INPUTS[0])
+
+    def test_smp_acpi_implementation_mutation_is_rejected(self):
+        self.assert_mutation_fails(AP_INPUTS[1])
+
+    def test_smp_acpi_header_mutation_is_rejected(self):
+        self.assert_mutation_fails(AP_INPUTS[2])
+
+    def test_win98_foundation_header_mutation_is_rejected(self):
+        self.assert_mutation_fails(AP_INPUTS[3])
 
 
 if __name__ == "__main__":

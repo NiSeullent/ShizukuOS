@@ -534,8 +534,15 @@ static int run_slice(domain_t *d)
     {
         const uint64_t host_cr2 = read_cr2();
         const int mixed = (g_info->loader_flags & SHZ_LOADER_NATIVE_WIN98) != 0;
+        if(d->kind==DK_WIN98 && win98_execution_begin(d)){
+            dom_fail(d,"native persistence execution epoch refused");return -1;
+        }
         if (mixed) write_cr2(d->guest_cr2);
         rc = vmx_enter(&d->vc);
+        if(d->kind==DK_WIN98 && win98_execution_end(d)){
+            if(mixed)write_cr2(host_cr2);
+            dom_fail(d,"native persistence returned execution epoch differs");return -1;
+        }
         if (mixed) { d->guest_cr2 = read_cr2(); write_cr2(host_cr2); }
     }
     fx_save(d);
@@ -612,6 +619,9 @@ int sched_run(shz_info_t *info)
         }
         last = pick->id;
         run_slice(pick);
+        /* Includes checked-load and VM-entry failure returns, where run_slice
+         * never reaches its ordinary post-exit housekeeping. */
+        if(pick->kind==DK_WIN98)win98_housekeeping();
     }
     info->stage = SHZ_STAGE_GUEST_EXIT;
     return 0;
