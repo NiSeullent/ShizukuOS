@@ -1,76 +1,58 @@
-# m98.nyase.kr self-hosted distribution and preview
+# m98.nyase.kr 운영·배포
 
-The static distribution and recorded preview now use the existing origin on
-142.44.212.204, through `/srv/conf.d/nginx/conf.d/m98.nyase.kr.conf`.
-Only this vhost was changed. The prior file is retained at
-`build/m98-self-host/m98.nyase.kr.conf.before`.
+공식 사이트는 기존 nginx origin의 정적 파일로 운영합니다. **홈페이지·ISO 다운로드는 [m98.nyase.kr](https://m98.nyase.kr/)**에서 제공하며 공개 범위는 [배포 기준](OFFICIAL_DISTRIBUTION.md)을 따릅니다.
 
-The current immutable release is recorded by the latest receipt under
-`build/m98-self-host/`, and the current symlink is `/srv/m98/current`.
-Its `site/` contains the two pages, original
-captured PNGs, evidence manifest, open-source driver ZIP and latest-Notepad++
-compatibility ZIP with exact checksums/setup text. Earlier releases
-remain intact. The preview includes twenty-eight original screenshots and three direct
-PNG decodes of validated native Windows98 GOP framebuffer pixels. Every
-decoded RGB byte is independently compared with its frozen raw BGRX capture;
-the first collection shows actual native GOP monitor output. Its additive
-review correction preserves the original runs and supersedes the earlier
-incorrect black-monitor verdict. All15,360 original monitor GDI pattern
-pixels are independently compared by the exporter. A separate collection binds
-the genuine native GOP cold boot, prior-file reopen and fresh 43-byte Notepad
-save to exact disk readback and native provider checks. Its editor is the
-original Windows 98 Notepad; this does not establish current Notepad++ execution.
-The 20260930T182132 immutable release passed 40 exact origin body-hash checks.
-Its latest-app collection presents the actual Notepad++ 8.9.8.1 editing,
-native Save As, new 44-byte file, warm document reopen and a separately verified
-cold application reopen together with the
-preserved program-exit fault. The overall app trial remains FAIL and uses
-stock VGA. A separate eleven-frame collection now verifies unchanged official
-NPP8.9.8.1 on genuine Windows98 GOP with native SaveAs, fresh44-byte document,
-warm reopen and normal Alt+F4 native process/helper/waiter exit zero. Its scoped
-review496970... requires the native field interpreter; unassisted exit remains
-FAIL. Four unrelated first-chance events and three FFFFFFFF worker shutdown
-exits are preserved as limits. A separate cold trial now reopens the44-byte
-document and saves distinct39-byte keyboard text to a new file before another
-normal exit. Its recorded shortcut correction and restoration of the original
-private document are disclosed; both44-byte originals and new39-byte file are
-verified in final disk readback. Actual browser
-receipts verify both added collections, deep linking and their original frames.
-Nginx configuration
-is in `site/deploy/`. After syntax validation the existing master reloaded
-gracefully; the original compatibility VM/noVNC service was untouched.
+## 운영 구조
 
-Origin checks passed for `/`, `/preview.html`, its JS/manifest/image, the exact
-native driver ZIP, `/vnc.html`, and noVNC's core module. HTTP redirects to
-HTTPS; forwarded HTTPS also works through the existing Cloudflare HTTP path.
-`build/m98-self-host/origin-result.json` records the actual body hashes and
-content types. The first traversal-permission failure is preserved separately.
+| 위치 | 역할 |
+| --- | --- |
+| `site/` | 한국어·영어 페이지와 공개 자산의 소스 |
+| `site/deploy/m98.nyase.kr.conf` | 사이트 전용 nginx vhost 설정 |
+| `site/deploy/m98-locations.conf` | 정적·다운로드·기존 콘솔 경로 설정 |
+| `/srv/m98/releases/<release>/site` | 불변 정적 릴리스 |
+| `/srv/m98/current` | 현재 릴리스 링크 |
+| `/srv/m98/nginx/locations.conf` | 운영 nginx의 안정된 경로 설정 |
+| `build/m98-self-host/` | 게시·응답 검증 기록 |
 
-The current original compatibility VM console is unrelated to the native
-GOP trials and is not claimed as Modern Edition live preview. The current
-preview presents genuine recorded guest frames and explicitly reports no
-connected live guest. A new live endpoint must bind the actual verified GOP
-Windows 98 instance; never redirect the old VM to imply a different result.
+기존 운영 vhost는 `/srv/conf.d/nginx/conf.d/m98.nyase.kr.conf`에 있습니다. HTML은 `no-store, no-transform`으로 제공하며 옛 `/vnc.html`·`/vnc_lite.html`은 배포 페이지로 이동합니다. 기존 VM 콘솔은 `/legacy-console/`로 분리되어 있습니다.
 
-The Cloudflare edge currently challenges automated fetches, including an actual
-Chromium navigation checked on September30. This is distinct
-from the working origin routes and is not treated as a successful external
-page fetch. DNS already existed; no DNS or global client configuration changed.
-The temporary Sites domain registration was removed. The earlier owner-private
-Sites deployment remains a separate fallback with its existing access policy.
+기록 미리보기는 원본 게스트 캡처를 사용합니다. 기존 호환성 VM을 새 ShizukuOS 실행 화면으로 표시하지 않습니다. 라이브 연결은 실제 검증한 게스트의 접속 주소가 준비될 때까지 연결되지 않은 상태입니다.
 
-`site/deploy/publish_static.py` reproduces this bounded immutable static
-publish, verifies each exact local-origin body and restores the prior symlink
-on failure. It does not reload nginx or modify DNS or unrelated routes.
-Both download ZIPs are additionally pinned to reviewed package hashes before
-publication. The Notepad++ download excludes the editor/Windows binaries and
-does not claim a newly tested installer; it distributes the proven compatibility
-components, full corresponding sources and explicit manual prerequisites.
-The Notepad++ package release20260930T215357 passed43 exact origin checks,
-receipt SHA256 `574c6d709aa98a37c03efef7c523cf06d326347ba98ef85180330297d3f3abf2`.
-An actual headless browser independently passed11 distribution/download checks,
-including the complete1,323,075-byte ZIP SHA256, checksum sidecar, manual setup
-limit, eight required app rows and genuine GOP app evidence link, with zero
-page errors. `build/m98-self-host/browser-npp-package-result.json` preserves
-the actual result. The browser used a scoped loopback preview; public-edge
-challenge handling remains outside that proof.
+## 수정과 검증
+
+저장소 루트에서 실행합니다.
+
+```sh
+python3 -m http.server 8080 --bind 127.0.0.1 --directory site
+python3 -m unittest discover -s site/deploy/tests -p 'test_*.py'
+```
+
+첫 명령은 로컬 미리보기 서버이며 두 번째 명령은 다른 터미널에서 실행합니다. 테스트는 경로·언어 연결·다운로드 무결성·증거 보존·배포 제어를 검사합니다. 테스트 자체는 운영 사이트를 게시하거나 VM을 부팅하지 않습니다.
+
+## 기존 origin에 게시
+
+ISO 변경 없이 정적 페이지와 기존 구성요소를 게시:
+
+```sh
+python3 site/deploy/publish_static.py
+```
+
+공개 개발 ISO를 함께 게시하려면 실제 ISO 경로와 빌더 영수증에 기록한 소스 commit을 지정합니다.
+
+```sh
+python3 site/deploy/publish_static.py \
+  --iso build/<public-image>.iso \
+  --iso-source-commit <40-character-lowercase-commit>
+```
+
+ISO 옆의 같은 이름의 `.json` 영수증은 파일 경로·크기·해시·commit이 일치하고 `private: false`여야 합니다. 공개 ISO는 최대 512 MiB이며 Microsoft 미디어를 포함한 개인 이미지와 링크·특수 파일은 거절합니다. 실제 배포 ISO의 두 콜드 부팅 결과가 있으면 `--iso-boot-evidence <result.json>`으로 연결할 수 있습니다. 이 결과는 독립 개발 데스크톱의 시험 범위를 표시합니다.
+
+게시기는 공개 자산을 검증하여 새 릴리스에 복사하고 `/srv/m98/current`만 교체합니다. 정확한 루프백 HTTPS 응답·다운로드 크기·해시·Range를 확인한 뒤 PASS 영수증을 기록합니다. 실패 시 이 작업이 여전히 현재 릴리스 링크를 소유하는 경우 이전 링크로 되돌립니다. 게시 잠금이 사용 중이면 새 게시를 거절합니다.
+
+이 도구는 **이미 구성된 m98 origin용**입니다. nginx·DNS·VM·다른 서비스를 자동 변경하지 않습니다. 새 호스트에서는 문서 루트·인증서·공통 include·Cloudflare 전달 설정을 먼저 실제 환경에 맞춥니다. 비밀 키와 토큰은 저장소에 넣지 않습니다.
+
+## 접근 결과 확인
+
+origin 검증과 공개 주소 검증은 별도로 기록합니다. 과거 자동 요청에는 Cloudflare challenge가 있었고, 이후 표준 브라우저 User-Agent를 사용한 일부 공개 HTTPS 경로의 정확한 응답도 기록되었습니다. 이를 모든 클라이언트의 접근 보증으로 확장하지 않습니다. 새 게시 후 실제 외부 브라우저에서 한국어·영어·다운로드·미리보기를 확인하고 서버 밖의 검증 결과를 남깁니다.
+
+최신 게시 판단은 `build/m98-self-host/`의 해당 릴리스 영수증과 현재 링크를 대조합니다. 과거 실패·원본 화면·패키지 해시는 보존하며 사이트 디자인 변경으로 검증 결과를 바꾸지 않습니다.

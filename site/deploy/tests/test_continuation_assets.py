@@ -39,13 +39,13 @@ class ContinuationAssets(unittest.TestCase):
     def test_full_static_inventory_preserves_all_existing_assets_and_exact_nine_additions(self):
         prepared = self.prepared()
         assets = prepared['assets']
-        self.assertEqual(len(assets), 92)
+        self.assertEqual(len(assets), 100)
         self.assertTrue(ADDED.issubset(assets))
         existing = set(publisher.STATIC) | set(publisher.AUTHORSHIP_STATIC)
         existing.update('authorship/images/' + name for name in publisher.AUTHORSHIP_IMAGES)
         preview = json.loads((self.site / 'evidence/preview.json').read_bytes())
         existing.update('evidence/' + Path(frame['src']).as_posix() for collection in preview['collections'] for frame in collection['frames'])
-        self.assertEqual(len(existing), 83)
+        self.assertEqual(len(existing), 91)
         self.assertEqual(set(assets), existing | ADDED)
         for name, raw in assets.items():
             self.assertEqual(raw, (self.site / name).read_bytes(), name)
