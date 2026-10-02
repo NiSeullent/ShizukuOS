@@ -6,6 +6,7 @@
  */
 #ifndef K64_SCHED_CPU_H
 #define K64_SCHED_CPU_H
+#define K64_AP_COHORT_QUEUE 1
 #include "../kcommon/pma_sync.h"
 #define K64_CPU_MAX 32u
 #define K64_CPU_NONE UINT32_MAX
@@ -17,6 +18,7 @@ typedef struct {
     thread_t *current, *idle, *outgoing;
     uint64_t idle_ticks, kernel_ticks, user_ticks;
     int tick_from_user;
+    uint64_t service_ticks, reschedule_request, reschedule_ack;
 } k64_cpu_sched_t;
 typedef struct {
     pma_ticketlock_t lock;
@@ -43,6 +45,38 @@ static inline int k64_rq_valid(const k64_runqueues_t *r, const thread_t *t)
 static inline int k64_rq_online(const k64_runqueues_t *r, uint32_t cpu)
 {
     return cpu < K64_CPU_MAX && (r->online_mask & (1ull << cpu)) != 0;
+}
+/* Only the preallocated kernel idle can establish a cohort context. Physical
+ * identity/resources/GS and destination stack are checked by the real caller. */
+static inline int k64_rq_cohort_safe(const thread_t *t)
+{
+    return t && t->ap_kernel_cohort && !t->proc && !t->teb && !t->object && !t->ipc &&
+           !t->wait_sem && !t->wait_multi && !t->next && !t->user_rip && !t->user_rsp;
+}
+static inline int k64_rq_admit_cohort_locked(k64_runqueues_t *r,uint32_t cpu,thread_t *idle)
+{
+    if(!cpu || cpu>=K64_CPU_MAX || k64_rq_online(r,cpu) || !k64_rq_valid(r,idle) ||
+       !k64_rq_cohort_safe(idle) || idle->state!=TS_NEW || idle->ready_queued ||
+       idle->on_cpu!=K64_CPU_NONE || r->cpu[cpu].current || r->cpu[cpu].idle ||
+       r->cpu[cpu].outgoing || r->cpu[cpu].ready_count || r->cpu[cpu].ready_mask) return -1;
+    idle->state=TS_RUNNING;idle->cpu_mask=1ull<<cpu;idle->on_cpu=cpu;
+    idle->sched_priority=0;idle->aging_service_left=0;
+    r->cpu[cpu].current=r->cpu[cpu].idle=idle;
+    r->online_mask|=1ull<<cpu;
+    return 0;
+}
+/* Called only from retained bootstrap destination stack, never this idle's
+ * still-live stack. Every worker must already have completed its handoff. */
+static inline int k64_rq_withdraw_cohort_locked(k64_runqueues_t *r,uint32_t cpu)
+{
+    if(!cpu || !k64_rq_online(r,cpu)) return -1;
+    k64_cpu_sched_t *c=&r->cpu[cpu];thread_t *idle=c->idle;
+    if(!k64_rq_valid(r,idle) || !k64_rq_cohort_safe(idle) || c->current!=idle ||
+       idle->state!=TS_RUNNING || idle->on_cpu!=cpu || idle->ready_queued ||
+       c->outgoing || c->ready_count || c->ready_mask) return -1;
+    idle->state=TS_NEW;idle->on_cpu=K64_CPU_NONE;idle->cpu_mask=1;
+    c->current=c->idle=0;r->online_mask&=~(1ull<<cpu);
+    return 0;
 }
 static inline uint32_t k64_rq_choose_locked(const k64_runqueues_t *r, uint64_t mask)
 {
