@@ -1,5 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Execute the real CLI body with tiny owned inputs and modeled QEMU/VMCS.
+"""Exercise controller collection logic with tiny inputs and modeled QEMU/VMCS.
+
+The legacy no-custody collection branch is modeled explicitly. The real CLI
+requires guardian admission, tested separately below and by lifecycle controls.
 
 These host controls never run QEMU, original media or a Windows guest.
 """
@@ -24,6 +27,14 @@ u = importlib.util.module_from_spec(spec);spec.loader.exec_module(u)
 
 
 class MainControls(unittest.TestCase):
+    def test_real_cli_refuses_missing_guardian_before_launch(self):
+        argv = ['run_vm.py', '--repo', '/unused', '--plan', '/unused/plan.json',
+                '--plan-sha256', '0'*64, '--runtime-sources-sha256', '0'*64]
+        with patch.object(sys, 'argv', argv), patch.object(m.subprocess, 'Popen') as launch:
+            with self.assertRaisesRegex(ValueError, 'independently admitted task guardian'):
+                m.main()
+            launch.assert_not_called()
+
     def fixture(self, mode):
         temporary = tempfile.TemporaryDirectory();self.addCleanup(temporary.cleanup)
         base=Path(temporary.name);repo=base/'repo';out=base/'vm';out.mkdir()
@@ -111,7 +122,7 @@ class MainControls(unittest.TestCase):
         def write(path,*args,**kwargs):
             if mode=='receipt_failure' and path.name=='native-result.json':raise OSError('modeled final receipt failure')
             return original_write(path,*args,**kwargs)
-        with patch.object(m,'load',loader),patch.object(sys,'argv',argv),patch.object(m.subprocess,'Popen',Child),patch.object(m.time,'monotonic',lambda:clock[0]),patch.object(m.time,'sleep',lambda n:clock.__setitem__(0,clock[0]+n)),patch.object(m.shutil,'disk_usage',lambda path:types.SimpleNamespace(free=(m.RESERVE-1 if mode=='reserve_consumed' and clock[0]>=1 else free))),patch.object(u,'available_memory_bytes',lambda:(5<<30 if mode=='memory_short' else 1<<30 if mode=='memory_consumed' and clock[0]>=1 else 8<<30)),patch.object(u,'OwnedQMP',Monitor),patch.object(u,'atomic_json',atomic),patch.object(Path,'write_text',write):
+        with patch.object(m,'get_custody',return_value=None),patch.object(m,'load',loader),patch.object(sys,'argv',argv),patch.object(m.subprocess,'Popen',Child),patch.object(m.time,'monotonic',lambda:clock[0]),patch.object(m.time,'sleep',lambda n:clock.__setitem__(0,clock[0]+n)),patch.object(m.shutil,'disk_usage',lambda path:types.SimpleNamespace(free=(m.RESERVE-1 if mode=='reserve_consumed' and clock[0]>=1 else free))),patch.object(u,'available_memory_bytes',lambda:(5<<30 if mode=='memory_short' else 1<<30 if mode=='memory_consumed' and clock[0]>=1 else 8<<30)),patch.object(u,'OwnedQMP',Monitor),patch.object(u,'atomic_json',atomic),patch.object(Path,'write_text',write):
             try:result=m.main();failure=None
             except BaseException as error:result=None;failure=error
         p=out/'native-result.json';record=json.loads(p.read_text()) if p.exists() else None
