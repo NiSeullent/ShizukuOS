@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#008080">
+  <meta name="description" content="The ShizukuOS architecture preserves actual Windows 98. Explore public source, component licenses and verification requirements.">
+  <title>Development and public source · ShizukuOS</title>
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../styles.css?v=20261001-refactor1">
+  <link rel="alternate" hreflang="ko" href="https://m98.nyase.kr/develop.html">
+  <link rel="alternate" hreflang="en" href="https://m98.nyase.kr/en/develop.html">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top site-header"><a class="brand" href="./index.html"><span class="brand-mark" aria-hidden="true">S</span><span><strong>ShizukuOS</strong><small>1.0.0 in development</small></span></a><nav class="site-nav" aria-label="Main navigation"><a href="./index.html">Project</a><a href="./downloads.html">Downloads</a><a href="./install.html">Setup</a><a href="./apps.html">App support</a><a href="./develop.html" aria-current="page">Development</a><a class="language-link" href="../develop.html" lang="ko" hreflang="ko">한국어</a></nav></header>
+<main id="main">
+  <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="./index.html">Home</a><span aria-hidden="true">/</span><span>Development and public source</span></nav>
+  <section class="page-hero" aria-labelledby="page-title">
+    <p class="eyebrow">Windows 98, on a new foundation</p>
+    <h1 id="page-title">Connecting the familiar<br>system all the way through.</h1>
+    <p class="lead">Actual Windows 98 is the core of ShizukuOS. The goal is to replace its MS-DOS foundation with ShizukuDOS and connect protected-mode services, 64-bit execution and modern hardware to Windows 98.</p>
+    <div class="hero-actions"><a class="button primary" href="https://github.com/NiSeullent/Win98-Modern">Public source on GitHub</a><a class="button secondary" href="../continuation/guide.html">Continue development elsewhere</a></div>
+  </section>
+
+  <section id="architecture" aria-labelledby="architecture-title">
+    <div class="section-heading"><div><p class="eyebrow">Integration architecture</p><h2 id="architecture-title">Windows 98 remains at the center.</h2></div></div>
+    <div class="card-grid">
+      <article class="info-card"><span class="status-pill component">Windows 98 environment</span><h3>VMM · USER · GDI · Explorer</h3><p>The actual Windows 98 VMM, Win16/Win32 application environment and desktop are preserved. Window, input, file and application lifetimes must remain connected to this environment.</p></article>
+      <article class="info-card"><span class="status-pill pending">DOS → VMM connection in development</span><h3>ShizukuDOS</h3><p>Replaces the MS-DOS foundation used by Windows 98. Current DOS16 uses a compatibility bootstrap based on pinned FreeDOS and FreeCOM sources with recorded patches. Actual WIN.COM startup and DOS resident-state and initialization contracts are being implemented.</p></article>
+      <article class="info-card"><span class="status-pill component">Service components</span><h3>Kernel32 · Kernel64 · PMA</h3><p>Kernel32 supplies protected-mode services; Kernel64 supplies Long Mode and x64 library execution. PMA and the Supervisor provide the foundation for connecting service requests while preserving Windows 98 execution state. Standalone kernel boots and internal loopback are component tests.</p></article>
+      <article class="info-card"><span class="status-pill pending">Full integration verification required</span><h3>GOP · drivers · NT compatibility</h3><p>Connects basic UEFI GOP display output, modern storage, USB, PCI-E and NT application APIs to Windows 98. GOP software output does not establish GPU 3D acceleration. API names or a successful build do not establish application functionality.</p></article>
+    </div>
+    <p><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/SHIZUKUDOS_WINDOWS98_ARCHITECTURE.md">DOS → Windows 98 architecture audit</a> · <a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/SHIZUKUOS_ARCHITECTURE_SUPPLEMENT.md">1.0.0 integration contract</a> · <a href="https://github.com/NiSeullent/Win98-Modern/blob/main/shizukudos/supervisor/native_win98/README.md">Windows domain source and limits</a></p>
+  </section>
+
+  <section id="remaining" aria-labelledby="verification-title">
+    <div class="section-heading"><div><p class="eyebrow">Acceptance requirements</p><h2 id="verification-title">A passing stage does not complete the whole system.</h2></div><a href="./apps.html">Application status</a></div>
+    <div class="table-wrap" role="region" aria-labelledby="verification-title" tabindex="0">
+      <table>
+        <caption>Scope of current public records and actual verification needed for final integration</caption>
+        <thead><tr><th scope="col">Verification stage</th><th scope="col">What it establishes</th><th scope="col">What remains for full acceptance</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Source and host checks</th><td>Checks actual source ABI, boundaries, lifetimes, failure behavior, input hashes and build results. Tests with modeled privileged CPU or device boundaries disclose that scope.</td><td>Host checks and successful compilation do not establish Windows 98 guest boot or application execution.</td></tr>
+          <tr><th scope="row">Independent component execution</th><td>Exercises limited behavior of actual CPU, UEFI, kernels, services and disks. Independent Kernel64 application records belong to this stage.</td><td>Tests connecting these components to Windows 98 VMM, windows, input and file lifetimes are required.</td></tr>
+          <tr><th scope="row">Win98 control with original DOS</th><td>Preserves actual Windows 98 GOP output and limited Notepad++ and VLC workflows in original captures.</td><td>A control that executes Microsoft DOS does not establish ShizukuDOS replacing MS-DOS.</td></tr>
+          <tr><th scope="row">Windows 98 on ShizukuDOS</th><td><span class="status-pill pending">Final acceptance incomplete</span><p>Actual execution must establish ShizukuDOS entry → WIN.COM → real VMM and Windows 98 desktop, plus Windows ↔ PMA service round trips.</p></td><td>Two cold boots, GOP, input, save and reopen, required drivers and acceleration, and each application's real functionality and normal exit are required.</td></tr>
+          <tr><th scope="row">1.0.0 installation and delivery</th><td><span class="status-pill pending">Final release in preparation</span><p>Prepare the project's own installer, Classic and ShizukuOS themes, final ISO and checksums from the same verified source.</p></td><td>Actual installation, reboot, full integration verification and official download delivery must pass. Current development ZIPs and component ISOs do not replace these requirements.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Original successes and failures are preserved. The <a href="./preview.html">13 actual trial collections</a> identify their environments and unverified scope alongside the captures.</p>
+  </section>
+
+  <section id="source" aria-labelledby="source-title">
+    <div class="section-heading"><div><p class="eyebrow">Starting development</p><h2 id="source-title">Read the source with its reproduction records.</h2></div></div>
+    <div class="card-grid">
+      <article class="info-card"><h3>Public source</h3><p>GitHub provides development source and patches suitable for publication. The <a href="https://github.com/NiSeullent/Win98-Modern/blob/main/README.md">project README</a> distinguishes current and historical paths.</p><a href="https://github.com/NiSeullent/Win98-Modern">Open the repository</a></article>
+      <article class="info-card"><h3>Build environment</h3><p>The handoff documents describe Linux build tools, staged commands, actual input preparation and current limits. A full ISO also needs DOS16, UEFI and Win64 tools.</p><a href="../continuation/environment-guide.md">Development environment guide</a></article>
+      <article class="info-card"><h3>Application retries</h3><p>Pin the original application version, official checksums and full-file hashes. Test actual functionality for each app and distinguish common API passes from final application acceptance.</p><a href="../continuation/modern-apps-guide.md">Next steps per application</a></article>
+      <article class="info-card"><h3>Official distribution</h3><p>Final ShizukuOS 1.0.0 uses the project's own installation system. <strong>ISOs are distributed only at m98.nyase.kr.</strong> GitHub distributes public development source and patches.</p><a href="./downloads.html">Current download scope</a></article>
+    </div>
+    <aside class="scope-note"><h3>Supply your own Windows and application inputs.</h3><p>Microsoft installation media, product keys, installed private disks, private VMs and secrets are excluded from public source and downloads. Prepare Windows 98 and original application inputs from material you are entitled to use. The detailed source handoff documents are in Korean.</p></aside>
+  </section>
+
+  <section id="licenses" aria-labelledby="licenses-title">
+    <div class="section-heading"><div><p class="eyebrow">Attribution and licenses</p><h2 id="licenses-title">Every component keeps its source history.</h2></div><a href="../authorship/">Authorship and trial evidence</a></div>
+    <div class="table-wrap" role="region" aria-labelledby="licenses-title" tabindex="0"><table><caption>Key licenses recorded in public source · Check original per-file terms and included notices first.</caption><thead><tr><th scope="col">Source</th><th scope="col">Recorded terms</th><th scope="col">Attribution record</th></tr></thead><tbody>
+      <tr><th scope="row">Project-authored code</th><td>GPL-2.0-only. External code and data retain their respective original notices.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/LICENSE">LICENSE</a> · <a href="https://github.com/NiSeullent/Win98-Modern/blob/main/THIRD_PARTY.md">Per-file record</a></td></tr>
+      <tr><th scope="row">FreeDOS kernel · FreeCOM</th><td>GPL-2.0-or-later. Pinned revisions and project patches are recorded; external implementations are not labeled original project code.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/shizukudos/upstream/manifest.json">Pinned upstream manifest</a></td></tr>
+      <tr><th scope="row">CSMWrap · SeaBIOS</th><td>CSMWrap's own code is LGPL-2.1-only; the pinned SeaBIOS CSM code is LGPL-3.0-only. Included subprojects retain separate terms.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/shizukudos/upstream/manifest.json">Firmware source and license pins</a></td></tr>
+      <tr><th scope="row">Wine · ReactOS references and ports</th><td>Selected Wine code and data are LGPL-2.1-or-later; ReactOS GPL/LGPL notices must be checked per file. Reference-only files are distinguished from actual ports.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/THIRD_PARTY.md">Revisions and per-file attribution</a></td></tr>
+      <tr><th scope="row">Shizuku GOP external foundation</th><td>Pinned VMDisp9x and fixlink are MIT; the project's GOP parser and framebuffer code are GPL-2.0-only.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/THIRD_PARTY.md#native-shizuku-gop-display-package">GOP package attribution</a></td></tr>
+    </tbody></table></div>
+    <p>This table does not replace complete license notices. Check each distribution's actual sources, patches and original notices together with <a href="https://github.com/NiSeullent/Win98-Modern/blob/main/THIRD_PARTY.md">THIRD_PARTY.md</a>.</p>
+  </section>
+</main>
+<footer class="site-footer"><span>ShizukuOS · 1.0.0 in development</span><nav aria-label="Footer navigation"><a href="./downloads.html">Downloads</a><a href="../authorship/">Authorship</a><a href="../develop.html" lang="ko" hreflang="ko">한국어</a></nav></footer>
+</body>
+</html>

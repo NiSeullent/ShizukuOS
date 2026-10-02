@@ -409,7 +409,7 @@ class IsoPublication(unittest.TestCase):
         with self.iso.open('r+b') as stream: stream.write(b'changed')
         with self.assertRaises(ValueError): candidate.copy_to(self.root / 'stale.iso')
 
-    def test_rendered_languages_share_four_iso_ctas_and_keep_zip_download(self):
+    def test_rendered_languages_share_admitted_iso_slot_and_keep_zip_download(self):
         candidate = self.open_iso()
         self.assertTrue(hasattr(publisher, 'render_iso_homepage'), 'ISO home page rendering is absent')
         for language, name, prefix in [('ko', 'index.html', './'), ('en', 'en/index.html', '../')]:
@@ -417,7 +417,7 @@ class IsoPublication(unittest.TestCase):
                 original = (publisher.SITE / name).read_bytes()
                 rendered = publisher.render_iso_homepage(original, candidate.metadata, language)
                 parser = Anchors(); parser.feed(rendered.decode())
-                self.assertEqual(parser.downloads.count(prefix + candidate.name), 4)
+                self.assertEqual(parser.downloads.count(prefix + candidate.name), 1)
                 self.assertIn(prefix + 'downloads/shizuku-modern-preview-2026.10.01.zip', parser.downloads)
                 self.assertIn(self.digest[:12], rendered.decode())
                 self.assertIn(prefix + 'downloads/release.json', rendered.decode())

@@ -10,6 +10,8 @@ from contextlib import contextmanager
 import datetime
 import fcntl
 import hashlib
+from html import escape
+from html.parser import HTMLParser
 import json
 import os
 from pathlib import Path
@@ -26,7 +28,8 @@ SMALL_LIMIT = 8 * 1024 * 1024
 # Only streamed ISO inputs use this bound; ZIPs and static assets stay at 8 MiB.
 ISO_LIMIT = 512 * 1024 * 1024
 CHUNK_BYTES = 1024 * 1024
-STATIC = ('index.html', 'preview.html', 'styles.css', 'preview.css', 'preview.js',
+STATIC = ('index.html', 'downloads.html', 'install.html', 'apps.html', 'develop.html',
+          'en/downloads.html', 'en/install.html', 'en/apps.html', 'en/develop.html', 'preview.html', 'styles.css', 'preview.css', 'preview.js',
           'dead-screen.html', 'dead-screen.css', 'dead-screen.js',
           'dead-screen-preview.wasm', 'en/index.html', 'en/preview.html',
           'en/preview.js', 'en/dead-screen.html', 'en/evidence/preview.json',
@@ -327,78 +330,141 @@ def open_iso(path, source_commit, iso_boot_evidence=None):
         raise ValueError('Public ISO admission failed: ' + str(exc)) from exc
 
 
-def render_iso_homepage(data, metadata, language):
-    """Derive localized ISO download copy without editing the source ZIP pages."""
+ISO_SLOT_START = '<!-- M98:DEVELOPMENT-ISO:START -->'
+ISO_SLOT_END = '<!-- M98:DEVELOPMENT-ISO:END -->'
+
+
+def replace_iso_slot(data, content):
+    """One bounded slot per reviewed page; duplicate or missing slots refuse."""
     text = data.decode('utf-8')
-    prefix = './' if language == 'ko' else '../' if language == 'en' else None
-    if prefix is None:
+    if text.count(ISO_SLOT_START) != 1 or text.count(ISO_SLOT_END) != 1:
+        raise ValueError('Exactly one reviewed development ISO slot required')
+    start = text.index(ISO_SLOT_START) + len(ISO_SLOT_START)
+    end = text.index(ISO_SLOT_END)
+    if end <= start:
+        raise ValueError('Development ISO slot order differs')
+    return (text[:start] + content + text[end:]).encode('utf-8')
+
+
+def render_iso_section(data, metadata, language):
+    """Render the same admitted development artifact on home and downloads."""
+    if language not in ('ko', 'en'):
         raise ValueError('Unsupported download page language')
-    old = prefix + 'downloads/shizuku-modern-preview-2026.10.01.zip'
-    new = prefix + metadata['artifact']['path']
-    if text.count('href="' + old + '"') != 4:
-        raise ValueError('The reviewed four download links changed')
-    text = text.replace('href="' + old + '"', 'href="' + new + '"')
-    size = format(metadata['artifact']['bytes'] / 1000000, '.2f') + ' MB'
-    checksum = new + '.sha256'
-    release = prefix + 'downloads/release.json'
-    commit = metadata['source_commit']
+    artifact = metadata['artifact']
+    commit, digest, size = metadata['source_commit'], artifact['sha256'], artifact['bytes']
+    if (not isinstance(commit, str) or re.fullmatch(r'[0-9a-f]{40}', commit) is None
+            or not isinstance(digest, str) or re.fullmatch(r'[0-9a-f]{64}', digest) is None
+            or type(size) is not int or not 0 < size <= ISO_LIMIT
+            or artifact['path'] != 'downloads/shizukuos-development-' + commit[:12] + '-' + digest[:12] + '.iso'
+            or metadata.get('private') is not False
+            or metadata.get('windows98_media_included') is not False
+            or metadata['validation'].get('windows98_installer_complete') is not False
+            or metadata['validation'].get('latest_apps_complete') is not False):
+        raise ValueError('Public development ISO identity or scope differs')
+    boot = metadata['validation']['boot_status']
+    if boot not in ('not-verified-for-this-download', 'verified-uefi-development-desktop-two-cold-boots'):
+        raise ValueError('Unreviewed development ISO boot scope')
+    ko = language == 'ko'
+    prefix = './' if ko else '../'
+    url = prefix + artifact['path']
     source = 'https://github.com/NiSeullent/Win98-Modern/tree/' + commit
-    boot_verified = metadata['validation']['boot_status'] == 'verified-uefi-development-desktop-two-cold-boots'
-    if language == 'ko':
-        replacements = (
-            ('>다운로드</a>', '>ISO 다운로드</a>'),
-            ('>지금 바로 다운로드</a>', '>개발 ISO 지금 다운로드</a>'),
-            ('개발 미리보기 · 2026.10.01 · ZIP 1.67 MB', '개발 부팅 ISO · ' + size),
-            ('GOP 기본 그래픽 드라이버 + Notepad++ 호환 구성 + 소스', 'Shizuku 부팅 환경과 개발 구성요소'),
-            ('Windows 98 설치본과 앱 원본은 별도입니다.', 'Microsoft Windows 98 설치 파일과 앱 원본은 별도입니다.'),
-            ('ShizukuOS<br>1.0.0 개발판', 'ShizukuOS<br>1.0.0 개발 부팅 ISO'),
-            ('드라이버와 앱 호환 구성, 설치 안내를 한 파일에 담았습니다.', 'Shizuku 부팅 환경과 개발 구성요소를 시험 VM에서 살펴보세요.'),
-            ('ZIP 1.67 MB · Windows 98 SE용 구성', 'ISO ' + size + ' · 개발 부팅용'),
-            ('운영체제 ISO와 자동 설치 프로그램은 포함되어 있지 않습니다. GOP 부팅 구성과 앱 설치는 아래 안내를 따라 준비하세요.',
-             '이 ISO는 Shizuku 개발 부팅 이미지입니다. Windows 98 설치 파일은 포함되지 않으며 완성된 Windows 98 설치본이 아닙니다. 개별 ZIP은 드라이버와 앱 호환 구성을 제공합니다.'),
-            ('시험용 Windows 98 SE 설치본에 적용하세요.', '개발 ISO는 시험용 가상머신에 연결하세요.'),
-            ('<h3>다운로드하고 압축 풀기</h3><p>두 가지 구성과 “먼저 읽어주세요” 안내가 들어 있습니다.</p>',
-             '<h3>ISO를 가상머신에 연결하기</h3><p>받은 ISO를 시험 VM의 CD/DVD로 연결해 Shizuku 개발 부팅 환경을 살펴보세요.</p>'),
-            ('수동 설치용 개발 미리보기입니다. 새 설치본에서 이 ZIP만으로 설치하는 과정은 아직 검증 중입니다.',
-             ('UEFI 개발 데스크톱 두 번 콜드 부팅과 실제 저장·다시 열기 시험을 통과했습니다. Windows 98 자동 설치와 최신 앱 전체 지원은 아직 개발 중입니다. 개별 호환 ZIP은 별도의 Windows 98 SE 설치본에 수동 적용합니다.'
-              if boot_verified else '이 다운로드의 실제 부팅과 Windows 98 자동 설치는 아직 검증되지 않았습니다. 최신 앱 전체 지원은 개발 중입니다. 개별 호환 ZIP은 별도의 Windows 98 SE 설치본에 수동 적용합니다.')),
-        )
-        details = ('<p class="small">개발 ISO · ' + size + ' · 소스 <a href="' + source + '">' + commit[:12]
-                   + '</a></p><p><a href="' + checksum + '">ISO 체크섬</a> · <a href="' + release
-                   + '">배포 정보</a> · <a href="' + old + '" download>호환 구성 ZIP · 1.67 MB</a></p>')
+    title = '독립 개발 부팅 ISO' if ko else 'Standalone development boot ISO'
+    intro = ('Shizuku 개발 데스크톱과 구성요소를 시험하는 공개 이미지입니다. Microsoft Windows 98 설치 파일은 포함하지 않으며, 최종 Windows 98 + ShizukuDOS 설치판과 별도입니다.' if ko else
+             'A public image for exploring the Shizuku development desktop and components. It contains no Microsoft Windows 98 setup files and is separate from the final Windows 98 + ShizukuDOS installation release.')
+    if boot == 'verified-uefi-development-desktop-two-cold-boots':
+        scope = ('UEFI 개발 데스크톱 두 번 콜드 부팅과 실제 저장·다시 열기 시험을 통과했습니다. Windows 98 기반 통합 설치·부팅과 최신 앱 전체 지원은 미완료입니다.' if ko else
+                 'The UEFI development desktop passed two cold boots and real save/reopen tests. Integrated Windows 98 installation and boot, and complete modern-app support, remain unfinished.')
     else:
-        replacements = (
-            ('>Download</a>', '>ISO download</a>'),
-            ('>Download now</a>', '>Download development ISO</a>'),
-            ('Development preview · 2026.10.01 · ZIP 1.67 MB', 'Development boot ISO · ' + size),
-            ('GOP graphics driver + Notepad++ compatibility package + source', 'Shizuku boot environment and development components'),
-            ('A development ZIP, not a full OS ISO. Windows 98 and the original apps are separate.',
-             'A Shizuku development boot image. Microsoft Windows 98 setup files and original apps are separate.'),
-            ('ShizukuOS<br>1.0.0 development candidate', 'ShizukuOS<br>1.0.0 development boot ISO'),
-            ('The driver, compatibility components and setup guide in one package.', 'Explore the Shizuku boot environment and development components in a test VM.'),
-            ('ZIP 1.67 MB · Windows 98 SE components', 'ISO ' + size + ' · Development boot image'),
-            ('No operating system ISO, app originals or automatic installer is included. Prepare the matching GOP boot configuration and app prerequisites using the setup guide.',
-             'This is a Shizuku development boot image. It does not contain Microsoft Windows 98 setup files or provide a completed Windows 98 installation. The individual ZIPs supply driver and app compatibility components.'),
-            ('Use a disposable Windows 98 SE installation.', 'Attach the development ISO to a disposable test VM.'),
-            ('<h3>Download and extract</h3><p>The ZIP contains both packages and a readme to get you started.</p>',
-             '<h3>Attach the ISO to a test VM</h3><p>Use the downloaded ISO as the VM’s CD/DVD to explore the Shizuku development boot environment.</p>'),
-            ('This is a manual development preview. Installing it from scratch on a fresh machine has not been accepted. The app trial used Windows 98 SE Korean and the dedicated compatibility launcher.',
-             ('The UEFI development desktop passed two cold boots and real save/reopen tests. Automatic Windows 98 installation and complete support for the latest apps are still in development. Apply the individual compatibility ZIPs manually to a separate Windows 98 SE installation.'
-              if boot_verified else 'Booting this download and automatic Windows 98 installation remain unverified. Complete support for the latest apps is still in development. Apply the individual compatibility ZIPs manually to a separate Windows 98 SE installation.')),
-        )
-        details = ('<p class="small">Development ISO · ' + size + ' · Source <a href="' + source + '">' + commit[:12]
-                   + '</a></p><p><a href="' + checksum + '">ISO checksum</a> · <a href="' + release
-                   + '">Release information</a> · <a href="' + old + '" download>Compatibility ZIP · 1.67 MB</a></p>')
-    for before, after in replacements:
-        if before not in text:
-            raise ValueError('Reviewed download copy changed')
-        text = text.replace(before, after)
-    marker = '<details class="download-details"><summary>'
-    if text.count(marker) != 2:
-        raise ValueError('Reviewed download details changed')
-    position = text.index('</summary>', text.index(marker)) + len('</summary>')
-    text = text[:position] + details + text[position:]
-    return text.encode('utf-8')
+        scope = ('이 다운로드의 실제 부팅은 아직 검증되지 않았습니다. Windows 98 기반 통합 설치·부팅과 최신 앱 전체 지원은 미완료입니다.' if ko else
+                 'Booting this download remains unverified. Integrated Windows 98 installation and boot, and complete modern-app support, remain unfinished.')
+    label = '개발 ISO 다운로드' if ko else 'Download development ISO'
+    checksum = 'ISO 체크섬' if ko else 'ISO checksum'
+    release = '배포 정보' if ko else 'Release information'
+    source_label = '해당 소스' if ko else 'Corresponding source'
+    size_label = '바이트' if ko else 'bytes'
+    content = ('<section class="development-release" id="development-iso"><span class="status-pill component">'
+               + ('검토된 개발 이미지' if ko else 'Reviewed development image') + '</span><h2>' + title
+               + '</h2><p class="release-summary">' + intro + '</p><p class="small">' + scope
+               + '</p><dl class="download-facts"><dt>' + ('파일' if ko else 'File')
+               + '</dt><dd>' + escape(Path(artifact['path']).name) + '</dd><dt>' + ('크기' if ko else 'Size')
+               + '</dt><dd>' + format(size, ',') + ' ' + size_label + ' · ' + format(size / 1000000, '.2f')
+               + ' MB</dd><dt>SHA-256</dt><dd><code>' + digest + '</code></dd><dt>'
+               + ('소스' if ko else 'Source') + '</dt><dd><a href="' + source + '">' + commit
+               + '</a>' + (' · 변경된 작업 트리' if ko else ' · Modified source tree') * bool(metadata.get('source_tree_dirty'))
+               + '</dd></dl><div class="download-actions"><a class="button primary" data-m98-iso-cta="development" href="'
+               + url + '" download>' + label + '</a><a href="' + url + '.sha256">' + checksum
+               + '</a><a href="' + prefix + 'downloads/release.json">' + release + '</a><a href="'
+               + source + '">' + source_label + '</a></div></section>')
+    return replace_iso_slot(data, content)
+
+
+def render_iso_homepage(data, metadata, language):
+    return render_iso_section(data, metadata, language)
+
+
+def render_iso_downloadpage(data, metadata, language):
+    return render_iso_section(data, metadata, language)
+
+
+class DownloadCards(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.cards = []
+        self.downloads = []
+        self.current_card = None
+
+    def handle_starttag(self, tag, attributes):
+        values = dict(attributes)
+        if tag == 'article' and 'data-download' in values:
+            values['visible_text'] = ''
+            values['download_urls'] = []
+            values['links'] = []
+            self.cards.append(values)
+            self.current_card = values
+        if tag == 'a':
+            if self.current_card is not None:
+                self.current_card['links'].append(values.get('href'))
+            if 'download' in values:
+                self.downloads.append(values.get('href'))
+                if self.current_card is not None:
+                    self.current_card['download_urls'].append(values.get('href'))
+
+    def handle_data(self, data):
+        if self.current_card is not None:
+            self.current_card['visible_text'] += data
+
+    def handle_endtag(self, tag):
+        if tag == 'article':
+            self.current_card = None
+
+
+def validate_download_pages(assets):
+    """Displayed component identities must match the exact served bytes."""
+    names = ('SHZGOP.zip', 'SHZNPP.zip', 'shizuku-modern-preview-2026.10.01.zip',
+             'dead-screen-preview-source.zip', 'win98-modern-usb-helper.zip')
+    for page, prefix in (('downloads.html', './'), ('en/downloads.html', '../')):
+        parser = DownloadCards()
+        parser.feed(assets[page].decode('utf-8'))
+        if (len(parser.cards) != len(names)
+                or {row.get('data-download') for row in parser.cards} != set(names)):
+            raise ValueError('Exactly five reviewed component download cards required')
+        for row in parser.cards:
+            name = row['data-download']
+            raw = assets['downloads/' + name]
+            if (row.get('data-download-bytes') != str(len(raw))
+                    or row.get('data-download-sha256') != sha(raw)
+                    or sha(raw) not in row['visible_text']
+                    or format(len(raw), ',') not in row['visible_text']
+                    or name not in row['visible_text']
+                    or row['download_urls'] != [prefix + 'downloads/' + name]
+                    or row['links'].count(prefix + 'downloads/' + name + '.sha256') != 1
+                    or parser.downloads.count(prefix + 'downloads/' + name) != 1):
+                raise ValueError('Displayed download identity differs: ' + page + ': ' + name)
+        if any(url and url.split('?', 1)[0].endswith('.iso') for url in parser.downloads):
+            raise ValueError('Source pages cannot admit a development ISO without review')
+        replace_iso_slot(assets[page], '')
+    for page in ('index.html', 'en/index.html'):
+        replace_iso_slot(assets[page], '')
 
 
 def response_headers(data):
@@ -581,7 +647,7 @@ def render_component_installer_homepage(data, manifest, language):
                + '</h2></div></div><p>' + intro + '</p><div class="showcase-grid">'
                + ''.join(cards) + '</div><p class="small">' + pending + ' ' + details
                + ' <a href="' + prefix + 'evidence/component-installer/manifest.json">' + link + '</a></p></section>\n')
-    marker = '<section class="final-download"'
+    marker = '<!-- M98:COMPONENT-PROOF -->'
     if text.count(marker) != 1:
         raise ValueError('Reviewed component proof insertion point changed')
     return text.replace(marker, section + marker, 1).encode('utf-8')
@@ -692,6 +758,7 @@ def prepare_assets(iso_path=None, iso_source_commit=None, iso_boot_evidence=None
                 raise ValueError('Reviewed original PNG changed')
             assets[name] = data
             images.add(name)
+    validate_download_pages(assets)
     iso = None
     component_proof = None
     try:
@@ -701,6 +768,8 @@ def prepare_assets(iso_path=None, iso_source_commit=None, iso_boot_evidence=None
             assets[iso.name + '.sha256'] = (iso.metadata['artifact']['sha256'] + '  ' + Path(iso.name).name + '\n').encode('ascii')
             assets['index.html'] = render_iso_homepage(assets['index.html'], iso.metadata, 'ko')
             assets['en/index.html'] = render_iso_homepage(assets['en/index.html'], iso.metadata, 'en')
+            assets['downloads.html'] = render_iso_downloadpage(assets['downloads.html'], iso.metadata, 'ko')
+            assets['en/downloads.html'] = render_iso_downloadpage(assets['en/downloads.html'], iso.metadata, 'en')
         if component_installer_proof is not None:
             component_proof = add_component_installer_proof(assets, component_installer_proof)
             assets['index.html'] = render_component_installer_homepage(assets['index.html'], component_proof, 'ko')
