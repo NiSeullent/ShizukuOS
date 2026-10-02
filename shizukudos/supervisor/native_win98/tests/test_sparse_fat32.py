@@ -164,6 +164,57 @@ class WorkerControls(ActualSparseAssembly):
         B.verify_esp_member(self.esp,'SHZDOS/DISK.IMG',self.pin,3<<20,{'commands':[]})
         self.assertEqual(result['source']['streamed_sha256'],self.pin)
 
+    def test_dense_member_uses_bounded_contiguous_writes(self):
+        payload = b'N' * (3 << 20)
+        self.source.write_bytes(payload)
+        boot, reserved, fat_sectors = self.fat_layout()
+        first_data = (reserved + 2 * fat_sectors) * 512
+        calls = []
+        actual_write = self.P.os.pwrite
+        def counted(fd, data, at):
+            if os.fstat(fd).st_ino == self.esp.stat().st_ino and at >= first_data:
+                calls.append((at, len(data)))
+            return actual_write(fd, data, at)
+        with mock.patch.object(self.P.os, 'pwrite', side_effect=counted):
+            result = self.run_worker()
+        # Three 1MiB data spans plus one directory-entry write. Thousands
+        # of 4KiB syscalls make the fixed deadline sensitive to NAS latency.
+        self.assertLessEqual(len(calls), 4)
+        self.assertTrue(all(size <= 1 << 20 for _, size in calls))
+        self.assertEqual(result['member']['data_bytes_written'], len(payload))
+        self.assertEqual(result['member']['zero_bytes_omitted'], 0)
+        self.assertEqual(subprocess.check_output(['mtype','-i',str(self.esp),
+                         '::/SHZDOS/DISK.IMG'], timeout=30), payload)
+
+    def test_mixed_span_coalesces_zero_readback_without_dense_zero_writes(self):
+        payload = b'L' * (64 << 10) + bytes(512 << 10) + b'R' * (448 << 10)
+        self.source.write_bytes(payload)
+        boot, reserved, fat_sectors = self.fat_layout()
+        first_data = (reserved + 2 * fat_sectors) * 512
+        # Fresh mmd consumes the root and SHZDOS clusters, so the first
+        # file data starts at cluster4. Observe real source/destination IO.
+        data_start = first_data + 2 * boot[13] * 512
+        reads, writes = [], []
+        actual_read, actual_write = self.P.os.pread, self.P.os.pwrite
+        def counted_read(fd, count, at):
+            if os.fstat(fd).st_ino == self.esp.stat().st_ino and data_start <= at < data_start + len(payload):
+                reads.append((at, count))
+            return actual_read(fd, count, at)
+        def counted_write(fd, data, at):
+            if os.fstat(fd).st_ino == self.esp.stat().st_ino and data_start <= at < data_start + len(payload):
+                writes.append((at, len(data)))
+            return actual_write(fd, data, at)
+        with mock.patch.object(self.P.os, 'pread', side_effect=counted_read), \
+             mock.patch.object(self.P.os, 'pwrite', side_effect=counted_write):
+            result = self.run_worker()
+        self.assertLessEqual(len(writes), 2)
+        self.assertLessEqual(len(reads), 4)
+        self.assertEqual(result['member']['zero_bytes_omitted'], 512 << 10)
+        self.assertEqual(result['member']['data_bytes_written'], 512 << 10)
+        self.assertLess(self.esp.stat().st_blocks * 512, 2 << 20)
+        self.assertEqual(subprocess.check_output(['mtype','-i',str(self.esp),
+                         '::/SHZDOS/DISK.IMG'], timeout=30), payload)
+
     def test_zero_write_and_eio_never_publish_result(self):
         for failure in (0,OSError(5,'controlled EIO')):
             with self.subTest(failure=str(failure)):
