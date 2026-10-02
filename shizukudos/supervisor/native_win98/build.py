@@ -176,7 +176,7 @@ def space(path, remaining=0):
         raise RuntimeError("17 GiB retained free space plus the remaining preparation budget is required")
 
 
-def copy_fd(fd, checkpoint, destination, expected, size, maximum=DISK_BYTES, *, prefer_reflink=False):
+def copy_fd(fd, checkpoint, destination, expected, size, maximum=DISK_BYTES, *, prefer_reflink=False, record_identity=False):
     """Copy the same read-leased descriptor into a fresh independent file.
 
     Explicit COW preference falls back only on unsupported clone operations.
@@ -237,10 +237,13 @@ def copy_fd(fd, checkpoint, destination, expected, size, maximum=DISK_BYTES, *, 
     checkpoint()
     pinned_hash(destination, expected, size, maximum=maximum)
     space(destination)
-    return {"method": method, "bytes": size, "sha256": expected,
+    result = {"method": method, "bytes": size, "sha256": expected,
             "allocated_bytes": allocation, "allocation_includes_shared_extents": cloned,
             "reflink_fallback_errno": fallback_errno, "source_lease_preserved": True,
             "independent_inode": True, "target_readback_verified": True}
+    if record_identity:
+        result["identity"] = list(stable(owned))
+    return result
 
 
 def preparation_budget(inputs):
@@ -341,16 +344,79 @@ def verify_esp_member(esp, name, expected, size, receipt, timeout=120):
     return {"bytes": count, "sha256": digest.hexdigest(), "method": "mtype-streaming-SHA256"}
 
 
-def assemble(out, copies, loader, receipt):
+def assemble(out, copies, loader, receipt, *, scratch=None):
+    if scratch is None:
+        return _assemble(out, copies, loader, receipt)
+    guard_path = HERE / "ram_assembly.py"
+    guard_size, guard_sha = guard_path.stat().st_size, file_sha(guard_path)
+    # These artifact leases outlive the guard and placement cleanup.
+    with contextlib.ExitStack() as artifacts, read_leased(guard_path, guard_sha, guard_size, maximum=1 << 20) as (guard_fd, checkpoint):
+        namespace = {"__file__": str(guard_path), "__name__": "native_ram_assembly_guard"}
+        exec(compile(os.pread(guard_fd, guard_size, 0), str(guard_path), "exec"), namespace)
+        checkpoint()
+        with namespace["Placement"].create(scratch, out) as placement:
+            work = Path(placement.plan["scratch"]["path"])
+            plan_path = work / "ram-placement.json"
+            raw = (json.dumps(placement.plan, indent=2) + "\n").encode()
+            placement.check(len(raw))
+            fd = os.open("ram-placement.json", os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600,
+                         dir_fd=placement.fds["scratch"])
+            try:
+                if os.write(fd, raw) != len(raw):
+                    raise OSError("short RAM placement write")
+                os.fsync(fd)
+                if os.pread(fd, len(raw)+1, 0) != raw:
+                    raise ValueError("RAM placement readback differs")
+            finally:
+                os.close(fd)
+            plan_sha = hashlib.sha256(raw).hexdigest()
+            with read_leased(plan_path, plan_sha, len(raw), maximum=64 << 10):
+                esp, identities = _assemble(out, copies, loader, receipt, placement=placement,
+                    ram_guard=(guard_fd, guard_size, guard_sha, guard_path, plan_path, plan_sha))
+                checkpoint(); placement.check()
+                produced = receipt.get("disk_insertion", {}).get("result", {}).get("esp")
+                if not produced or produced["path"] != str(esp) or list(stable(esp.stat())) != produced["identity"]:
+                    raise ValueError("RAM ESP no longer matches the returned producer identity")
+                size, pin = produced["bytes"], pin_format(produced["sha256"])
+                final = out / "esp-win98.img"
+                source_fd, source_check = artifacts.enter_context(read_leased(esp, pin, size, maximum=ESP_MIB << 20))
+                if list(stable(os.fstat(source_fd))) != produced["identity"]:
+                    raise ValueError("RAM ESP producer identity changed during lease admission")
+                copied = copy_fd(source_fd, source_check, final, pin, size,
+                                 maximum=ESP_MIB << 20, prefer_reflink=True, record_identity=True)
+                final_fd, final_check = artifacts.enter_context(read_leased(final, pin, size, maximum=ESP_MIB << 20))
+                if list(stable(os.fstat(final_fd))) != copied["identity"]:
+                    raise ValueError("NAS ESP differs from its actual copied inode")
+                os.fsync(placement.fds["sink"])
+                source_check(); final_check(); checkpoint(); placement.check()
+                if (final.stat().st_dev, final.stat().st_ino) == (esp.stat().st_dev, esp.stat().st_ino):
+                    raise ValueError("RAM assembly and final NAS inode must differ")
+                receipt["ram_assembly"] = {"placement": placement.plan, "guard_source_sha256": guard_sha,
+                    "temporary_ESP": str(esp), "final_copy": copied, "final_identity": copied["identity"],
+                    "final_directory_fsync_completed": True, "worker_deadline_seconds": 120,
+                    "NAS_reserve_bytes": RESERVE, "independent_NAS_copy_full_SHA_verified": True}
+            checkpoint(); placement.check()
+        checkpoint()
+    return final, identities
+
+
+def _assemble(out, copies, loader, receipt, *, placement=None, ram_guard=None):
     space(out, ESP_MIB << 20)
-    esp = out / "esp-win98.img"
+    work = out if placement is None else Path(placement.plan["scratch"]["path"])
+    def step(argv):
+        if placement is not None:
+            placement.check()
+        command(argv, receipt)
+        if placement is not None:
+            placement.check()
+    esp = work / "esp-win98.img"
     with esp.open("xb") as stream:
         stream.truncate(ESP_MIB << 20)
         owned_esp = stable(os.fstat(stream.fileno()))[:3]
     # Avoid mkfs.fat's default whole-track rounding at the 2304 MiB extent.
     # The strict inserter requires the FAT BPB to cover every owned sector.
-    command(["mkfs.vfat", "-F", "32", "-g", "1/1", "-n", "SHZWIN98", "-i", "53485739", esp], receipt)
-    command(["mmd", "-i", esp, "::/EFI", "::/EFI/BOOT", "::/EFI/SHIZUKU", "::/SHZDOS"], receipt)
+    step(["mkfs.vfat", "-F", "32", "-g", "1/1", "-n", "SHZWIN98", "-i", "53485739", esp])
+    step(["mmd", "-i", esp, "::/EFI", "::/EFI/BOOT", "::/EFI/SHIZUKU", "::/SHZDOS"])
     policy = out / "BOOT.INI"
     policy.write_bytes(b"mode=supervisor\r\nmenu_timeout=0\r\n")
     members = {"EFI/BOOT/BOOTX64.EFI": loader, "EFI/SHIZUKU/BOOT.INI": policy,
@@ -363,7 +429,7 @@ def assemble(out, copies, loader, receipt):
             continue
         size, pin = source.stat().st_size, file_sha(source)
         space(out, size)
-        command(["mcopy", "-i", esp, source, "::/" + name], receipt)
+        step(["mcopy", "-i", esp, source, "::/" + name])
         verify_esp_member(esp, name, pin, size, receipt)
         identities[name] = {"bytes": size, "sha256": pin}
         space(out)
@@ -377,7 +443,7 @@ def assemble(out, copies, loader, receipt):
         # require a sibling packer merely to import this module.
         helper = HERE / "sparse_fat32.py"
         helper_size, helper_sha = helper.stat().st_size, file_sha(helper)
-        request_path, result_path = out / "disk-insertion-request.json", out / "disk-insertion.json"
+        request_path, result_path = work / "disk-insertion-request.json", work / "disk-insertion.json"
         request = {"schema": "shizukuos.sparse-fat32-request.v1", "member": "SHZDOS/DISK.IMG",
                    "source": {"path": str(source), "bytes": size, "sha256": pin, "identity": list(stable(source.stat()))},
                    "esp": {"path": str(safe_path(esp)), "bytes": esp.stat().st_size, "identity": list(stable(esp.stat()))},
@@ -409,10 +475,17 @@ def assemble(out, copies, loader, receipt):
             with read_leased(helper, helper_sha, helper_size, maximum=1 << 20) as (helper_fd, checkpoint):
                 checkpoint()
                 deadline = time.monotonic() + 120
+                ram_args, ram_fds = [], ()
+                if ram_guard is not None:
+                    guard_fd, guard_size, guard_sha, guard_path, plan_path, plan_sha = ram_guard
+                    ram_args = ["--ram-placement", plan_path, "--ram-placement-sha256", plan_sha,
+                                "--ram-guard-fd", str(guard_fd), "--ram-guard-size", str(guard_size),
+                                "--ram-guard-sha256", guard_sha, "--ram-guard-path", guard_path]
+                    ram_fds = (guard_fd,)
                 try:
                     command([sys.executable, "-B", "-c", bootstrap, str(helper_fd), str(helper_size), str(helper), helper_sha,
-                         "--request", request_path, "--request-sha256", request_sha, "--result", result_path, "--return-fd", str(return_write)],
-                            receipt, timeout=120, pass_fds=(helper_fd, return_write))
+                         "--request", request_path, "--request-sha256", request_sha, "--result", result_path, "--return-fd", str(return_write), *ram_args],
+                            receipt, timeout=120, pass_fds=(helper_fd, return_write, *ram_fds))
                 finally:
                     os.close(return_write); return_write = None
                 packet = bytearray()
@@ -514,6 +587,8 @@ def main(argv=None, *, receipt_sink=None):
         parser.add_argument("--" + name, type=Path)
         parser.add_argument("--" + name + "-sha256")
     parser.add_argument("--out", type=Path)
+    parser.add_argument("--assembly-scratch", type=Path,
+                        help="fresh owned tmpfs workspace; final ESP still uses --out and its 17GiB reserve")
     parser.add_argument("--validate-only", action="store_true", help="check all explicit inputs without output or compilation")
     args = parser.parse_args(argv)
     if args.make_config:
@@ -545,7 +620,9 @@ def main(argv=None, *, receipt_sink=None):
                                 "required_size": sizes.get(name), "maximum": maximum.get(name, DISK_BYTES)}
     out, receipt = None, None
     try:
-        with contextlib.ExitStack() as stack:
+        with contextlib.ExitStack() as artifact_stack, contextlib.ExitStack() as stack:
+            # Artifact custody closes after every original input and its registry.
+            artifact_registry = artifact_stack.enter_context(ReadLeaseRegistry())
             registry = stack.enter_context(ReadLeaseRegistry())
             inputs, descriptors = {}, {}
             for name, item in selected.items():
@@ -599,11 +676,24 @@ def main(argv=None, *, receipt_sink=None):
                 if file_sha(loader) != compiled["artifacts"]["BOOTX64.EFI"]["sha256"]:
                     raise ValueError("new loader does not match its compilation receipt")
                 registry.check()
-                esp, members = assemble(out, copies, loader, receipt)
+                if args.assembly_scratch is None:
+                    esp, members = assemble(out, copies, loader, receipt)
+                else:
+                    esp, members = assemble(out, copies, loader, receipt, scratch=args.assembly_scratch)
+                    known = receipt["ram_assembly"]
+                    final_fd, final_check = artifact_stack.enter_context(read_leased(esp, known["final_copy"]["sha256"],
+                        known["final_copy"]["bytes"], maximum=ESP_MIB << 20, registry=artifact_registry))
+                    if list(stable(os.fstat(final_fd))) != known["final_identity"]:
+                        raise ValueError("final NAS ESP changed after assembly return")
+                    final_check()
                 registry.check()
                 if pins != {str(p.relative_to(ROOT)): file_sha(p) for p in files}:
                     raise ValueError("public source changed during private preparation")
-                artifact = {"path": esp.name, "bytes": esp.stat().st_size, "sha256": file_sha(esp)}
+                if args.assembly_scratch is None:
+                    artifact = {"path": esp.name, "bytes": esp.stat().st_size, "sha256": file_sha(esp)}
+                else:
+                    artifact = {"path": esp.name, "bytes": known["final_copy"]["bytes"],
+                                "sha256": known["final_copy"]["sha256"]}
                 registry.check()
                 success = {"sources_sha256": pins, "members": members, "artifact": artifact,
                            "source_before_after_match": True, "originals_before_after_match": True,

@@ -275,16 +275,28 @@ def validate_request(request, result_path, executed_sha, executed_bytes):
     return result
 
 
-def prepare(request_path, request_sha, result_path, executed_sha, executed_bytes):
+def prepare(request_path, request_sha, result_path, executed_sha, executed_bytes, *, ram=None):
     request_path = canonical(str(request_path)); pin(request_sha)
     value = request_path.stat()
     need(stat.S_ISREG(value.st_mode) and 0 < value.st_size <= MAX_JSON, 'bounded regular request required')
     deadline = time.monotonic()+TIMEOUT
-    with owned_leases([('request', request_path, list(identity(value)), False)], deadline) as (held, request_check):
+    with contextlib.ExitStack() as stack:
+        held, request_check = stack.enter_context(owned_leases([('request', request_path, list(identity(value)), False)], deadline))
         raw = read_exact(held['request']['fd'], 0, value.st_size, request_check)
         need(sha(raw) == request_sha, 'exact request SHA differs')
         request = json.loads(raw, object_pairs_hook=unique_object)
         result_path = validate_request(request, result_path, executed_sha, executed_bytes)
+        placement = None
+        if ram is not None:
+            path, expected, factory = ram
+            path = canonical(str(path)); pin(expected); info = path.stat()
+            need(0 < info.st_size <= MAX_JSON, 'bounded RAM placement required')
+            request_check.add('RAM-placement', path, list(identity(info)), False)
+            body = read_exact(held['RAM-placement']['fd'], 0, info.st_size, request_check)
+            need(sha(body) == expected, 'RAM placement SHA differs')
+            placement = stack.enter_context(factory(json.loads(body, object_pairs_hook=unique_object)))
+            need(request_path.parent == result_path.parent == Path(placement.plan['scratch']['path']) and
+                 Path(request['esp']['path']).parent == request_path.parent, 'exact RAM scratch request/ESP/result namespace required')
         source, esp = request['source'], request['esp']
         # Request, source and owned ESP share one actual SIGIO registry.
         request_check.add('source', Path(source['path']), source['identity'], False)
@@ -292,7 +304,10 @@ def prepare(request_path, request_sha, result_path, executed_sha, executed_bytes
         data, data_check = held, request_check
         def check():
             request_check(); data_check()
-            need(shutil.disk_usage(Path(esp['path']).parent).free >= RESERVE, '17GiB retained free space unavailable')
+            if placement is None:
+                need(shutil.disk_usage(Path(esp['path']).parent).free >= RESERVE, '17GiB retained free space unavailable')
+            else:
+                placement.check()
         check()
         need(data['source']['identity'][:2] != data['esp']['identity'][:2], 'source and ESP inodes must differ')
         before_sha = hash_fd(data['source']['fd'], source['bytes'], check)
@@ -306,6 +321,8 @@ def prepare(request_path, request_sha, result_path, executed_sha, executed_bytes
 
         def write(at, block):
             need(0 <= at <= esp['bytes']-len(block), 'owned ESP write range out of bounds')
+            if placement is not None:
+                placement.check(len(block))
             done = 0
             while done < len(block):
                 check()
@@ -397,6 +414,8 @@ def prepare(request_path, request_sha, result_path, executed_sha, executed_bytes
         check()
         final_identity = list(data['esp']['identity'])
         request_check()
+        if placement is not None:
+            placement.check(MAX_JSON)
     result = {'schema':'shizukuos.sparse-fat32-result.v1', 'status':'PRIVATE_FAT32_MEMBER_INSERTED_NOT_RUN',
               'request_sha256':request_sha, 'producer_sha256':executed_sha, 'producer_bytes':executed_bytes,
               'source':{'path':source['path'], 'bytes':source['bytes'], 'sha256':source['sha256'], 'identity':source['identity'],
@@ -430,12 +449,35 @@ def main():
     parser.add_argument('--request-sha256', required=True)
     parser.add_argument('--result', type=Path, required=True)
     parser.add_argument('--return-fd', type=int, required=True)
+    parser.add_argument('--ram-placement', type=Path)
+    parser.add_argument('--ram-placement-sha256')
+    parser.add_argument('--ram-guard-fd', type=int)
+    parser.add_argument('--ram-guard-size', type=int)
+    parser.add_argument('--ram-guard-sha256')
+    parser.add_argument('--ram-guard-path', type=Path)
     args = parser.parse_args()
     need('_EXECUTED_SOURCE_SHA256' in globals() and '_EXECUTED_SOURCE_BYTES' in globals(), 'assembler-held executed source FD required')
     need(stat.S_ISFIFO(os.fstat(args.return_fd).st_mode) and
          fcntl.fcntl(args.return_fd, fcntl.F_GETFL) & os.O_ACCMODE == os.O_WRONLY and
          os.fpathconf(args.return_fd, 'PC_PIPE_BUF') >= 512, 'owned bounded metadata return pipe required')
-    result = prepare(args.request, args.request_sha256, args.result, globals()['_EXECUTED_SOURCE_SHA256'], globals()['_EXECUTED_SOURCE_BYTES'])
+    ram = None
+    supplied = (args.ram_placement, args.ram_placement_sha256, args.ram_guard_fd,
+                args.ram_guard_size, args.ram_guard_sha256, args.ram_guard_path)
+    if any(value is not None for value in supplied):
+        need(all(value is not None for value in supplied) and 0 < args.ram_guard_size <= 1 << 20,
+             'complete bounded parent-held RAM guard source and placement required')
+        pin(args.ram_guard_sha256); guard_path = canonical(str(args.ram_guard_path))
+        info = os.fstat(args.ram_guard_fd)
+        need(stat.S_ISREG(info.st_mode) and info.st_size == args.ram_guard_size and
+             identity(info) == identity(guard_path.stat()) and
+             fcntl.fcntl(args.ram_guard_fd, fcntl.F_GETLEASE) == fcntl.F_RDLCK,
+             'actual parent-held RAM guard source required')
+        body = read_exact(args.ram_guard_fd, 0, args.ram_guard_size, lambda: None)
+        need(sha(body) == args.ram_guard_sha256, 'parent-held RAM guard source SHA differs')
+        namespace = {'__file__': str(guard_path), '__name__': 'held_ram_assembly_guard'}
+        exec(compile(body, str(guard_path), 'exec'), namespace)
+        ram = (args.ram_placement, args.ram_placement_sha256, namespace['Placement'])
+    result = prepare(args.request, args.request_sha256, args.result, globals()['_EXECUTED_SOURCE_SHA256'], globals()['_EXECUTED_SOURCE_BYTES'], ram=ram)
     # These bytes come from the producer's unchanged in-memory saved record,
     # never from a post-return mutable result pathname.
     encoded = (json.dumps(result, indent=2)+'\n').encode()
