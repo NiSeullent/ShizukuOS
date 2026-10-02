@@ -344,9 +344,12 @@ class ParentWait:
         if self.pidfd is None:self.pidfd=os.pidfd_open(self.process.pid,0)
         if not self.exited():signal.pidfd_send_signal(self.pidfd,signal.SIGKILL)
 
+def task_stop(owner,preparation_stop,finalization_stop,timeout):
+    return finalization_stop if finalization_stop is not None else owner.start+timeout+16 if owner.start else preparation_stop
+
 def task_deadline(owner,preparation_stop,finalization_stop,timeout,now):
     if owner.start is not None and owner.confirm_reaped() and finalization_stop is None:finalization_stop=now+timeout
-    stop=finalization_stop if finalization_stop is not None else owner.start+timeout+16 if owner.start else preparation_stop
+    stop=task_stop(owner,preparation_stop,finalization_stop,timeout)
     if now>stop:raise TimeoutError('original task observation/cleanup/finalization deadline consumed')
     return finalization_stop
 
@@ -575,12 +578,28 @@ def main():
         server=Server(rpc.Channel(left,controller.pid),owner,sources,out)
         preparation_stop=time.monotonic()+manifest["timeout"];finalization_stop=None
         owner.record['finalization_budget_seconds']=manifest['timeout']
+        rpc_closed=False
         while controller_status.observe() is None:
             need(not stopped[0],'guardian cancellation requested')
             check_bootstrap();union.check();group.check();resource_guard(parent,manifest['limits'],group,capture,out,owner.start is None)
             finalization_stop=task_deadline(owner,preparation_stop,finalization_stop,manifest['timeout'],time.monotonic())
+            if rpc_closed:
+                time.sleep(.1)
+                continue
             try:server.once(.1)
             except socket.timeout:continue
+            except EOFError:
+                # Interpreter teardown can close RPC before the parent wait
+                # reports exit. EOF proves neither exit nor successful status;
+                # retain every guard and the original deadline until that wait.
+                rpc_closed=True
+                owner.record['controller_rpc_EOF_observed']=True
+        check_bootstrap();union.check();group.check();resource_guard(parent,manifest['limits'],group,capture,out,owner.start is None)
+        need(not stopped[0],'guardian cancellation requested')
+        # Check the already established phase stop; completion cannot start a
+        # new finalization budget or bypass a guard while the last wait reaps.
+        if time.monotonic()>task_stop(owner,preparation_stop,finalization_stop,manifest['timeout']):
+            raise TimeoutError('original task observation/cleanup/finalization deadline consumed')
         need(controller_status.reaped and controller.returncode==0 and owner.confirm_reaped() and owner.record.get('QMP_peer_admitted') is True,'controller exit is not owned-child reap/QMP admission')
     except BaseException as error:failure=error;owner.record['error']=type(error).__name__
     finally:
