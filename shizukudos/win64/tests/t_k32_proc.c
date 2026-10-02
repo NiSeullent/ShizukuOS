@@ -1397,6 +1397,440 @@ cleanup:
           "all strict-query and remote handles are closed with exact count restoration");
 }
 
+
+
+/* ---------------------------------------------------------------- held live-memory queries
+ * Modern query rights and the existing UP memory subset only. The preceding
+ * 620 checks are preserved; physical allocator races remain host controls. */
+#define MQ_STATUS_INVALID_HANDLE ((LONG)0xc0000008u)
+#define MQ_STATUS_TYPE_MISMATCH ((LONG)0xc0000024u)
+#define MQ_STATUS_ACCESS_DENIED ((LONG)0xc0000022u)
+#define MQ_STATUS_TERMINATING ((LONG)0xc000010au)
+#define MQ_STATUS_SHORT_BUFFER ((LONG)0xc0000023u)
+#define MQ_STATUS_BAD_LENGTH ((LONG)0xc0000004u)
+#define MQ_LENGTH_POISON 0x5a5a5a5au
+
+typedef struct {
+    ULONG64 before;
+    union { PROCESS_MEMORY_COUNTERS base; PROCESS_MEMORY_COUNTERS_EX ex; } value;
+    BYTE tail[16];
+    ULONG64 after;
+} mq_counter_guard;
+typedef struct { ULONG64 before; APP_MEMORY_INFORMATION value; ULONG64 after; } mq_app_guard;
+typedef struct { ULONG64 before, value[5]; BYTE tail[16]; ULONG64 after; } mq_raw_guard;
+typedef struct {
+    ULONG64 before;
+    PSAPI_WORKING_SET_EX_INFORMATION value;
+    BYTE tail[16];
+    ULONG64 after;
+} mq_ws_guard;
+typedef struct { ULONG before, value, after; } mq_length_guard;
+
+static BOOL mq_edges(const void *buffer, SIZE_T size, SIZE_T begin, SIZE_T changed)
+{
+    const BYTE *bytes = buffer;
+    SIZE_T i;
+    for (i = 0; i < size; ++i)
+        if ((i < begin || i >= begin + changed) && bytes[i] != 0x5a) return FALSE;
+    return TRUE;
+}
+static ULONG_PTR mq_page_flags(DWORD protection, BOOL locked)
+{
+    /* A private resident page has one owner, no sharing or NUMA extension. */
+    return 3u | ((ULONG_PTR)protection << 4) | (locked ? (ULONG_PTR)1 << 22 : 0);
+}
+static BOOL mq_capture_memory(HANDLE process, ULONG64 result[5])
+{
+    mq_raw_guard out;
+    mq_length_guard length;
+    LONG status;
+    BOOL ok;
+    memset(&out, 0x5a, sizeof out);
+    memset(&length, 0x5a, sizeof length);
+    status = NtShzQueryK32(8, process, out.value, sizeof out.value, &length.value);
+    ok = status == 0 && length.value == 40 &&
+         mq_edges(&out, sizeof out, sizeof out.before, sizeof out.value) &&
+         mq_edges(&length, sizeof length, sizeof length.before, sizeof length.value);
+    CHECK(ok, "private memory query returns exactly forty guarded bytes and required length");
+    if (ok) memcpy(result, out.value, sizeof out.value);
+    return ok;
+}
+static void mq_memory_success(HANDLE process, ULONG64 minimum_commit)
+{
+    mq_counter_guard out;
+    mq_app_guard app;
+    ULONG64 raw[5];
+    BOOL ok;
+    memset(&out, 0x5a, sizeof out);
+    ok = K32GetProcessMemoryInfo(process, &out.value.base, sizeof(PROCESS_MEMORY_COUNTERS));
+    CHECK(ok && out.value.base.cb == sizeof(PROCESS_MEMORY_COUNTERS) &&
+          out.value.base.PeakWorkingSetSize >= out.value.base.WorkingSetSize &&
+          out.value.base.PagefileUsage >= minimum_commit &&
+          out.value.base.PeakPagefileUsage >= out.value.base.PagefileUsage,
+          "modern memory QUERY or LIMITED returns the guarded base counter subset without VM_READ");
+    CHECK(mq_edges(&out, sizeof out, sizeof out.before, sizeof(PROCESS_MEMORY_COUNTERS)),
+          "base memory counters preserve the EX portion and every surrounding poisoned byte");
+    memset(&out, 0x5a, sizeof out);
+    ok = K32GetProcessMemoryInfo(process, &out.value.base, sizeof(PROCESS_MEMORY_COUNTERS_EX));
+    CHECK(ok && out.value.ex.cb == sizeof(PROCESS_MEMORY_COUNTERS_EX) &&
+          out.value.ex.PrivateUsage == out.value.ex.PagefileUsage &&
+          out.value.ex.PagefileUsage >= minimum_commit &&
+          out.value.ex.PeakPagefileUsage >= out.value.ex.PagefileUsage &&
+          out.value.ex.PeakWorkingSetSize >= out.value.ex.WorkingSetSize,
+          "the unchanged EX memory subset reports private commit and valid peak relations");
+    CHECK(mq_edges(&out, sizeof out, sizeof out.before, sizeof(PROCESS_MEMORY_COUNTERS_EX)),
+          "EX memory counters preserve the oversized tail and poisoned guards");
+    memset(&app, 0x5a, sizeof app);
+    ok = GetProcessInformation(process, ProcessAppMemoryInfo, &app.value, sizeof app.value);
+    CHECK(ok && app.value.PrivateCommitUsage >= minimum_commit &&
+          app.value.TotalCommitUsage == app.value.PrivateCommitUsage &&
+          app.value.PeakPrivateCommitUsage >= app.value.PrivateCommitUsage,
+          "LIMITED-compatible AppMemoryInfo preserves its private-commit reporting subset");
+    CHECK(mq_edges(&app, sizeof app, sizeof app.before, sizeof app.value),
+          "AppMemoryInfo changes only its exact guarded structure");
+    ok = mq_capture_memory(process, raw);
+    CHECK(ok && raw[2] >= raw[1] && raw[3] >= minimum_commit && raw[4] >= raw[3],
+          "the live private memory snapshot retains its actual counter relations");
+    /* AppMemoryInfo queries Q8 and Q7 separately; no joint atomicity is asserted. */
+}
+static void mq_memory_refusal(HANDLE process, LONG expected_status, DWORD expected_error)
+{
+    mq_counter_guard out;
+    mq_app_guard app;
+    mq_raw_guard raw;
+    mq_length_guard length;
+    memset(&out, 0x5a, sizeof out);
+    SetLastError(0x5a5a);
+    CHECK(!K32GetProcessMemoryInfo(process, &out.value.base, sizeof(PROCESS_MEMORY_COUNTERS_EX)) &&
+          GetLastError() == expected_error && mq_edges(&out, sizeof out, 0, 0),
+          "refused memory counters preserve the complete poisoned output and report the handle or right error");
+    memset(&app, 0x5a, sizeof app);
+    SetLastError(0x5a5a);
+    CHECK(!GetProcessInformation(process, ProcessAppMemoryInfo, &app.value, sizeof app.value) &&
+          GetLastError() == expected_error && mq_edges(&app, sizeof app, 0, 0),
+          "refused AppMemoryInfo preserves its complete guarded output");
+    memset(&raw, 0x5a, sizeof raw);
+    memset(&length, 0x5a, sizeof length);
+    CHECK(NtShzQueryK32(8, process, raw.value, sizeof raw.value, &length.value) == expected_status &&
+          mq_edges(&raw, sizeof raw, 0, 0) && mq_edges(&length, sizeof length, 0, 0),
+          "private memory refusal preserves both output and optional required length");
+}
+static void mq_ws_success(HANDLE process, PVOID address, ULONG_PTR flags)
+{
+    mq_ws_guard out;
+    mq_length_guard length;
+    BOOL ok;
+    memset(&out, 0x5a, sizeof out);
+    out.value.VirtualAddress = address;
+    ok = K32QueryWorkingSetEx(process, &out.value, sizeof out.value);
+    CHECK(ok && out.value.VirtualAddress == address && out.value.VirtualAttributes.Flags == flags &&
+          mq_edges(&out, sizeof out, sizeof out.before, sizeof out.value),
+          "full QUERY returns the independently expected page state within one guarded entry");
+    memset(&out, 0x5a, sizeof out);
+    memset(&length, 0x5a, sizeof length);
+    out.value.VirtualAddress = address;
+    CHECK(NtShzQueryK32(9, process, &out.value, sizeof out.value, &length.value) == 0 &&
+          length.value == 16 && out.value.VirtualAddress == address && out.value.VirtualAttributes.Flags == flags &&
+          mq_edges(&out, sizeof out, sizeof out.before, sizeof out.value) &&
+          mq_edges(&length, sizeof length, sizeof length.before, sizeof length.value),
+          "private working-set query preserves the address and writes exactly sixteen bytes plus required length");
+}
+static void mq_ws_refusal(HANDLE process, PVOID address, LONG expected_status, DWORD expected_error)
+{
+    mq_ws_guard out, original;
+    mq_length_guard length;
+    memset(&out, 0x5a, sizeof out);
+    out.value.VirtualAddress = address;
+    original = out;
+    SetLastError(0x5a5a);
+    CHECK(!K32QueryWorkingSetEx(process, &out.value, sizeof out.value) &&
+          GetLastError() == expected_error && memcmp(&out, &original, sizeof out) == 0,
+          "refused working-set query preserves its input address, poisoned attributes and guards");
+    memset(&length, 0x5a, sizeof length);
+    CHECK(NtShzQueryK32(9, process, &out.value, sizeof out.value, &length.value) == expected_status &&
+          memcmp(&out, &original, sizeof out) == 0 && mq_edges(&length, sizeof length, 0, 0),
+          "private working-set refusal preserves the whole entry and optional length");
+}
+static void mq_buffer_checks(HANDLE process, PVOID address)
+{
+    mq_raw_guard raw;
+    mq_counter_guard counter;
+    mq_ws_guard ws, original;
+    mq_length_guard length;
+    const ULONG short_lengths[2] = {0, 39}, bad_lengths[3] = {0, 15, 17};
+    unsigned i;
+    for (i = 0; i < 2; ++i) {
+        memset(&raw, 0x5a, sizeof raw);
+        memset(&length, 0x5a, sizeof length);
+        CHECK(NtShzQueryK32(8, process, raw.value, short_lengths[i], &length.value) == MQ_STATUS_SHORT_BUFFER &&
+              length.value == 40 && mq_edges(&raw, sizeof raw, 0, 0) &&
+              mq_edges(&length, sizeof length, sizeof length.before, sizeof length.value),
+              "a short private memory buffer receives required forty without an output write");
+    }
+    memset(&raw, 0x5a, sizeof raw);
+    memset(&length, 0x5a, sizeof length);
+    CHECK(NtShzQueryK32(8, process, raw.value, sizeof raw.value + sizeof raw.tail, &length.value) == 0 &&
+          length.value == 40 && mq_edges(&raw, sizeof raw, sizeof raw.before, sizeof raw.value) &&
+          mq_edges(&length, sizeof length, sizeof length.before, sizeof length.value),
+          "an oversized private memory buffer keeps its unused tail");
+    memset(&counter, 0x5a, sizeof counter);
+    SetLastError(0x5a5a);
+    CHECK(!K32GetProcessMemoryInfo(process, &counter.value.base, sizeof(PROCESS_MEMORY_COUNTERS) - 1) &&
+          GetLastError() == ERROR_INSUFFICIENT_BUFFER && mq_edges(&counter, sizeof counter, 0, 0),
+          "the preserved frontend rejects a short base memory buffer without modifying it");
+    SetLastError(0x5a5a);
+    CHECK(!K32GetProcessMemoryInfo(process, NULL, sizeof(PROCESS_MEMORY_COUNTERS)) &&
+          GetLastError() == ERROR_INSUFFICIENT_BUFFER, "the preserved frontend safely rejects NULL memory counters");
+    memset(&counter, 0x5a, sizeof counter);
+    CHECK(K32GetProcessMemoryInfo(process, &counter.value.base, sizeof counter.value + sizeof counter.tail) &&
+          counter.value.ex.cb == sizeof(PROCESS_MEMORY_COUNTERS_EX) &&
+          mq_edges(&counter, sizeof counter, sizeof counter.before, sizeof(PROCESS_MEMORY_COUNTERS_EX)),
+          "the existing frontend writes only its EX subset even with an oversized public buffer");
+    for (i = 0; i < 3; ++i) {
+        memset(&ws, 0x5a, sizeof ws);
+        memset(&length, 0x5a, sizeof length);
+        ws.value.VirtualAddress = address;
+        original = ws;
+        CHECK(NtShzQueryK32(9, process, &ws.value, bad_lengths[i], &length.value) == MQ_STATUS_BAD_LENGTH &&
+              memcmp(&ws, &original, sizeof ws) == 0 && mq_edges(&length, sizeof length, 0, 0),
+              "private working-set zero or non-entry lengths refuse without any entry or length write");
+    }
+    memset(&ws, 0x5a, sizeof ws);
+    ws.value.VirtualAddress = address;
+    original = ws;
+    SetLastError(0x5a5a);
+    CHECK(!K32QueryWorkingSetEx(process, &ws.value, 0) && GetLastError() == ERROR_BAD_LENGTH &&
+          memcmp(&ws, &original, sizeof ws) == 0, "the unchanged working-set wrapper rejects zero capacity");
+    SetLastError(0x5a5a);
+    CHECK(!K32QueryWorkingSetEx(process, &ws.value, 15) && GetLastError() == ERROR_BAD_LENGTH &&
+          memcmp(&ws, &original, sizeof ws) == 0, "the unchanged working-set wrapper rejects a partial entry");
+    SetLastError(0x5a5a);
+    CHECK(!K32QueryWorkingSetEx(process, NULL, 16) && GetLastError() == ERROR_BAD_LENGTH,
+          "the unchanged working-set wrapper safely rejects NULL entries");
+}
+static void mq_batch(HANDLE process, BYTE *pages)
+{
+    struct { ULONG64 before; PSAPI_WORKING_SET_EX_INFORMATION value[4]; BYTE tail[16]; ULONG64 after; } out;
+    mq_length_guard length;
+    unsigned i, pass;
+    BOOL ok;
+    const ULONG_PTR expected[4] = {3u | ((ULONG_PTR)PAGE_READONLY << 4),
+                                   3u | ((ULONG_PTR)PAGE_READWRITE << 4), 0, 0};
+    PVOID addresses[4] = {pages, pages + 4096, pages + 2 * 4096, NULL};
+    for (pass = 0; pass < 2; ++pass) {
+        memset(&out, 0x5a, sizeof out);
+        memset(&length, 0x5a, sizeof length);
+        for (i = 0; i < 4; ++i) out.value[i].VirtualAddress = addresses[i];
+        ok = pass == 0 ? K32QueryWorkingSetEx(process, out.value, sizeof out.value) :
+                        NtShzQueryK32(9, process, out.value, sizeof out.value, &length.value) == 0;
+        for (i = 0; i < 4; ++i)
+            if (out.value[i].VirtualAddress != addresses[i] || out.value[i].VirtualAttributes.Flags != expected[i]) ok = FALSE;
+        CHECK(ok && mq_edges(&out, sizeof out, sizeof out.before, sizeof out.value) &&
+              (pass == 0 ? mq_edges(&length, sizeof length, 0, 0) :
+               length.value == 64 && mq_edges(&length, sizeof length, sizeof length.before, sizeof length.value)),
+              "each complete batch entry reports its independent resident, decommitted or absent page state");
+    }
+}
+static void mq_remote_child(void)
+{
+    static const WCHAR child_name[] = L"T_HELLO.EXE";
+    struct { ULONG64 before; WCHAR path[MAX_PATH]; ULONG64 after; } name;
+    struct { ULONG64 before, value, after; } readback;
+    struct { ULONG64 before; SIZE_T value; ULONG64 after; } transfer;
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    HANDLE query = NULL, limited = NULL;
+    BYTE *remote = NULL, *address = NULL;
+    ULONG64 before_memory[5], after_memory[5], pattern = 0x3141592653589793ull;
+    DWORD n, at, i, original_count = 0, final_count = 0, old = 0, pc = 0, tc = 0;
+    DWORD pw = WAIT_FAILED, tw = WAIT_FAILED;
+    BOOL ok;
+    CHECK(GetProcessHandleCount(GetCurrentProcess(), &original_count),
+          "capture the handle count before the live remote memory fixture");
+    memset(&name, 0x5a, sizeof name);
+    n = GetModuleFileNameW(NULL, name.path, MAX_PATH);
+    CHECK(n > 0 && n < MAX_PATH && name.path[n] == 0 && mq_edges(&name, sizeof name, sizeof name.before, sizeof name.path),
+          "obtain the existing sibling directory for the memory child within guarded bounds");
+    if (!n || n >= MAX_PATH || name.path[n] != 0) return;
+    at = n;
+    while (at && name.path[at - 1] != '\\' && name.path[at - 1] != '/') --at;
+    CHECK(at && at + sizeof child_name / sizeof child_name[0] <= MAX_PATH,
+          "the existing child filename and NUL fit the captured memory-fixture directory");
+    if (!at || at + sizeof child_name / sizeof child_name[0] > MAX_PATH) return;
+    for (i = 0; i < sizeof child_name / sizeof child_name[0]; ++i) name.path[at + i] = child_name[i];
+    CHECK(name.path[at + sizeof child_name / sizeof child_name[0] - 1] == 0 &&
+          mq_edges(&name, sizeof name, sizeof name.before, sizeof name.path),
+          "memory-fixture child path replacement preserves guards and termination");
+    memset(&si, 0, sizeof si); si.cb = sizeof si;
+    memset(&pi, 0, sizeof pi);
+    ok = CreateProcessW(name.path, NULL, NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi);
+    CHECK(ok, "create the sole-thread natural exit-seven memory child suspended");
+    if (!ok) return;
+    query = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pi.dwProcessId);
+    CHECK(query != NULL, "hold a separate QUERY-only handle to the live memory child");
+    limited = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pi.dwProcessId);
+    CHECK(limited != NULL, "hold a separate LIMITED-only handle to the same memory child");
+    if (!query || !limited || !mq_capture_memory(query, before_memory)) goto cleanup;
+    remote = VirtualAllocEx(pi.hProcess, NULL, 2 * 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    CHECK(remote != NULL, "the original full handle allocates two actual remote pages and supplies their real address");
+    if (!remote) goto cleanup;
+    address = remote;
+    ok = mq_capture_memory(query, after_memory);
+    CHECK(ok && after_memory[3] == before_memory[3] + 2 * 4096,
+          "the suspended child's actual remote allocation increases its private commit by exactly two pages");
+    mq_memory_success(query, 2 * 4096);
+    mq_memory_success(limited, 2 * 4096);
+    mq_ws_success(query, address, 0);
+    mq_ws_refusal(limited, address, MQ_STATUS_ACCESS_DENIED, ERROR_ACCESS_DENIED);
+    memset(&transfer, 0x5a, sizeof transfer);
+    ok = WriteProcessMemory(pi.hProcess, address, &pattern, sizeof pattern, &transfer.value);
+    CHECK(ok && transfer.value == 8 && mq_edges(&transfer, sizeof transfer, sizeof transfer.before, sizeof transfer.value),
+          "the original full handle touches eight bytes in the real remote allocation");
+    if (!ok || transfer.value != 8) goto cleanup;
+    memset(&readback, 0x5a, sizeof readback);
+    memset(&transfer, 0x5a, sizeof transfer);
+    ok = ReadProcessMemory(pi.hProcess, address, &readback.value, sizeof readback.value, &transfer.value);
+    CHECK(ok && transfer.value == 8 && readback.value == pattern &&
+          mq_edges(&readback, sizeof readback, sizeof readback.before, sizeof readback.value) &&
+          mq_edges(&transfer, sizeof transfer, sizeof transfer.before, sizeof transfer.value),
+          "full-READ readback verifies the actual remote byte owner and preserves both guards");
+    mq_ws_success(query, address, mq_page_flags(PAGE_READWRITE, FALSE));
+    ok = VirtualProtectEx(pi.hProcess, address, 4096, PAGE_READONLY, &old);
+    CHECK(ok && old == PAGE_READWRITE, "the full mutation handle protects the actual remote page read-only");
+    mq_ws_success(query, address, mq_page_flags(PAGE_READONLY, FALSE));
+    CHECK(VirtualFreeEx(pi.hProcess, address, 4096, MEM_DECOMMIT),
+          "the original full handle decommits the actual touched remote page");
+    mq_ws_success(query, address, 0);
+    ok = VirtualFreeEx(pi.hProcess, remote, 0, MEM_RELEASE);
+    CHECK(ok, "release the real remote reservation before natural child dispatch");
+    if (ok) remote = NULL;
+    mq_ws_success(query, address, 0);
+    ok = ResumeThread(pi.hThread) == 1;
+    CHECK(ok, "resume the suspended memory fixture exactly once for natural completion");
+    if (!ok) goto cleanup;
+    pw = WaitForSingleObject(pi.hProcess, 5000);
+    CHECK(pw == WAIT_OBJECT_0, "the remote memory process finishes within its bounded wait");
+    tw = WaitForSingleObject(pi.hThread, 5000);
+    CHECK(tw == WAIT_OBJECT_0, "the real primary thread finishes before retained memory refusal checks");
+    if (pw != WAIT_OBJECT_0 || tw != WAIT_OBJECT_0) goto cleanup;
+    ok = GetExitCodeProcess(pi.hProcess, &pc) && pc == 7;
+    CHECK(ok, "the memory child process exits naturally with its existing result seven");
+    if (!ok) goto cleanup;
+    ok = GetExitCodeThread(pi.hThread, &tc) && tc == 7;
+    CHECK(ok, "the retained primary thread independently confirms natural memory-child exit seven");
+    if (!ok) goto cleanup;
+    /* These are chosen live-memory backend refusals, not Windows exit precedence. */
+    mq_memory_refusal(query, MQ_STATUS_TERMINATING, ERROR_ACCESS_DENIED);
+    mq_memory_refusal(limited, MQ_STATUS_TERMINATING, ERROR_ACCESS_DENIED);
+    mq_ws_refusal(query, address, MQ_STATUS_TERMINATING, ERROR_ACCESS_DENIED);
+    mq_ws_refusal(limited, address, MQ_STATUS_ACCESS_DENIED, ERROR_ACCESS_DENIED);
+cleanup:
+    if (remote && pw != WAIT_OBJECT_0)
+        CHECK(VirtualFreeEx(pi.hProcess, remote, 0, MEM_RELEASE), "release any failed live memory-child allocation");
+    if (pw != WAIT_OBJECT_0 || tw != WAIT_OBJECT_0) {
+        CHECK(TerminateProcess(pi.hProcess, 99), "terminate a failed memory child only for separate cleanup");
+        CHECK(WaitForSingleObject(pi.hProcess, 2000) == WAIT_OBJECT_0, "failed memory-child process cleanup stays bounded");
+        CHECK(WaitForSingleObject(pi.hThread, 2000) == WAIT_OBJECT_0, "failed memory-child primary-thread cleanup stays bounded");
+    }
+    if (limited) CHECK(CloseHandle(limited), "close the memory child's independent LIMITED handle");
+    if (query) CHECK(CloseHandle(query), "close the memory child's independent QUERY handle");
+    CHECK(CloseHandle(pi.hThread), "close the original memory-child primary-thread handle");
+    CHECK(CloseHandle(pi.hProcess), "close the original full memory-child process handle");
+    CHECK(GetProcessHandleCount(GetCurrentProcess(), &final_count) && final_count == original_count,
+          "live memory-child cleanup restores the exact original parent handle count");
+}
+static void test_held_memory_queries(void)
+{
+    static const DWORD rights[7] = {PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION,
+        PROCESS_QUERY_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
+        PROCESS_SET_INFORMATION, PROCESS_VM_READ | PROCESS_SET_INFORMATION,
+        PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ};
+    HANDLE handles[7] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL}, thread = NULL, closed = NULL;
+    BYTE *pages = NULL;
+    DWORD before = 0, count = 0, old = 0;
+    unsigned i, tag;
+    BOOL ok, locked = FALSE;
+    HANDLE bad[5];
+    LONG statuses[5] = {MQ_STATUS_TYPE_MISMATCH, MQ_STATUS_TYPE_MISMATCH,
+                       MQ_STATUS_INVALID_HANDLE, MQ_STATUS_INVALID_HANDLE, MQ_STATUS_INVALID_HANDLE};
+    CHECK(sizeof(PROCESS_MEMORY_COUNTERS) == 72 && sizeof(PROCESS_MEMORY_COUNTERS_EX) == 80 &&
+          sizeof(APP_MEMORY_INFORMATION) == 32 && sizeof(PSAPI_WORKING_SET_EX_INFORMATION) == 16 &&
+          sizeof(((mq_raw_guard *)0)->value) == 40,
+          "the real Win64 counter, app-memory and entry schemas match the unchanged private widths");
+    CHECK(GetProcessHandleCount(GetCurrentProcess(), &before), "capture the handle count before held-memory tests");
+    for (i = 0; i < 7; ++i) {
+        handles[i] = OpenProcess(rights[i], FALSE, GetCurrentProcessId());
+        CHECK(handles[i] != NULL, "open each independently selected memory-query right combination");
+        if (!handles[i]) goto cleanup;
+    }
+    thread = OpenThread(THREAD_QUERY_INFORMATION, FALSE, GetCurrentThreadId());
+    CHECK(thread != NULL, "open a real thread handle for the memory-query wrong-type control");
+    if (!thread) goto cleanup;
+    pages = VirtualAlloc(NULL, 4 * 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    CHECK(pages != NULL, "allocate four actual private pages for memory-query state checks");
+    if (!pages) goto cleanup;
+    mq_ws_success(handles[0], pages, 0);
+    for (i = 0; i < 7; ++i) {
+        if (i == 0 || i == 1 || i == 2 || i == 6) mq_memory_success(handles[i], 4 * 4096);
+        else mq_memory_refusal(handles[i], MQ_STATUS_ACCESS_DENIED, ERROR_ACCESS_DENIED);
+        if (i == 0 || i == 2) mq_ws_success(handles[i], pages, 0);
+        else mq_ws_refusal(handles[i], pages, MQ_STATUS_ACCESS_DENIED, ERROR_ACCESS_DENIED);
+    }
+    ((volatile BYTE *)pages)[0] = 0x39;
+    CHECK(((volatile BYTE *)pages)[0] == 0x39, "actually touch the first private page before its resident query");
+    mq_ws_success(handles[0], pages, mq_page_flags(PAGE_READWRITE, FALSE));
+    ok = VirtualProtect(pages, 4096, PAGE_READONLY, &old);
+    CHECK(ok && old == PAGE_READWRITE, "protect the touched current-process page read-only");
+    mq_ws_success(handles[0], pages, mq_page_flags(PAGE_READONLY, FALSE));
+    locked = VirtualLock(pages + 4096, 4096);
+    CHECK(locked, "VirtualLock actually commits residency and locking of the second private page");
+    mq_ws_success(handles[0], pages + 4096, mq_page_flags(PAGE_READWRITE, TRUE));
+    ok = VirtualUnlock(pages + 4096, 4096);
+    CHECK(ok, "release the actual second-page lock before checking its unlocked state");
+    if (ok) locked = FALSE;
+    mq_ws_success(handles[0], pages + 4096, mq_page_flags(PAGE_READWRITE, FALSE));
+    ((volatile BYTE *)pages)[2 * 4096] = 0x73;
+    CHECK(((volatile BYTE *)pages)[2 * 4096] == 0x73, "actually touch a third private page before decommit");
+    mq_ws_success(handles[0], pages + 2 * 4096, mq_page_flags(PAGE_READWRITE, FALSE));
+    CHECK(VirtualFree(pages + 2 * 4096, 4096, MEM_DECOMMIT), "decommit the real resident third private page");
+    mq_ws_success(handles[0], pages + 2 * 4096, 0);
+    mq_batch(handles[0], pages);
+    mq_buffer_checks(handles[0], pages);
+    for (tag = 0; tag < 4; ++tag) {
+        HANDLE tagged = (HANDLE)(((ULONG_PTR)handles[0] & ~(ULONG_PTR)3) | tag);
+        mq_memory_success(tagged, 3 * 4096);
+        mq_ws_success(tagged, pages, mq_page_flags(PAGE_READONLY, FALSE));
+    }
+    bad[0] = thread; bad[1] = GetCurrentThread(); bad[2] = NULL;
+    bad[3] = (HANDLE)((ULONG_PTR)handles[0] | ((ULONG_PTR)1 << 32));
+    bad[4] = (HANDLE)(ULONG_PTR)0x7fff1;
+    for (i = 0; i < 5; ++i) {
+        mq_memory_refusal(bad[i], statuses[i], ERROR_INVALID_HANDLE);
+        mq_ws_refusal(bad[i], pages, statuses[i], ERROR_INVALID_HANDLE);
+    }
+    closed = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, GetCurrentProcessId());
+    CHECK(closed != NULL, "open one memory-query handle solely for immediate closed-handle refusal");
+    if (closed) {
+        ok = CloseHandle(closed);
+        CHECK(ok, "close the temporary memory-query handle before any handle slot can be reused");
+        if (ok) {
+            HANDLE stale = closed;
+            closed = NULL;
+            mq_memory_refusal(stale, MQ_STATUS_INVALID_HANDLE, ERROR_INVALID_HANDLE);
+            mq_ws_refusal(stale, pages, MQ_STATUS_INVALID_HANDLE, ERROR_INVALID_HANDLE);
+        }
+    }
+    mq_remote_child();
+cleanup:
+    if (locked) CHECK(VirtualUnlock(pages + 4096, 4096), "release a remaining page lock after a failed fixture");
+    if (pages) CHECK(VirtualFree(pages, 0, MEM_RELEASE), "release the current-process memory fixture reservation");
+    if (thread) CHECK(CloseHandle(thread), "close the wrong-type memory-query thread handle");
+    if (closed) CHECK(CloseHandle(closed), "close any failed temporary memory-query handle");
+    for (i = 0; i < 7; ++i)
+        if (handles[i]) CHECK(CloseHandle(handles[i]), "close each independently held memory-query handle");
+    CHECK(GetProcessHandleCount(GetCurrentProcess(), &count) && count == before,
+          "held-memory tests release every fixture page and restore the exact parent handle count");
+}
 int main(void)
 {
     test_restart();
@@ -1414,5 +1848,6 @@ int main(void)
     test_heaps();
     test_query_rights_and_retained_times();
     test_strict_process_queries();
+    test_held_memory_queries();
     return k32t_finish("t_k32_proc");
 }
