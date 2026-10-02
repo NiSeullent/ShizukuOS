@@ -193,6 +193,45 @@ static inline thread_t *k64_rq_complete_locked(k64_runqueues_t *r, uint32_t cpu)
     c->outgoing = 0;
     return t;
 }
+/* Conditional service wait shares the descriptor ticket. A wake may race the
+ * unlocked stack-save boundary, but cannot enqueue an on_cpu context. */
+static inline int k64_rq_work_park_locked(k64_runqueues_t *r,uint32_t cpu,thread_t *t)
+{
+    if(!cpu || !k64_rq_online(r,cpu) || !k64_rq_valid(r,t) ||
+       t->ap_kernel_cohort!=K64_AP_WORKER_CLASS || !k64_rq_cohort_safe(t) ||
+       r->cpu[cpu].current!=t || t==r->cpu[cpu].idle || t->state!=TS_RUNNING ||
+       t->on_cpu!=cpu || t->ready_queued || r->cpu[cpu].outgoing) return -1;
+    t->state=TS_BLOCKED;t->aging_service_left=0;return 0;
+}
+static inline int k64_rq_work_wake_locked(k64_runqueues_t *r,thread_t *t,uint64_t now,uint64_t order)
+{
+    if(!k64_rq_valid(r,t) || t->ap_kernel_cohort!=K64_AP_WORKER_CLASS ||
+       !k64_rq_cohort_safe(t) || !t->cpu_mask || (t->cpu_mask&1) || (t->cpu_mask&~r->online_mask) ||
+       t->sched_priority>=SCHED_PRIORITY_LEVELS || !t->quantum_ticks || t->quantum_ticks>SCHED_MAX_QUANTUM_TICKS) return -1;
+    if(t->state!=TS_BLOCKED) return t->state==TS_READY || t->state==TS_RUNNING ? 0:-1;
+    if(t->ready_queued || t->ready_prev || t->ready_next ||
+       (t->on_cpu!=K64_CPU_NONE && (!k64_rq_online(r,t->on_cpu) ||
+       (r->cpu[t->on_cpu].current!=t && r->cpu[t->on_cpu].outgoing!=t))))return -1;
+    t->state=TS_READY;t->ready_since=now;t->ready_order=order;t->aging_service_left=0;
+    if(t->on_cpu==K64_CPU_NONE) return k64_rq_enqueue_locked(r,t,k64_rq_choose_locked(r,t->cpu_mask),now,order);
+    /* Current/outgoing lifetime is still owned; only complete may publish. */
+    KASSERT(k64_rq_online(r,t->on_cpu) && (r->cpu[t->on_cpu].current==t || r->cpu[t->on_cpu].outgoing==t));
+    return 0;
+}
+/* Only a completely saved conditional waiter may change its private owner.
+ * The service additionally checks descriptor references and worker coverage. */
+static inline int k64_rq_work_move_locked(k64_runqueues_t *r,thread_t *t,uint32_t destination)
+{
+    if(!k64_rq_valid(r,t) || t->ap_kernel_cohort!=K64_AP_WORKER_CLASS ||
+       !k64_rq_cohort_safe(t) || !destination || !k64_rq_online(r,destination) ||
+       t->state!=TS_BLOCKED || t->on_cpu!=K64_CPU_NONE || t->ready_queued ||
+       t->ready_prev || t->ready_next || t->ready_cpu!=K64_CPU_NONE ||
+       !t->cpu_mask || (t->cpu_mask&(t->cpu_mask-1)) || (t->cpu_mask&1) ||
+       (t->cpu_mask&~r->online_mask) || t->cpu_mask==(1ull<<destination))return -1;
+    for(unsigned c=0;c<K64_CPU_MAX;c++)
+        if(r->cpu[c].current==t || r->cpu[c].outgoing==t || r->cpu[c].idle==t)return -1;
+    t->cpu_mask=1ull<<destination;return 0;
+}
 static inline int k64_rq_policy_locked(k64_runqueues_t *r, thread_t *t, uint32_t priority,
                                       uint32_t quantum, uint64_t mask, uint64_t now, uint64_t order)
 {

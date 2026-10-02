@@ -10,6 +10,7 @@
 #include "cpu_tlb.h"
 #include "cpu_tlb_stress.h"
 #include "pci.h"
+#include "../boot_profile/win98_foundation.h"
 extern uint64_t arch_timer_irqs(void);
 static shz_cpu_firmware_t firmware;
 static const shz_bootinfo_t *owner_boot;
@@ -17,6 +18,10 @@ static uint64_t initial_root;
 static unsigned admitted,resources_owned;
 static int backend_result;
 static unsigned dispatch_count,dispatch_mode;
+static unsigned workers_mode;
+#ifdef SHZ_STANDALONE
+static unsigned workers_attempted;
+#endif
 static uint64_t dispatch_rsdp;
 static volatile uint32_t release_work,cancel_work,ipi_turn,fatal;
 static struct {
@@ -89,6 +94,12 @@ static int resources_check(unsigned count,uint64_t bootstrap)
         const uint64_t stack=top-phys_base_va-KSTACK_BYTES,arch=i?shz_cpu_arch_resource(i):0;
         if(shz_smp_cpus[i].irq_stack_top!=top+KSTACK_BYTES || shz_smp_cpus[i].df_stack_top!=top+KSTACK_BYTES+8192 ||
            !owned_span(stack,stack_bytes) || (i && (!owned_span(arch,SHZ_CPU_ARCH_BYTES) || overlap(stack,stack_bytes,arch,SHZ_CPU_ARCH_BYTES)))) return -1;
+        if(workers_mode) {
+            uint64_t bytes=0;const uint64_t pool=sched_ap_work_resource(&bytes);
+            if(!pool || !owned_span(pool,bytes) || overlap(pool,bytes,stack,stack_bytes) ||
+               (i && overlap(pool,bytes,arch,SHZ_CPU_ARCH_BYTES)) ||
+               sched_ap_work_overlaps(stack,stack_bytes) || (i && sched_ap_work_overlaps(arch,SHZ_CPU_ARCH_BYTES)))return -1;
+        }
         for(unsigned j=0;j<i;j++) {
             const uint64_t prior=shz_smp_cpus[j].boot_stack_top-phys_base_va-KSTACK_BYTES,prior_arch=j?shz_cpu_arch_resource(j):0;
             if(overlap(stack,stack_bytes,prior,stack_bytes) || (j && overlap(stack,stack_bytes,prior_arch,SHZ_CPU_ARCH_BYTES)) ||
@@ -204,9 +215,11 @@ static void report_abort(int error)
 }
 void shz_cpu_bringup_prepare(const shz_bootinfo_t *bi,uint64_t initial_cr3)
 {
-    if(k64_cmdline_has("smp=off") || (!k64_cmdline_has("shz.smp=dispatch") && !k64_cmdline_has("shz.smp=bringup") && !k64_cmdline_has("shz.smp=firmware-test") &&
+    if(k64_cmdline_has("smp=off") || (!k64_cmdline_has("shz.smp=workers") && !k64_cmdline_has("shz.smp=dispatch") && !k64_cmdline_has("shz.smp=bringup") && !k64_cmdline_has("shz.smp=firmware-test") &&
        !k64_cmdline_has("shz.smp=no-ipi") && !k64_cmdline_has("shz.smp=return-ap") && !k64_cmdline_has("shz.smp=withhold-verify"))) return;
-    dispatch_mode=k64_cmdline_has("shz.smp=dispatch");
+    workers_mode=k64_cmdline_has("shz.smp=workers");
+    if(workers_mode && (shz_win98_foundation_policy(bi)!=0 || k64_cmdline_has("shz.smp=dispatch")))return;
+    dispatch_mode=workers_mode || k64_cmdline_has("shz.smp=dispatch");
     owner_boot=bi;initial_root=initial_cr3;
     const int rc=shz_cpu_firmware_prepare(bi,&firmware);
     if(rc!=1) { kprintf("SMP-BRINGUP: firmware unavailable rc=%d, scheduler CPUs=1\n",rc);return; }
@@ -235,7 +248,8 @@ void shz_cpu_bringup_prepare(const shz_bootinfo_t *bi,uint64_t initial_cr3)
         if(found.count<2 || k64_cmdline_has("shz.memory=test") || k64_cmdline_has("shz.tlb=test") ||
            shz_cpu_arch_sched_timer_prepare(endpoint)) return;
         dispatch_count=found.count;dispatch_rsdp=rsdp;
-        kprintf("SMP-DISPATCH prepared: cpus=%u INIT_deferred=1 scheduler_cpus=1\n",found.count);
+        if(workers_mode)kprintf("SMP-WORK prepared: cpus=%u INIT_deferred=1 after_UP_QA=required scheduler_cpus=1\n",found.count);
+        else kprintf("SMP-DISPATCH prepared: cpus=%u INIT_deferred=1 scheduler_cpus=1\n",found.count);
         return;                            /* sched_init has not run yet */
     }
     if(k64_cmdline_has("shz.tlb=test") && shz_cpu_tlb_stress_prepare(found.count,tlb_owned,0)) return;
@@ -249,6 +263,7 @@ void shz_cpu_bringup_prepare(const shz_bootinfo_t *bi,uint64_t initial_cr3)
 }
 void shz_cpu_bringup_verify(void)
 {
+    if(workers_mode)return; /* QA must run with no AP INIT or scheduler admission. */
     if(dispatch_mode && !k64_cmdline_has("smp=off")) {
         int rc=-1;
         const uint64_t flags=irq_save();
@@ -302,4 +317,27 @@ report:
         kprintf("SMP-AP IPI: cpu=%u wake=%u verify=%u irqstack=%llx delivered=%u\n",i,jobs[i].wake,jobs[i].verify,jobs[i].irq_stack,jobs[i].verify_delivered);
     }
     kprintf("SMP-AP summary: discovered=%u arch_online=%u completed=%u bad=%u scheduler_cpus=1\n",count,shz_smp_online_count(),completed,bad);
+}
+int shz_cpu_workers_requested(void)
+{ return workers_mode && !k64_cmdline_has("smp=off"); }
+int shz_cpu_workers_start(void)
+{
+#ifndef SHZ_STANDALONE
+    return -2;
+#else
+    if(!shz_cpu_workers_requested() || workers_attempted || shz_smp_this_cpu()!=0 ||
+       !dispatch_count || !kernel_contract() || sched_ap_work_quiescent())return -1;
+    const uint64_t flags=irq_save();workers_attempted=1;
+    int rc=-1;
+    if(!sched_ap_work_prepare(dispatch_count) && !shz_smp_boot_set_resource_check(resources_check)) {
+        backend_result=shz_smp_boot_start_with_reader(dispatch_rsdp,ap_entry,shz_cpu_firmware_read,&firmware,initial_root);
+        thread_t *bsp=thread_current();
+        KASSERT(bsp && arch_sched_entry_bind(0,bsp->stack_base+KSTACK_BYTES)==0);
+        if(backend_result==(int)dispatch_count)rc=0;
+    }
+    irq_restore(flags);
+    if(!rc)rc=sched_ap_work_start();
+    kprintf("SMP-WORK admission: backend=%d owned=%u result=%d retained_on_failure=1\n",backend_result,resources_owned,rc);
+    return rc;
+#endif
 }

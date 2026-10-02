@@ -8,6 +8,7 @@ _Static_assert(TICK_US==1000u,"native cohort PIT2 calibration is one millisecond
 static shz_cpu_arch_tables_t *tables[SHZ_SMP_MAX_CPUS];
 static unsigned allocated_count;
 static uint32_t entered_mask, scheduler_gate_mask;
+static uint32_t work_trace_mask;
 #ifdef SHZ_STANDALONE
 static volatile uint32_t *scheduler_lapic;
 static uint32_t scheduler_timer_count;
@@ -158,6 +159,17 @@ int shz_cpu_arch_sched_install(unsigned cpu)
     gate(&tables[cpu]->idt[SHZ_SMP_VEC_RESCHEDULE],isr_stub_table[SHZ_SMP_VEC_RESCHEDULE],0);
     gate(&tables[cpu]->idt[SHZ_SMP_VEC_TIMER],isr_stub_table[SHZ_SMP_VEC_TIMER],0);
     __atomic_fetch_or(&scheduler_gate_mask,1u<<cpu,__ATOMIC_RELEASE);
+    if(__atomic_load_n(&work_trace_mask,__ATOMIC_ACQUIRE)&(1u<<cpu)) {
+        shz_ap_work_trace_t *w=&tables[cpu]->work_trace;shz_cpu_dtr_t gdtr,idtr;uint16_t tr;
+        __asm__ volatile("sgdt %0":"=m"(gdtr));__asm__ volatile("sidt %0":"=m"(idtr));
+        __asm__ volatile("str %0":"=r"(tr));
+        uint32_t a=1,b,c,d;__asm__ volatile("cpuid":"+a"(a),"=b"(b),"=c"(c),"=d"(d));
+        uint64_t rsp;__asm__ volatile("mov %%rsp,%0":"=r"(rsp));
+        w->cpu=cpu;w->apic=b>>24;w->cr3=read_cr3();w->gdt=gdtr.base;w->idt=idtr.base;
+        w->gdt_limit=gdtr.limit;w->idt_limit=idtr.limit;w->tr=tr;w->tss=(uint64_t)&tables[cpu]->tss;
+        w->rsp0=tables[cpu]->tss.rsp[0];w->gs=rdmsr(MSR_GS_BASE);
+        w->kernel_gs=rdmsr(MSR_KERNEL_GS_BASE);w->efer=rdmsr(MSR_EFER);w->stack=rsp;
+    }
     irq_restore(flags);return 0;
 }
 
@@ -228,10 +240,90 @@ void shz_cpu_arch_sched_irq(struct regs *r)
        r->rsp<t->stack_base || r->rsp>=top ||
        (r->vector!=SHZ_SMP_VEC_TIMER && r->vector!=SHZ_SMP_VEC_RESCHEDULE)) fault();
     /* Local APIC in-service state is released before any task-stack transfer. */
+    shz_ap_work_trace_t *w=(__atomic_load_n(&work_trace_mask,__ATOMIC_ACQUIRE)&(1u<<cpu))?&tables[cpu]->work_trace:0;
+    if(w) {
+        ++w->sequence;
+        if(w->count<SHZ_AP_WORK_TRACE_SLOTS) {
+            shz_ap_work_trace_record_t *v=&w->record[w->count++];
+            *v=(shz_ap_work_trace_record_t){w->sequence,1,cpu,t->id,(uint32_t)r->vector,
+                at,r->rip,r->rflags,r->rsp,t->stack_base,top,w->eoi,w->complete,tables[cpu]->tss.rsp[0]};
+        } else ++w->dropped;
+    }
     shz_smp_apic_eoi();
+    if(w) {
+        ++w->eoi;++w->sequence;
+        if(w->count<SHZ_AP_WORK_TRACE_SLOTS) {
+            shz_ap_work_trace_record_t *v=&w->record[w->count++];
+            *v=(shz_ap_work_trace_record_t){w->sequence,2,cpu,t->id,(uint32_t)r->vector,
+                at,r->rip,r->rflags,r->rsp,t->stack_base,top,w->eoi,w->complete,tables[cpu]->tss.rsp[0]};
+        } else ++w->dropped;
+    }
     if(r->vector==SHZ_SMP_VEC_TIMER) {
         ++shz_smp_cpus[cpu].timer_irqs;sched_tick_from(0);
     } else {
         ++shz_smp_cpus[cpu].reschedule_ipis;sched_ap_reschedule();
     }
 }
+void shz_cpu_arch_work_enable(unsigned cpu)
+{
+    KASSERT(shz_smp_this_cpu()==0 && cpu && cpu<allocated_count && tables[cpu] &&
+        !(__atomic_load_n(&entered_mask,__ATOMIC_ACQUIRE)&(1u<<cpu)));
+    __atomic_fetch_or(&work_trace_mask,1u<<cpu,__ATOMIC_RELEASE);
+}
+uint64_t shz_cpu_arch_work_online_mask(void)
+{
+    if(shz_smp_this_cpu()!=0)return 0;
+    const uint32_t ready=__atomic_load_n(&entered_mask,__ATOMIC_ACQUIRE)&
+        __atomic_load_n(&scheduler_gate_mask,__ATOMIC_ACQUIRE)&
+        __atomic_load_n(&work_trace_mask,__ATOMIC_ACQUIRE);
+    uint64_t mask=0;
+    for(unsigned c=1;c<allocated_count;c++)
+        if((ready&(1u<<c)) && tables[c] &&
+           __atomic_load_n(&shz_smp_cpus[c].state,__ATOMIC_ACQUIRE)==SHZ_SMP_CPU_ONLINE)mask|=1ull<<c;
+    return mask;
+}
+int shz_cpu_arch_work_available(unsigned count)
+{
+    if(shz_smp_this_cpu()!=0 || count<2 || count!=allocated_count ||
+       __atomic_load_n(&entered_mask,__ATOMIC_ACQUIRE) || __atomic_load_n(&scheduler_gate_mask,__ATOMIC_ACQUIRE))return 0;
+    for(unsigned c=1;c<count;c++)if(!tables[c])return 0;
+    return 1;
+}
+void shz_cpu_arch_work_complete(unsigned cpu)
+{
+    KASSERT(cpu && cpu<allocated_count && shz_smp_this_cpu()==cpu);
+    if(!(__atomic_load_n(&work_trace_mask,__ATOMIC_ACQUIRE)&(1u<<cpu)))return;
+    shz_ap_work_trace_t *w=&tables[cpu]->work_trace;thread_t *t=thread_current();uint64_t rsp;
+    __asm__ volatile("mov %%rsp,%0":"=r"(rsp));
+    KASSERT(t && t->ap_kernel_cohort==K64_AP_WORKER_CLASS && rsp>=t->stack_base && rsp<t->stack_base+KSTACK_BYTES);
+    ++w->complete;++w->sequence;
+    if(w->count<SHZ_AP_WORK_TRACE_SLOTS) {
+        shz_ap_work_trace_record_t *v=&w->record[w->count++];
+        *v=(shz_ap_work_trace_record_t){w->sequence,3,cpu,t->id,0,0,0,0,rsp,
+            t->stack_base,t->stack_base+KSTACK_BYTES,w->eoi,w->complete,tables[cpu]->tss.rsp[0]};
+    } else ++w->dropped;
+}
+void shz_cpu_arch_work_finish(unsigned cpu)
+{
+    KASSERT(cpu && cpu<allocated_count && shz_smp_this_cpu()==cpu &&
+        !(__atomic_load_n(&scheduler_gate_mask,__ATOMIC_ACQUIRE)&(1u<<cpu)));
+    __atomic_store_n(&tables[cpu]->work_trace.done,1,__ATOMIC_RELEASE);
+}
+int shz_cpu_arch_work_report(unsigned cpu)
+{
+    if(shz_smp_this_cpu()!=0 || !cpu || cpu>=allocated_count || !tables[cpu] ||
+       !__atomic_load_n(&tables[cpu]->work_trace.done,__ATOMIC_ACQUIRE)) return -1;
+    const shz_ap_work_trace_t *w=&tables[cpu]->work_trace;
+    kprintf("SMP-WORK ARCH: cpu=%u apic=%u cr3=%llx gdt=%llx/%u idt=%llx/%u tr=%u tss=%llx rsp0=%llx gs=%llx kernelgs=%llx efer=%llx entry_stack=%llx\n",
+        w->cpu,w->apic,w->cr3,w->gdt,w->gdt_limit,w->idt,w->idt_limit,w->tr,w->tss,w->rsp0,w->gs,w->kernel_gs,w->efer,w->stack);
+    for(unsigned i=0;i<w->count;i++) {
+        const shz_ap_work_trace_record_t *r=&w->record[i];
+        kprintf("SMP-WORK FRAME: cpu=%u seq=%llu kind=%u tid=%u vector=%u frame=%llx rip=%llx flags=%llx rsp=%llx low=%llx high=%llx eoi=%llu complete=%llu rsp0=%llx\n",
+            r->cpu,r->sequence,r->kind,r->thread,r->vector,r->frame,r->rip,r->flags,r->rsp,r->base,r->top,r->eoi,r->complete,r->rsp0);
+    }
+    kprintf("SMP-WORK TRACE: cpu=%u records=%u dropped=%u eoi=%llu complete=%llu done=%u\n",cpu,w->count,w->dropped,w->eoi,w->complete,w->done);
+    return 0;
+}
+int shz_cpu_arch_work_ready(unsigned cpu)
+{ return shz_smp_this_cpu()==0 && cpu && cpu<allocated_count && tables[cpu] &&
+    __atomic_load_n(&tables[cpu]->work_trace.done,__ATOMIC_ACQUIRE); }
