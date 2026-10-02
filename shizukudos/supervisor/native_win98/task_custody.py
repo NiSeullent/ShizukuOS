@@ -37,6 +37,7 @@ SOURCES=(*HELPERS,'shizukudos/supervisor/native_win98/run_vm.py',
          'shizukudos/supervisor/native_win98/custody_rpc.py',
          'shizukudos/supervisor/native_win98/task_custody.py',
          'shizukudos/supervisor/native_win98/disk_lineage.py')
+NATIVE_EPOCH_SOURCE='shizukudos/supervisor/native_win98/native_epoch_host.py'
 
 def identity(s):return s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns
 
@@ -181,10 +182,19 @@ class Owner:
     def __init__(self,union,group,argv,executable_pin,timeout=300):
         self.union,self.group,self.expected,self.executable_pin=union,group,tuple(argv),executable_pin
         self.timeout=timeout;self.process=None;self.pidfd=None;self.qmp=None;self.attempted=False;self.start=None;self.reaped=False;self.target_released=False
+        self._native_reaper=None;self._legacy_wait_started=False
         self.record={'schema':'shizukuos.native-custody.v1',**FLAGS,'custody_admitted':False,'owned_child_reaped':False,'leases_released':False,'launch_attempted':False}
     def spawn(self,request,rights):
         need(not self.attempted and self.process is None,'exactly one launch attempt')
         self.attempted=True;self.record['launch_attempted']=True
+        declared=self.record.get('runtime_source_pins',{});configured=getattr(self,'_configured_native_reaper',None)
+        need(type(declared) is dict and ((NATIVE_EPOCH_SOURCE in declared)==(configured is not None)),'declared native source requires actual native reaper configuration')
+        if configured is not None:
+            need(type(configured) is tuple and len(configured)==2 and configured[1]==declared[NATIVE_EPOCH_SOURCE],'native reaper configuration pin differs')
+            module,row=configured;entry=self.union.rows.get(str(pin(row,1<<20)))
+            need(type(module) is type(sys) and module.__file__==row['path'] and getattr(module,'__executed_sha256__',None)==row['sha256'] and
+                 entry is not None and entry['pin']==row and entry.get('full_SHA_admitted') is True,'actual admitted native reaper configuration required')
+            self.union.check()
         need(set(request)=={'argv','pipes'} and type(request['argv']) is list,'exact launch request')
         normalized=list(request['argv'])
         for option,placeholder in (('-serial','file:/proc/self/fd/0'),('-debugcon','file:/proc/self/fd/1')):
@@ -224,6 +234,11 @@ class Owner:
                 if self.exited() or time.monotonic()>=stop:raise
                 time.sleep(.005)
         self.record['VM_executed']=True;self.record['custody_admitted']=True
+        if configured is not None:
+            module,row=configured
+            executable=module.PinnedFD(source['fd'],self.executable_pin)
+            binding=module.ProcessBinding(self.process,self.pidfd,executable,tuple(args),'/'+str(self.group.path.relative_to('/sys/fs/cgroup')))
+            self.admit_native_reaper(binding,module,row)
         return {'pid':self.process.pid,'argv':args}
     def assert_owned(self):
         need(self.process is not None and self.pidfd is not None and not self.exited(),'owned live pidfd required')
@@ -242,9 +257,106 @@ class Owner:
     def exited(self):
         if self.pidfd is None:return False
         poll=select.poll();poll.register(self.pidfd,select.POLLIN|select.POLLHUP|select.POLLERR);return bool(poll.poll(0))
+    def admit_native_reaper(self,binding,native_module,source_pin):
+        """Delegate this guardian's one waiter to an admitted concrete binding.
+
+        In-process only: no RPC request can provide a module, class or callback.
+        This entry does not start an optional exchange or confer device access.
+        """
+        need(self._native_reaper is None and not self._legacy_wait_started and not self.reaped,'native reaper requires fresh exclusive waiter')
+        name='shizukudos/supervisor/native_win98/native_epoch_host.py'
+        declared=self.record.get('runtime_source_pins',{})
+        need(type(declared) is dict and declared.get(name)==source_pin,'native reaper source must be declared by guardian manifest')
+        path=pin(source_pin,1<<20);entry=self.union.rows.get(str(path))
+        need(entry is not None and entry.get('full_SHA_admitted') is True and entry['pin']==source_pin,'already full-SHA-leased native source required')
+        need(type(native_module) is type(sys) and native_module.__file__==str(path) and getattr(native_module,'__executed_sha256__',None)==source_pin['sha256'],'actual admitted native module origin required')
+        cls=getattr(native_module,'ProcessBinding',None)
+        need(type(cls) is type and cls.__name__=='ProcessBinding' and cls.__module__==native_module.__name__ and type(binding) is cls,'exact admitted concrete ProcessBinding required')
+        raw=self.union.raw(source_pin,1<<20);compiled=compile(raw,str(path),'exec',dont_inherit=True)
+        codes=[x for x in compiled.co_consts if type(x) is type(compiled) and x.co_name=='ProcessBinding']
+        need(len(codes)==1,'unique admitted ProcessBinding class required')
+        expected={x.co_name:x for x in codes[0].co_consts if type(x) is type(compiled)}
+        methods={}
+        for method in ('__init__','_pidfd','check','reap_owned','assert_reaped'):
+            actual=cls.__dict__.get(method);frozen=expected.get(method)
+            need(type(actual) is type(lambda:None) and frozen is not None and actual.__globals__ is native_module.__dict__ and actual.__code__==frozen and
+                 all(getattr(actual.__code__,field)==getattr(frozen,field) for field in ('co_filename','co_firstlineno','co_qualname','co_linetable','co_exceptiontable')) and method not in binding.__dict__,'native reaper methods must match whole held source')
+            methods[method]=(actual,actual.__code__)
+        need(type(self.process) is subprocess.Popen and binding.process is self.process and self.pidfd is not None and binding.pidfd==binding.original_pidfd==self.pidfd and binding.original_pid==self.process.pid,'same guardian Popen and original pidfd required')
+        need(binding.reap_record is None and not hasattr(binding,'_guardian_reaper_owner'),'native binding already consumed or claimed')
+        self.assert_owned();binding.check()
+        source=self.union.rows[str(pin(self.executable_pin))]
+        need(type(binding.executable) is native_module.PinnedFD and binding.executable.fd==source['fd'] and binding.executable.pin==self.executable_pin and
+             binding.starttime==self.starttime and binding.argv==tuple(self.actual_args) and binding.command==b''.join(os.fsencode(a)+b'\0' for a in self.actual_args) and
+             binding.cgroup=='/'+str(self.group.path.relative_to('/sys/fs/cgroup')),'same original start/argv/cgroup/executable descriptor required')
+        self.assert_owned();self.union.check();self.group.check()
+        context={'binding':binding,'class':cls,'module':native_module,'methods':methods,'source_pin':dict(source_pin),'guardian_pid':os.getpid(),
+                 'process':self.process,'pid':self.process.pid,'pidfd':self.pidfd,'pidfd_identity':identity(os.fstat(self.pidfd)),
+                 'binding_pidfd_identity':binding.pidfd_identity,'starttime':self.starttime,'argv':tuple(self.actual_args),'command':binding.command,'cgroup':binding.cgroup,
+                 'executable':binding.executable,'executable_fd':binding.executable.fd,'executable_pin':dict(binding.executable.pin),'executable_identity':binding.executable.binding,
+                 'record_seen':False,'raw_record':None,'status_unavailable':False}
+        binding._guardian_reaper_owner=self;self._native_reaper=context
+        self.record.update(native_reaper_admitted=True,native_reaper_source_pin=dict(source_pin),native_reap_postcheck_verified=False)
+        return {'pid':self.process.pid,'starttime':self.starttime,'source_pin':dict(source_pin)}
+    def _native_record(self,raw):
+        need(type(raw) is dict and set(raw)=={'pid','code','status'} and all(type(raw[k]) is int for k in raw),'strict numeric native CLD record required')
+        need(raw['pid']==self._native_reaper['pid'] and raw['code'] in (os.CLD_EXITED,os.CLD_KILLED,os.CLD_DUMPED),'exact native parent waitid PID/code required')
+        need(0<=raw['status']<=255 if raw['code']==os.CLD_EXITED else 0<raw['status']<signal.NSIG,'actual native waitid status bound required')
+        return dict(raw)
+    def _native_identity(self):
+        context=self._native_reaper;binding=context['binding'];module=context['module']
+        need(os.getpid()==context['guardian_pid'] and self.process is context['process'] and self.process.pid==context['pid'] and
+             self.pidfd==context['pidfd'] and identity(os.fstat(self.pidfd))==context['pidfd_identity'],'original guardian/Popen/pidfd identity changed')
+        need(type(binding) is context['class'] and module.ProcessBinding is context['class'] and getattr(module,'__executed_sha256__',None)==context['source_pin']['sha256'] and
+             binding._guardian_reaper_owner is self and binding.process is self.process and binding.pidfd==binding.original_pidfd==self.pidfd and binding.original_pid==context['pid'] and
+             binding.pidfd_identity==context['binding_pidfd_identity'],'admitted native reaper context changed')
+        for name,(function,code) in context['methods'].items():
+            actual=getattr(binding,name)
+            need(name not in binding.__dict__ and getattr(actual,'__self__',None) is binding and getattr(actual,'__func__',None) is function and function.__code__ is code and function.__globals__ is module.__dict__,'admitted native reaper method changed')
+        need(binding.starttime==self.starttime==context['starttime'] and binding.argv==tuple(self.actual_args)==context['argv'] and binding.command==context['command'] and binding.cgroup==context['cgroup'] and
+             binding.executable is context['executable'] and binding.executable.fd==context['executable_fd'] and binding.executable.pin==context['executable_pin'] and binding.executable.binding==context['executable_identity'],'original native birth/argv/cgroup/executable changed')
+        if context['record_seen']:
+            need(self._native_record(binding.reap_record)==context['raw_record']==self._native_record(self.record.get('native_reap_record')),'retained native waitid record changed')
+        else:need(binding.reap_record is None,'native wait performed outside delegated guardian observation')
+        binding._pidfd(reaped=context['record_seen'] or context['status_unavailable'])
+        return binding
+    def _retain_native_record(self,raw):
+        # Latch before validation: an unusable result still cannot cause a
+        # second destructive wait. Ordinary native records contain three ints.
+        context=self._native_reaper;context['record_seen']=True
+        if type(raw) is dict and set(raw)=={'pid','code','status'} and all(type(v) in (int,bool,type(None)) and (type(v) is not int or -(1<<63)<=v<(1<<63)) for v in raw.values()):
+            self.record['native_reap_record']=dict(raw)
+        else:self.record['native_reap_record']=None
+        self.record.update(native_reap_postcheck_verified=False,exit_status_verified=False)
+        context['raw_record']=self._native_record(raw)
+    def _observe_native(self):
+        context=self._native_reaper;binding=self._native_identity()
+        if context['status_unavailable']:raise ChildProcessError('original delegated parent wait status remains unavailable')
+        if not context['record_seen']:
+            if not self.exited():return None
+            try:raw=binding.reap_owned()
+            except BaseException as error:
+                if binding.reap_record is not None:
+                    try:self._retain_native_record(binding.reap_record)
+                    except BaseException as retained_error:
+                        self.record['native_reap_postcheck_error']=type(error).__name__
+                        raise error from retained_error
+                    self.record['native_reap_postcheck_error']=type(error).__name__
+                elif isinstance(error,ChildProcessError):
+                    context['status_unavailable']=True;self.physically_dead=self.exited()
+                    self.record.update(exit_status_verified=False,parent_wait_status_unavailable=True)
+                raise
+            self._retain_native_record(raw)
+        binding=self._native_identity();binding.assert_reaped()
+        raw=context['raw_record'];code=raw['status'] if raw['code']==os.CLD_EXITED else -raw['status']
+        self.process.returncode=code;self.reaped=True
+        self.record.update(native_reap_postcheck_verified=True,owned_child_reaped=True,exit_status_verified=True,observed_exit_code=code)
+        return code
     def observe(self):
         if self.process is None:return None
+        if self._native_reaper is not None:return self._observe_native()
         if self.reaped:return self.process.returncode
+        self._legacy_wait_started=True
         try:
             if self.pidfd is not None:
                 status=os.waitid(os.P_PIDFD,self.pidfd,os.WEXITED|os.WNOHANG)
@@ -276,10 +388,21 @@ class Owner:
             remaining=stop-time.monotonic()
             if remaining<=0:return None
             time.sleep(min(.01,remaining))
-    def confirm_reaped(self):return self.process is None or (self.reaped and self.process.returncode is not None and (self.exited() or not self.target_released))
-    def safe_to_release(self):return self.confirm_reaped() or (getattr(self,'physically_dead',False) and self.exited())
+    def confirm_reaped(self):
+        if self._native_reaper is not None:
+            if not self.reaped or self.record.get('native_reap_postcheck_verified') is not True:return False
+            binding=self._native_identity();binding.assert_reaped()
+            return self.process.returncode is not None and self.exited()
+        return self.process is None or (self.reaped and self.process.returncode is not None and (self.exited() or not self.target_released))
+    def safe_to_release(self):
+        if self._native_reaper is not None:
+            if self.confirm_reaped():return True
+            if not self._native_reaper['status_unavailable']:return False
+            self._native_identity();return bool(getattr(self,'physically_dead',False) and self.exited())
+        return self.confirm_reaped() or (getattr(self,'physically_dead',False) and self.exited())
     def signal(self,number):
         need(number in (signal.SIGTERM,signal.SIGKILL),'only bounded owned cleanup signals')
+        if self._native_reaper is not None:self._native_identity()
         if self.pidfd is None:
             need(self.process is None or not self.target_released,'released target missing pidfd; custody must remain held');return
         if not self.exited():signal.pidfd_send_signal(self.pidfd,number)
@@ -406,7 +529,7 @@ class Server:
             item={**source,'path':str(target)};entry=self.owner.union.add(item);os.fsync(entry['fd']);self.frozen.add(p['relative'])
             return {'bytes':item['bytes'],'sha256':item['sha256']},[entry['fd']]
         if op=='spawn':
-            need(set(self.sources)-{'shizukudos/supervisor/native_win98/task_custody.py','shizukudos/supervisor/native_win98/custody_rpc.py','shizukudos/supervisor/native_win98/disk_lineage.py'}<=self.frozen,'all executed snapshots must be admitted before launch')
+            need(set(self.sources)-{'shizukudos/supervisor/native_win98/task_custody.py','shizukudos/supervisor/native_win98/custody_rpc.py','shizukudos/supervisor/native_win98/disk_lineage.py',NATIVE_EPOCH_SOURCE}<=self.frozen,'all executed snapshots must be admitted before launch')
             return self.owner.spawn(p,rights),[]
         if op=='qmp':
             need(not p and len(rights)==1,'one exact QMP descriptor');fd=rights.pop();return self.owner.admit_qmp(fd),[]
@@ -429,7 +552,26 @@ def admitted_module(name,row,union):
     loader=object.__new__(rpc.Client)
     loader.frozen_fds={path:(entry['fd'],os.pread(entry['fd'],entry['pin']['bytes'],0))
                        for path,entry in union.rows.items() if path.endswith('.py') and entry['pin']['bytes']<=1<<20}
-    union.check();return loader.load(name,Path(row['path']))
+    path=pin(row,1<<20);entry=union.rows.get(str(path))
+    need(entry is not None and entry['pin']==row,'module source must already be admitted under its exact pin')
+    union.check();held=loader.frozen_fds.get(str(path))
+    need(held is not None,'held Python source required')
+    raw=held[1];sha=hashlib.sha256(raw).hexdigest()
+    need(len(raw)==row['bytes'] and sha==row['sha256'],'actual executed module source bytes differ')
+    module=loader.load(name,path);union.check()
+    module.__executed_sha256__=sha
+    return module
+
+def configure_native_reaper(owner,sources,union):
+    """Load the declared guardian-only source before its one gated launch."""
+    need(type(owner) is Owner and owner.union is union and not owner.attempted and owner.process is None and
+         getattr(owner,'_configured_native_reaper',None) is None,'fresh guardian native reaper configuration required')
+    need(type(sources) is dict and sources==owner.record.get('runtime_source_pins'),'native configuration must use declared runtime sources')
+    if NATIVE_EPOCH_SOURCE not in sources:return None
+    row=sources[NATIVE_EPOCH_SOURCE]
+    module=admitted_module('admitted_native_epoch',row,union)
+    owner._configured_native_reaper=(module,dict(row))
+    return None
 
 def admit_optional_native_inputs(manifest,built,union,builder):
     """Hold only explicitly declared optional originals, never infer PCI authority."""
@@ -458,6 +600,17 @@ def admit_optional_native_inputs(manifest,built,union,builder):
         provenance_descriptors[name]=union.add(row)['fd']
     union.check();builder.validate_optional_native(descriptors,provenance_descriptors);union.check()
 
+def admit_runtime_sources(repo,sources,union):
+    # Retain the complete original closure and its positional bootstrap roles.
+    # Declaring the native module admits bytes only, never a device grant.
+    need(isinstance(repo,Path) and repo.is_absolute() and repo.resolve()==repo,'canonical source root')
+    legacy=set(SOURCES)
+    need(type(sources) is dict and set(sources) in (legacy,legacy|{NATIVE_EPOCH_SOURCE}),'exact legacy or native runtime source closure')
+    for relative,row in sources.items():need(pin(row,1<<20)==repo/relative,'approved source path differs');union.add(row)
+    need(globals().get('__executed_sha256__')==sources[SOURCES[-2]]['sha256'] and getattr(rpc,'__executed_sha256__',None)==sources[SOURCES[-3]]['sha256'],'guardian and RPC must execute independently pinned held bytes')
+    return sources
+
+
 def admit_manifest(manifest,union):
     fields={'schema','plan','repo','sources','lineage','producers','limits','timeout'}
     need(type(manifest) is dict and fields<=set(manifest) and
@@ -465,9 +618,7 @@ def admit_manifest(manifest,union):
          manifest['schema']=='shizukuos.native-custody-manifest.v1','exact task manifest')
     need(type(manifest['timeout']) is int and 20<=manifest['timeout']<=900,'existing observation timeout')
     repo=Path(manifest['repo']);need(repo.is_absolute() and repo.resolve()==repo,'canonical source root')
-    sources=manifest['sources'];need(type(sources) is dict and set(sources)==set(SOURCES),'exact runtime/guardian/lineage source closure')
-    for relative,row in sources.items():need(pin(row,1<<20)==repo/relative,'approved source path differs');union.add(row)
-    need(globals().get('__executed_sha256__')==sources[SOURCES[-2]]['sha256'] and getattr(rpc,'__executed_sha256__',None)==sources[SOURCES[-3]]['sha256'],'guardian and RPC must execute independently pinned held bytes')
+    sources=admit_runtime_sources(repo,manifest['sources'],union)
     plan=union.json(manifest['plan']);out=Path(manifest['plan']['path']).parent
     need(plan.get('status')=='PASS_FRESH_PRIVATE_VM_INPUTS_PREPARED_NOT_RUN' and plan.get('private') is True and plan.get('VM_executed') is False and plan.get('source_bound_ESP') is True and plan.get('originals_before_after_match') is True,'fresh private unexecuted plan')
     need(set(plan['input_pins'])=={'esp','build_receipt','firmware_code','firmware_vars','qemu'},'five original preparation inputs')
@@ -606,6 +757,7 @@ def main():
     command=[sys.executable,'-B','-c',CONTROLLER_BOOTSTRAP,str(rpcfd),str(runfd),rpcrow['path'],runrow['path'],rpcrow['sha256'],runrow['sha256'],'--custody-fd',str(right.fileno()),'--repo',manifest['repo'],'--plan',manifest['plan']['path'],'--plan-sha256',manifest['plan']['sha256'],'--plan-bytes',str(manifest['plan']['bytes']),'--runtime-source-pins-json',runtime_pins,'--runtime-sources-sha256',helper_identity,'--timeout',str(manifest['timeout'])]
     controller_status=None
     try:
+        configure_native_reaper(owner,manifest['sources'],union)
         need(not stopped[0],'guardian cancellation requested')
         controller=subprocess.Popen(command,stdin=subprocess.DEVNULL,pass_fds=(rpcfd,runfd,right.fileno()),preexec_fn=group.place_before_exec)
         controller_status=ParentWait(controller);controller_status.pidfd=os.pidfd_open(controller.pid,0);right.close()

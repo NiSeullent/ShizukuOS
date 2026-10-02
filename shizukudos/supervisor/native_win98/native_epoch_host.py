@@ -373,8 +373,8 @@ class ProcessBinding:
         """Only when the outer custodian explicitly delegates its one reaper.
 
         Never accept Popen.poll()/ECHILD's synthesized status. A guardian that
-        retains its reaper must use a separate reviewed handoff before using
-        this API. Current guardian has no such wiring.
+        retains its reaper must first use its concrete source-pinned native
+        reaper admission before delegating to this API.
         """
         need(self.reap_record is None, 'actual child already reaped by this binding')
         # Verify the original kernel object before the destructive operation.
@@ -416,6 +416,7 @@ class SoleQMP:
         need(type(monitor).__name__ == 'OwnedQMP', 'actual admitted OwnedQMP class required')
         need(not hasattr(monitor, '_native_epoch_claim'), 'sole monitor already claimed')
         self.binding, self.monitor, self.attempt = binding, monitor, attempt
+        self.original_monitor = monitor
         self.socket = monitor.socket; self.deadline = monitor.deadline
         need(type(self.deadline) in (int, float) and math.isfinite(self.deadline) and int(self.deadline * 1e9) == attempt.original_deadline_ns, 'QMP original absolute deadline differs')
         self.claim = object(); monitor._native_epoch_claim = self.claim
@@ -424,6 +425,7 @@ class SoleQMP:
         self.socket_identity = identity(os.fstat(self.socket.fileno())); self.check()
 
     def check(self):
+        need(not getattr(self, 'retired', False) and self.monitor is self.original_monitor, 'epoch monitor adapter retired or original monitor replaced')
         self.attempt.check(); self.binding.check()
         self.monitor_source.check()
         for name in ('__init__', '_remaining', '_read', 'call', 'hmp', 'close'):
@@ -645,6 +647,7 @@ class HostGrant:
         self.transport_calls = 0; self.grant_bytes_written = 0
 
     def check(self):
+        need(not getattr(self, '_monitor_handed_off', False) and not getattr(self, '_handoff_failed', False), 'host epoch monitor transferred or handoff failed')
         self.qmp.check(); self.listener.check(); self.esp.check()
         s = Path('/proc/%d/fd/%d' % (self.binding.process.pid, self.attempt.policy_fd)).stat()
         need((s.st_dev, s.st_ino, s.st_size) == self.attempt.policy_identity[:3], 'actual child inherited policy FD differs')
@@ -690,6 +693,7 @@ class HostGrant:
         return {'FlatView': flat, 'PCI': resources, 'ESP': backing}
 
     def exchange(self):
+        need(not getattr(self, '_handoff_attempted', False), 'monitor handoff attempt is terminal')
         need(not self.attempt.consumed, 'single-use host attempt consumed'); self.attempt.consumed = True
         try:
             self._guarded_check(); self.peer = self.listener.accept(self.binding.process.pid, os.getuid(), self.attempt.original_deadline_ns, guard=self._guarded_check)
@@ -703,7 +707,7 @@ class HostGrant:
             self._guarded_check(); last = self.observe(observed)
             need(first == last, 'current paused PCI/RAM/ECAM/ESP/cache epoch changed')
             self._guarded_check(); self.transfer(grant(report), 272, True); self.qmp.paused(); self._guarded_check()
-            return {'schema': 'shizukuos.native-device-host-grant.v1', 'host_grant_transmitted': True,
+            receipt = {'schema': 'shizukuos.native-device-host-grant.v1', 'host_grant_transmitted': True,
                     'owned_process': self.binding.check(), 'original_host_deadline_ns': self.attempt.original_deadline_ns,
                     'policy': {'bytes': 256, 'sha256': digest(self.attempt.policy).hex(), 'inode': self.attempt.policy_identity[:2], 'sealed': True},
                     'nonce_sha256': digest(self.attempt.nonce).hex(), 'report_sha256': digest(report).hex(),
@@ -711,10 +715,44 @@ class HostGrant:
                     'QEMU_remains_paused': True, 'owner_must_resume_within_original_deadline': True,
                     'constructor_host_runtime_wiring_implemented': False, 'native_gate_admission_observed': False,
                     'physical_device_initialization_verified': False, 'VM_Windows_boot_verified': False, 'coldboot_persistence_verified': False}
+            # Receipt construction itself may still refuse the current child.
+            # Only a completely returned exchange may transfer its one reader.
+            self._completed_qmp = self.qmp
+            return receipt
         except BaseException:
             # A partial/full GRANT is observable even if final checks fail.
             # Retain channel and policy for the actual outer recovery/reap.
             self.failure_after_grant_bytes = self.grant_bytes_written
+            raise
+
+    def handoff_monitor(self):
+        """Return the original sole monitor after one fully completed epoch.
+
+        The caller owns postepoch source/process/cancellation checks and a
+        finite budget within the ORIGINAL owner deadline. No deadline is
+        renewed here. Policy, listener and COM2 custody persist until exact
+        child reap. This transfers the reader; it never creates another one.
+        """
+        need(not getattr(self, '_handoff_attempted', False), 'single-use monitor handoff consumed')
+        self._handoff_attempted = True
+        try:
+            qmp = self.qmp
+            need(type(qmp) is SoleQMP and getattr(self, '_completed_qmp', None) is qmp and
+                 self.grant_bytes_written == 272 and not hasattr(self, 'failure_after_grant_bytes'),
+                 'fully successful returned GRANT exchange required')
+            self._guarded_check(); qmp.paused()
+            monitor = qmp.monitor
+            buffer = monitor.buffer; buffered = bytes(buffer); request = monitor.request
+            self._guarded_check()
+            need(self.qmp is qmp and monitor is qmp.monitor and monitor.buffer is buffer and bytes(buffer) == buffered and
+                 monitor.request == request, 'post-query parser state changed during final owner check')
+            # Keep the permanent claim on the original monitor. Rewrapping it
+            # would create an independently budgeted reader after this epoch.
+            qmp.retired = True
+            self._monitor_handed_off = True
+            return monitor
+        except BaseException:
+            self._handoff_failed = True
             raise
 
     def close_after_reap(self):
