@@ -304,8 +304,15 @@ def _run_process(child, resources, python_path, name):
             _require(observed_error is not None and command["returncode"] == -signal.SIGKILL and command["aborted"],
                      "negative did not kill/reap actual owned command with expected failure")
             _require(monitor.metrics["fault_injections"] > 0, "named injected boundary was not reached")
-            _require(command.get("quiescence", {}).get("failure_stop_retained_until_owned_kill") is True,
-                     "failed paused group was not held for owned kill")
+            quiescence = command.get("quiescence", {})
+            if index == 4:
+                _require(quiescence.get("stop_requests") == 0
+                         and quiescence.get("continue_requests") == 0
+                         and quiescence.get("failure_stop_retained_until_owned_kill") is False,
+                         "malformed first observation must fail before every STOP/CONT")
+            else:
+                _require(quiescence.get("failure_stop_retained_until_owned_kill") is True,
+                         "failed paused group was not held for owned kill")
             if index == 7:
                 _require(bytes(consumer_payload) == b"CONTROL_STREAM\n"
                          and command["full_stdout_sha256"] == _sha(bytes(consumer_payload)),

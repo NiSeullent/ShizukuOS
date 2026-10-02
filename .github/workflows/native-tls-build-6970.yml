@@ -93,15 +93,18 @@ jobs:
               global captured
               observe()
               print('Hosted-only prerequisite:', label, argv, flush=True)
-              child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                       stderr=subprocess.STDOUT, env=environment,
-                                       start_new_session=True, preexec_fn=child_limits)
-              watch = selectors.DefaultSelector()
-              watch.register(child.stdout, selectors.EVENT_READ)
+              watch = None
               output, started = bytearray(), time.monotonic()
               aborted = None
               group_kill = 'NOT_REQUESTED'
+              child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                       stderr=subprocess.STDOUT, env=environment,
+                                       start_new_session=True, preexec_fn=child_limits)
               try:
+                  # Protect selector creation/registration immediately after
+                  # successful spawn, including failures before the first read.
+                  watch = selectors.DefaultSelector()
+                  watch.register(child.stdout, selectors.EVENT_READ)
                   while True:
                       observe()
                       if time.monotonic() - started > 120:
@@ -137,8 +140,11 @@ jobs:
                   child.wait(timeout=5)
                   raise
               finally:
-                  watch.close()
-                  child.stdout.close()
+                  try:
+                      if watch is not None:
+                          watch.close()
+                  finally:
+                      child.stdout.close()
                   print(output.decode('utf-8', errors='replace'), end='')
                   records.append({'label': label, 'argv': argv, 'exit_code': child.returncode,
                                   'direct_child_reaped': child.returncode is not None,
@@ -157,7 +163,7 @@ jobs:
                   'apt-get', '-o', 'Acquire::Retries=0', '-o', 'DPkg::Lock::Timeout=10',
                   '-o', 'Dir::Cache::archives=' + str(archives),
                   '--no-install-recommends', '--no-upgrade', '--no-remove', '--yes',
-                  'install', 'gcc-mingw-w64-i686-win32', 'cmake', 'ninja-build',
+                  'install', 'gcc-mingw-w64-i686-win32', 'cmake', 'ninja-build', 'binutils',
               ])
               run('isolated-pe-parser', [sys.executable, '-B', '-m', 'pip', 'install',
                   '--disable-pip-version-check', '--no-compile', '--no-cache-dir',
@@ -166,9 +172,11 @@ jobs:
                   'dpkg-query', '-W', '-f=${Package}\t${Version}\n',
                   'gcc-mingw-w64-i686-win32', 'gcc-mingw-w64-i686-win32-runtime',
                   'binutils-mingw-w64-i686', 'mingw-w64-i686-dev', 'mingw-w64-common',
+                  'binutils', 'binutils-x86-64-linux-gnu', 'binutils-common', 'cmake', 'ninja-build',
               ])
               assert shutil.which('i686-w64-mingw32-gcc-win32')
               assert shutil.which('i686-w64-mingw32-objdump')
+              assert shutil.which('as') and shutil.which('ld')
               assert (pydeps / 'pefile.py').is_file()
               observe()
               assert shutil.disk_usage(root).free >= reserve + 32 * 1024**2
@@ -258,7 +266,7 @@ jobs:
           import hashlib,os,stat,sys,types
           from pathlib import Path
           root=Path.cwd().resolve()
-          pins={'ntwin32/secure_transport/build_native_tls_guarded_6970.py': 'aba211a9b3bcc34582a9efbf98830f616b40713abf9646850b1e4f2c827d49f0', 'ntwin32/secure_transport/i486_stream_6970.py': '0b661068ebac98331aac796d4612ee6ef78f3825b12683df9ec03e46f8e3a08f', 'ntwin32/secure_transport/native_tls_resources_6970.py': '2803ad3a357395c3fe82d875fe6c4c3e070c15d0a8bf328fcc0a155d73424878', 'ntwin32/secure_transport/native_tls_quiescent_controls_6970.py': '5ff8c7cdf5730c3819f005803f87ff327bf3e31d2c7e06077a3d4e473027b3ee'}
+          pins={'ntwin32/secure_transport/build_native_tls_guarded_6970.py': '1d2e59eea56726f85b75f179d3a4484758a0dfd98e9483068c33dd77bcd14b71', 'ntwin32/secure_transport/i486_stream_6970.py': '0b661068ebac98331aac796d4612ee6ef78f3825b12683df9ec03e46f8e3a08f', 'ntwin32/secure_transport/native_tls_resources_6970.py': '7c5e2c615dec28c338ece68c14cf0d6dddfb8d723d01ded62d85036ee423db18', 'ntwin32/secure_transport/native_tls_quiescent_controls_6970.py': 'ed73af0b390655953aa63b26c6ee5be3ba5b1779c788d2e147761758a428949d', 'ntwin32/secure_transport/native_tls_pidfd_controls_6970.py': '2f86d53ec0e5e4e7cf899df9b063b939f30659ac538aa91d720c26852fa897c3'}
           before={}
           identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
           for relative,expected in pins.items():
@@ -326,15 +334,32 @@ jobs:
               print('Actual capture:',p.name)
               print(data.decode('utf-8',errors='replace'),end='')
           retained_control_text=0
-          for item in receipt.get('quiescent_controls',{}).get('proof_files',[]):
-              p=Path(item['path']);relative=Path(item['relative_path'])
-              assert not relative.is_absolute() and '..' not in relative.parts
-              assert p==proof/relative and p.is_relative_to(proof/'tmp') and not any(c in str(relative) for c in '\r\n')
-              if p.name not in ('result.json','control.stdout','control.stderr'):continue
-              expected={k:item[k] for k in ('bytes','sha256','identity')}
-              data=read(p,524288,expected);retained_control_text+=len(data);assert retained_control_text<=524288
-              print('Actual quiescent retained file:',str(relative),'bytes='+str(len(data)),'sha256='+hashlib.sha256(data).hexdigest())
-              print(data.decode('utf-8'),end='')
+          for key,title in (('quiescent_controls','quiescent'),('pidfd_controls','pidfd')):
+              group=receipt.get(key,{})
+              fixture=group.get('fixture_build',{})
+              fixture_text={fixture[name]['path'] for name in ('source','map') if name in fixture}
+              if key=='pidfd_controls':
+                  allowed={proof/'tmp'/('pidfd-%02d'%index)/name for index in range(5) for name in ('result.json','control.stdout','control.stderr')}
+                  allowed.update((proof/'tmp/pidfd-fixture.S',proof/'tmp/pidfd-fixture.map'))
+                  assert fixture_text<=set(map(str,allowed))
+              else:
+                  allowed={proof/'tmp'/('quiescent-%02d'%index)/name for index in range(10) for name in (('result.json','control.stdout','control.stderr') if index<8 else ('result.json',))}
+              seen=set()
+              for item in group.get('proof_files',[]):
+                  p=Path(item['path']);relative=Path(item['relative_path'])
+                  assert not relative.is_absolute() and '..' not in relative.parts
+                  assert p==proof/relative and p.is_relative_to(proof/'tmp') and not any(c in str(relative) for c in '\r\n')
+                  child_text=p.name in ('result.json','control.stdout','control.stderr')
+                  if key=='pidfd_controls':
+                      assert child_text or str(p) in fixture_text
+                      assert p.suffix not in ('.o','.ELF')
+                  elif not child_text:continue
+                  assert p in allowed and p not in seen;seen.add(p)
+                  expected={k:item[k] for k in ('bytes','sha256','identity')}
+                  data=read(p,524288,expected);retained_control_text+=len(data);assert retained_control_text<=524288
+                  print('Actual '+title+' retained file:',str(relative),'bytes='+str(len(data)),'sha256='+hashlib.sha256(data).hexdigest())
+                  print(data.decode('utf-8'),end='')
+              if group.get('result') in ('PASS_QUIESCENT_GUARD_CONTROLS_ONLY','PASS_PIDFD_VFORK_CONTROLS_ONLY'):assert seen==allowed
           retained_ninja_text=0
           for name in ('build.ninja','CMakeFiles/rules.ninja'):
               p=proof/'cmake'/name
@@ -358,14 +383,17 @@ jobs:
           reserve,limit=20*1024**3,32*1024**2
           assert shutil.disk_usage(root).free>=reserve+limit
           identity=lambda s:[s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns]
-          def read(path,maximum):
+          def read(path,maximum,system_tool=False):
               assert shutil.disk_usage(root).free>=reserve+limit
               assert path.is_absolute() and path.resolve(strict=True)==path
-              for component in (path,*path.parents):assert not component.is_symlink()
+              for component in (path,*path.parents):
+                  info=component.lstat();assert not stat.S_ISLNK(info.st_mode)
+                  if system_tool:assert info.st_uid==0 and not info.st_mode&0o022
+              if system_tool:assert path.is_relative_to(Path('/usr')) and not path.is_relative_to(proof)
               fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
               try:
                   info=os.fstat(fd)
-                  assert stat.S_ISREG(info.st_mode) and info.st_nlink==1 and info.st_size<=maximum
+                  assert stat.S_ISREG(info.st_mode) and info.st_nlink>=1 and (system_tool or info.st_nlink==1) and info.st_size<=maximum
                   raw=bytearray();started=time.monotonic()
                   while True:
                       part=os.read(fd,65536)
@@ -405,6 +433,61 @@ jobs:
               pin={k:v for k,v in item.items() if k not in ('path','relative_path')}
               assert read(path,524288)[1]==pin and path not in selected
               selected[path]=pin
+          pidfd=x['pidfd_controls']
+          pidfd_names=('positive-vfork-parent-first','positive-nested-vfork-parent-first','negative-vfork-preexec-timeout','negative-ancestry-cycle','negative-pidfd-token-change')
+          assert pidfd['result']=='PASS_PIDFD_VFORK_CONTROLS_ONLY' and pidfd['completed']==5 and pidfd['failures']==0
+          assert pidfd['schema']=='native-tls-pidfd-vfork-controls-6970-v1' and pidfd['case_timeout_seconds']==5 and pidfd['total_timeout_seconds']==60 and 0<=pidfd['elapsed_seconds']<=60
+          assert [case['name'] for case in pidfd['cases']]==list(pidfd_names)
+          for key in ('actual_controls_execution_verified','resource_source_before_after_equal','control_source_before_after_equal'):assert pidfd[key] is True
+          for key in ('expected_negative_commands_added_to_parent','host_elf_object_binary_transfer_authorized','tool_dynamic_runtime_closure_verified','escaped_writers_excluded_verified','continuous_group_stop_verified','filesystem_quota_verified','native_execution_verified','windows98_integration_verified','tls_execution_verified'):assert pidfd[key] is False
+          assert pidfd['source_input_count_delta']==1 and pidfd['original_production_and_support_sources_changed'] is False
+          assert pidfd['case_pool_charges_exclude_parent_prepare_commands'] is True
+          assert x['pidfd_control_proof_files_before_after_equal'] is True
+          fixture=pidfd['fixture_build']
+          assert fixture['tools_after_equal'] is True and set(fixture['tools_before'])=={'as','ld'}
+          assert fixture['binary_transfer_authorized'] is False and fixture['metadata_only_host_binaries'] is True
+          assert fixture['headers_libraries_crt_used'] is False and fixture['tool_dynamic_runtime_closure_verified'] is False
+          assert fixture['source_bytes_limit']==8192 and fixture['map_bytes_limit']==262144
+          assert fixture['object_elf_bytes_limit_each']==2*1024**2 and fixture['fixture_bytes_limit']==8*1024**2
+          assert fixture['private_stack_memory_bytes']==65536
+          prep_labels=['pidfd-as-version','pidfd-ld-version','pidfd-fixture-as','pidfd-fixture-ld']
+          assert fixture['command_labels']==prep_labels and len(fixture['command_indexes'])==len(fixture['argvs'])==4
+          table=x['command_argv_string_table'];assert x['command_argv_encoding']=='lossless-string-table-v1'
+          for index,label,argv in zip(fixture['command_indexes'],prep_labels,fixture['argvs']):
+              assert isinstance(index,int) and not isinstance(index,bool) and 0<=index<len(x['commands'])
+              command=x['commands'][index]
+              assert command['label']==label and command['returncode']==0 and command['reaped'] is True and command['aborted'] is None
+              assert [table[i] for i in command['argv_refs']]==argv
+              assert command['full_stderr_bytes']==0
+          for key,argv in zip(('as','ld'),fixture['argvs'][:2]):
+              tool=Path(argv[0]);assert argv[1:]==['--version']
+              assert read(tool,256*1024**2,system_tool=True)[1]==fixture['tools_before'][key]
+          fixture_paths={}
+          for key,maximum in (('source',8192),('map',262144),('object',2*1024**2),('elf',2*1024**2)):
+              item=fixture[key];path=Path(item['path']);relative=Path(item['relative_path'])
+              assert path==proof/relative and path.is_relative_to(proof/'tmp')
+              pin={k:item[k] for k in ('bytes','sha256','identity')};assert read(path,maximum)[1]==pin
+              fixture_paths[key]=path
+          assert fixture_paths['source']==proof/'tmp/pidfd-fixture.S' and fixture_paths['map']==proof/'tmp/pidfd-fixture.map'
+          assert fixture_paths['object']==proof/'tmp/pidfd-fixture.o' and fixture_paths['elf']==proof/'tmp/pidfd-fixture.ELF'
+          assert fixture['argvs'][2]==[fixture['argvs'][0][0],'--64','--fatal-warnings','-o',str(fixture_paths['object']),str(fixture_paths['source'])]
+          assert fixture['argvs'][3]==[fixture['argvs'][1][0],'-m','elf_x86_64','-e','_start','--build-id=none','-z','noexecstack','--fatal-warnings','-Map',str(fixture_paths['map']),'-o',str(fixture_paths['elf']),str(fixture_paths['object'])]
+          assert [line[5:] for line in read(fixture_paths['map'],262144)[0].decode('utf-8').splitlines() if line.startswith('LOAD ')]==[str(fixture_paths['object'])]
+          for key,kind in (('object_metadata','ET_REL'),('elf_metadata','ET_EXEC')):
+              item=fixture[key]
+              assert (item['class'],item['byteorder'],item['machine'],item['type'])==('ELF64','little','EM_X86_64',kind)
+              assert item['metadata_only'] is True and item['binary_transfer_authorized'] is False and item['runtime_execution_or_loaded_code_attestation'] is False
+          for key in ('no_PT_INTERP','no_PT_DYNAMIC','nonexecutable_GNU_STACK','entry_in_RX_segment'):assert fixture['elf_metadata'][key] is True
+          pidfd_paths={fixture_paths['source'],fixture_paths['map']}
+          for index in range(5):
+              pidfd_paths.update(proof/'tmp'/('pidfd-%02d'%index)/name for name in ('result.json','control.stdout','control.stderr'))
+          assert len(pidfd['proof_files'])==17 and {Path(item['path']) for item in pidfd['proof_files']}==pidfd_paths
+          for item in pidfd['proof_files']:
+              path=Path(item['path']);assert path==proof/item['relative_path'] and path not in selected
+              pin={k:item[k] for k in ('bytes','sha256','identity')}
+              assert read(path,524288)[1]==pin;selected[path]=pin
+          excluded_fixture_binaries={fixture_paths['object'],fixture_paths['elf']}
+          assert not excluded_fixture_binaries&{proof/name for name in x['compiled_outputs']}
           for name,pin in x['compiled_outputs'].items():selected[proof/name]=pin
           for item in x['PEs'].values():
               for key in ('artifact','compressed_decode'):
@@ -415,6 +498,9 @@ jobs:
           selected[proof/'cmake/compile_commands.json']=x['compile_commands']
           selected[Path(x['direct_system_CMake_inputs']['path'])]=x['direct_system_CMake_inputs']['manifest']
           for relative,pin in x['source_inputs_before'].items():selected[root/relative]=pin
+          assert len(x['source_inputs_before'])==30 and 'ntwin32/secure_transport/native_tls_pidfd_controls_6970.py' in x['source_inputs_before']
+          assert pidfd['resource_source']==x['source_inputs_before']['ntwin32/secure_transport/native_tls_resources_6970.py']
+          assert pidfd['control_source']==x['source_inputs_before']['ntwin32/secure_transport/native_tls_pidfd_controls_6970.py']
           for path,pin in x['source_copies_before'].items():selected[Path(path)]=pin
           selected[root/'LICENSE']=read(root/'LICENSE',1048576)[1]
           upstream=json.loads(read(prep/'upstream-preparation.json',2097152)[0])
@@ -430,53 +516,123 @@ jobs:
                   assert pin['sha256']==c['captured_sha256'][stream]
                   capture_total+=len(data);selected[path]=pin
           control_capture_total=control_raw_total=0
-          assert len(controls['cases'])==10
-          previous_capture=previous_decoder=None
-          for case in controls['cases']:
-              assert case['result']=='PASS' and case['executed'] is True
-              child_path=Path(case['child_receipt_path']);assert child_path in selected
-              data,pin=read(child_path,524288);assert pin['sha256']==case['child_receipt_sha256']
-              child=json.loads(data)
-              assert child['control']==case['name'] and child['result']==case['expected_child_epoch']==case['child_epoch']
-              assert child['receipt_accounting_verified'] is True and child['command_count']==case['expected_command_count']==len(case['commands'])
-              assert child['command_argv_encoding']=='lossless-string-table-v1'
-              assert child['inherited_parent_capture_bytes']==case['capture_pool_offset']
-              assert child['inherited_parent_decoder_bytes']==case['decoder_pool_offset']
-              if previous_capture is not None:assert case['capture_pool_offset']==previous_capture and case['decoder_pool_offset']==previous_decoder
-              case_capture=case_raw=0
-              assert len(case['capture_payloads'])==len(case['commands'])==len(child['commands'])
-              for record,actual,payload in zip(case['commands'],child['commands'],case['capture_payloads']):
-                  for key,value in record.items():
-                      if key!='argv_sha256':assert actual[key]==value
-                  assert len(child['command_argv_string_table'])<=8192
-                  assert all(isinstance(i,int) and not isinstance(i,bool) and 0<=i<len(child['command_argv_string_table']) for i in actual['argv_refs'])
-                  argv=[child['command_argv_string_table'][i] for i in actual['argv_refs']]
-                  assert hashlib.sha256(json.dumps(argv,separators=(',',':')).encode()).hexdigest()==record['argv_sha256']
-                  captured=0
-                  for stream in ('stdout','stderr'):
-                      value=bytes.fromhex(payload[stream+'_hex']);assert len(value)<=4096
-                      capture_path=child_path.parent/(actual['label']+'.'+stream)
-                      assert capture_path in selected and read(capture_path,4096)[0]==value
-                      assert hashlib.sha256(value).hexdigest()==actual['captured_sha256'][stream]==record['captured_sha256'][stream]
-                      captured+=len(value)
-                      if stream=='stderr' or not actual['raw_stdout_stream']:
-                          assert len(value)==actual['full_'+stream+'_bytes'] and hashlib.sha256(value).hexdigest()==actual['full_'+stream+'_sha256']
-                  assert captured==actual['captured_bytes']==record['captured_bytes']
-                  case_capture+=captured
-                  if actual['raw_stdout_stream']:
-                      value=bytes.fromhex(case['consumer_payload_hex']);assert len(value)<=4096
-                      assert len(value)==actual['full_stdout_bytes'] and hashlib.sha256(value).hexdigest()==actual['full_stdout_sha256']
-                      assert case['stream_consumer_raised_before_delivery_commit'] is True and actual['stdout_delivered_to_consumer_bytes']==0
-                      case_capture+=len(value);case_raw+=len(value)
-              assert case_capture==case['capture_pool_delta']==child['control_capture_pool_delta']
-              assert case_raw==case['decoder_pool_delta']==child['control_decoder_pool_delta']
-              previous_capture=case['capture_pool_offset']+case_capture
-              previous_decoder=case['decoder_pool_offset']+case_raw
-              assert previous_capture==child['captured_normal_bytes'] and previous_decoder==child['decoder_observed_bytes']
-              control_capture_total+=case_capture;control_raw_total+=case_raw
-          assert control_capture_total==controls['capture_bytes_charged_to_parent']==controls['capture_payload_bytes']<=4096
-          assert control_raw_total==controls['raw_bytes_charged_to_parent']<=4096
+          assert len(controls['cases'])==10 and len(pidfd['cases'])==5
+          old_last=controls['cases'][-1]
+          old_capture_end=old_last['capture_pool_offset']+old_last['capture_pool_delta']
+          old_decoder_end=old_last['decoder_pool_offset']+old_last['decoder_pool_delta']
+          prep_capture=sum(x['commands'][i]['captured_bytes'] for i in fixture['command_indexes'])
+          assert fixture['capture_pool_before_prepare']==old_capture_end and fixture['decoder_pool_before_prepare']==old_decoder_end
+          assert fixture['prepare_capture_pool_delta']==prep_capture and fixture['prepare_decoder_pool_delta']==0
+          assert fixture['capture_pool_after_prepare']==old_capture_end+prep_capture and fixture['decoder_pool_after_prepare']==old_decoder_end
+          assert pidfd['cases'][0]['capture_pool_offset']==old_capture_end+prep_capture and pidfd['cases'][0]['decoder_pool_offset']==old_decoder_end
+          for group in (controls,pidfd):
+              previous_capture=previous_decoder=None
+              group_capture_total=group_raw_total=0
+              for case_index,case in enumerate(group['cases']):
+                  assert case['result']=='PASS' and case['executed'] is True
+                  child_path=Path(case['child_receipt_path']);assert child_path in selected
+                  data,pin=read(child_path,524288);assert pin['sha256']==case['child_receipt_sha256']
+                  child=json.loads(data)
+                  assert child['control']==case['name'] and child['result']==case['expected_child_epoch']==case['child_epoch']
+                  assert child['receipt_accounting_verified'] is True and child['command_count']==case['expected_command_count']==len(case['commands'])
+                  assert child['command_argv_encoding']=='lossless-string-table-v1'
+                  if group is pidfd:
+                      assert child_path==proof/'tmp'/('pidfd-%02d'%case_index)/'result.json'
+                      assert child['schema']=='native-tls-pidfd-control-child-6970-v1'
+                      assert case['expected_command_count']==1 and child['expected_negative'] is (case_index>=2)
+                      assert case['expected_child_epoch']==('PASS_CONTROL_CHILD' if case_index<2 else 'FAIL')
+                      assert case['injected_fault'] is (case_index>=3) and case['stop_request_expected'] is (case_index<3)
+                      assert child['injected_fault'] is case['injected_fault'] and child['stop_request_expected'] is case['stop_request_expected']
+                      assert child['fixture_elf_sha256']==fixture['elf']['sha256']
+                      assert child['observed_control_error'] is None and child['expected_fault_observed']==case['observed_error']
+                      assert 0<=case['elapsed_seconds']<=5
+                      observation=case['observation'];assert child['actual_control_observation']==observation
+                      assert observation['observed_D_ppid_ready'] is True and observation['ready_before_any_stop'] is True
+                      assert observation['wrong_target_stop_requests']==observation['early_continue_requests']==0
+                      assert observation['injected_fault_count']==int(case_index>=3) and observation['readiness_does_not_prove_production_vfork_cause'] is True
+                      assert 0<=observation['readiness_wait_seconds']<=1
+                      snapshot=observation['readiness_snapshot']
+                      assert set(snapshot)=={'leader','members','tasks','stable'} and snapshot['stable'] is True
+                      assert hashlib.sha256(json.dumps(snapshot,sort_keys=True,separators=(',',':')).encode()).hexdigest()==observation['readiness_sha256']
+                      members,tasks=snapshot['members'],snapshot['tasks'];assert len(members)==len(tasks)==(3 if case_index==1 else 2)
+                      by_pid={row['pid']:row for row in members};leader=snapshot['leader']
+                      assert len(by_pid)==len(members) and leader==by_pid.get(leader['pid'])
+                      for row in members:
+                          assert set(row)=={'pid','ppid','startticks','pgrp','session','uid','state'}
+                          assert all(type(row[key]) is int and row[key]>=0 for key in ('pid','ppid','startticks','pgrp','session','uid'))
+                          assert row['pid']>0 and row['pgrp']==row['session']==leader['pid'] and row['uid']==os.getuid()
+                      assert {row['pid'] for row in tasks}==set(by_pid)
+                      for row in tasks:
+                          assert set(row)==set(by_pid[row['pid']])|{'tid'} and row['tid']==row['pid']
+                          assert all(row[key]==value for key,value in by_pid[row['pid']].items())
+                      if case_index==1:
+                          workers=[row for row in members if row['pid']!=leader['pid'] and row['ppid']==leader['pid'] and row['state']=='D']
+                          assert leader['state'] in ('S','R') and len(workers)==1;blocking=workers[0]
+                      else:
+                          assert leader['state']=='D';blocking=leader
+                      assert sum(row['pid']!=blocking['pid'] and row['ppid']==blocking['pid'] and row['state'] in ('S','R') for row in members)==1
+                  assert child['inherited_parent_capture_bytes']==case['capture_pool_offset']
+                  assert child['inherited_parent_decoder_bytes']==case['decoder_pool_offset']
+                  if previous_capture is not None:assert case['capture_pool_offset']==previous_capture and case['decoder_pool_offset']==previous_decoder
+                  case_capture=case_raw=0
+                  assert len(case['capture_payloads'])==len(case['commands'])==len(child['commands'])
+                  for record,actual,payload in zip(case['commands'],child['commands'],case['capture_payloads']):
+                      for key,value in record.items():
+                          if key!='argv_sha256':assert actual[key]==value
+                      assert len(child['command_argv_string_table'])<=8192
+                      assert all(isinstance(i,int) and not isinstance(i,bool) and 0<=i<len(child['command_argv_string_table']) for i in actual['argv_refs'])
+                      argv=[child['command_argv_string_table'][i] for i in actual['argv_refs']]
+                      assert hashlib.sha256(json.dumps(argv,separators=(',',':')).encode()).hexdigest()==record['argv_sha256']
+                      if group is pidfd:
+                          assert argv==[str(fixture_paths['elf']),'direct' if case_index==0 else 'nested' if case_index==1 else 'stuck'] and actual['label']=='control' and actual['raw_stdout_stream'] is False
+                          q=actual['quiescence']
+                          assert q['stop_signal_model']=='pidfd-process-parent-first-flags0-v1' and q['observation_row_schema']=='owned-process-task-ppid-v2'
+                          for key in ('escaped_writers_excluded_verified','continuous_group_stop_verified','filesystem_quota_verified'):assert q[key] is False
+                          if case_index<3:assert observation['stop_requests']>0 and q['stop_requests']>0
+                          else:assert observation['stop_requests']==q['stop_requests']==q['continue_requests']==0 and q['failure_stop_retained_until_owned_kill'] is False
+                          reason=(None,None,'owned group stop confirmation exceeded one second','owned group ancestry cycle refused','owned pidfd process identity changed')[case_index]
+                          assert case['expected_negative_reason']==reason
+                          if reason:assert reason in case['observed_error'] and reason in actual['aborted']
+                          else:assert case['observed_error'] is None and observation['paused_scans']>0 and q['verified_pauses']>0 and q['continue_requests']>0
+                      if case['expected_child_epoch']=='FAIL':
+                          assert actual['returncode']==-9 and actual['reaped'] is True and actual['group_kill']=='REQUESTED_BEFORE_REAP' and actual['aborted']
+                          q=actual['quiescence']
+                          refused_before_stop=(group is controls and case['name']=='negative-malformed-observer') or (group is pidfd and case_index>=3)
+                          if refused_before_stop:assert q['stop_requests']==q['continue_requests']==0 and q['failure_stop_retained_until_owned_kill'] is False
+                          else:assert q['failure_stop_retained_until_owned_kill'] is True
+                      else:assert actual['returncode']==0 and actual['reaped'] is True and actual['aborted'] is None
+                      captured=0
+                      for stream in ('stdout','stderr'):
+                          value=bytes.fromhex(payload[stream+'_hex']);assert len(value)<=4096
+                          capture_path=child_path.parent/(actual['label']+'.'+stream)
+                          assert capture_path in selected and read(capture_path,4096)[0]==value
+                          assert hashlib.sha256(value).hexdigest()==actual['captured_sha256'][stream]==record['captured_sha256'][stream]
+                          captured+=len(value)
+                          if stream=='stderr' or not actual['raw_stdout_stream']:
+                              assert len(value)==actual['full_'+stream+'_bytes'] and hashlib.sha256(value).hexdigest()==actual['full_'+stream+'_sha256']
+                      assert captured==actual['captured_bytes']==record['captured_bytes']
+                      case_capture+=captured
+                      if actual['raw_stdout_stream']:
+                          value=bytes.fromhex(case['consumer_payload_hex']);assert len(value)<=4096
+                          assert len(value)==actual['full_stdout_bytes'] and hashlib.sha256(value).hexdigest()==actual['full_stdout_sha256']
+                          assert case['stream_consumer_raised_before_delivery_commit'] is True and actual['stdout_delivered_to_consumer_bytes']==0
+                          case_capture+=len(value);case_raw+=len(value)
+                  assert case_capture==case['capture_pool_delta']==child['control_capture_pool_delta']
+                  assert case_raw==case['decoder_pool_delta']==child['control_decoder_pool_delta']
+                  previous_capture=case['capture_pool_offset']+case_capture
+                  previous_decoder=case['decoder_pool_offset']+case_raw
+                  assert previous_capture==child['captured_normal_bytes'] and previous_decoder==child['decoder_observed_bytes']
+                  group_capture_total+=case_capture;group_raw_total+=case_raw
+              assert group_capture_total==group['capture_bytes_charged_to_parent']==group['capture_payload_bytes']<=4096
+              assert group_raw_total==group['raw_bytes_charged_to_parent']<=4096
+              if group is pidfd:assert group_raw_total==0
+              control_capture_total+=group_capture_total;control_raw_total+=group_raw_total
+          assert control_capture_total<=8192 and control_raw_total<=8192
           assert capture_total+control_capture_total==x['captured_normal_bytes']<=262144
+          assert not excluded_fixture_binaries&set(selected)
+          retained_child_paths={Path(item['path']) for group in (controls,pidfd) for item in group['proof_files'] if Path(item['path']).name in ('result.json','control.stdout','control.stderr')}
+          assert len(retained_child_paths)==41
+          assert sum(selected[path]['bytes'] for path in retained_child_paths|{fixture_paths['source'],fixture_paths['map']})<=524288
           entries={}
           for path,pin in sorted(selected.items()):
               assert path.is_relative_to(root) and not any(c in str(path) for c in '\r\n')
@@ -496,6 +652,8 @@ jobs:
               'entries':entries,'entry_count':len(entries),'entry_payload_bytes':sum(e['bytes'] for e in entries.values()),
               'closed_build_receipt':receipt_pin,'original_closed_output_bytes':before,
               'proof_limit_bytes':limit,'maximum_new_manifest_bytes':524288,
+              'host_control_compiled_outputs_excluded':sorted(str(path.relative_to(root)) for path in excluded_fixture_binaries),
+              'host_control_binary_transfer_authorized':False,'retained_child_text_count':41,'pidfd_fixture_text_count':2,
               'source_committed_blobs_independently_queried':False,
               'native_execution_verified':False,'TLS_negotiation_verified':False,'NAS_binary_admission':False}
           data=(json.dumps(manifest,sort_keys=True,separators=(',',':'))+'\n').encode();assert len(data)<=524288 and before+len(data)<=limit

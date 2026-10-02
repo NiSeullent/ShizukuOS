@@ -111,7 +111,9 @@ def _write_all(fd, data):
 class _OwnedGroupObservation:
     """Linux observed stop scope; neither a writer census nor a kernel freeze.
 
-    The unreaped Popen leader pins the signal target through normal cleanup.
+    The unreaped Popen leader pins the owned group through normal cleanup.
+    Active STOP sends use individually bound pidfds, in current-parent order.
+    Numeric PPID is fresh ancestry metadata, never part of a birth token.
     Every observed process and thread must be signal-stopped (T) or zombie (Z).
     Tracing-stop (t) is deliberately refused: a tracer owns its restart.
     Escaped descendants and asynchronous kernel writes are not attested.
@@ -121,7 +123,8 @@ class _OwnedGroupObservation:
         self.guard = guard
         self.proc = proc
         self.deadline = deadline
-        self.proc_fd = os.open("/proc", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        self.proc_fd = None
+        self._pidfds = {}
         self.paused = False
         self.verified = False
         self.pause_deadline = None
@@ -151,17 +154,32 @@ class _OwnedGroupObservation:
                           "escaped_writers_excluded_verified": False,
                           "continuous_group_stop_verified": False,
                           "failure_stop_retained_until_owned_kill": False,
+                          "observation_row_schema": "owned-process-task-ppid-v2",
+                          "stop_signal_model": "pidfd-process-parent-first-flags0-v1",
+                          "pidfd_stop_requests": 0,
+                          "parent_first_deferrals": 0,
+                          "dynamic_root_stop_requests": 0,
+                          "initial_pre_stop_snapshots": 0,
                           "filesystem_quota_verified": False}
         try:
+            self.proc_fd = os.open("/proc", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            if not callable(getattr(os, "pidfd_open", None)) or not callable(
+                    getattr(signal, "pidfd_send_signal", None)):
+                raise ResourceFailure("process-targeted pidfd signaling unavailable")
             leader = self._read_process(proc.pid)[0]
             if (leader["pid"] != proc.pid or leader["pgrp"] != proc.pid
                     or leader["session"] != proc.pid or leader["uid"] != os.getuid()
                     or proc.returncode is not None):
                 raise ResourceFailure("owned unreaped session/group leader required")
             self.leader_token = self._token(leader)
+            self._bind_pidfd(leader)
         except BaseException:
-            os.close(self.proc_fd)
-            self.proc_fd = None
+            try:
+                self._close_pidfds()
+            finally:
+                if self.proc_fd is not None:
+                    fd, self.proc_fd = self.proc_fd, None
+                    os.close(fd)
             raise
 
     @staticmethod
@@ -210,15 +228,16 @@ class _OwnedGroupObservation:
             if len(fields) < 20:
                 raise ValueError("short stat")
             state = fields[0].decode("ascii")
-            pgrp, session, ticks = int(fields[2]), int(fields[3]), int(fields[19])
+            ppid, pgrp, session, ticks = (int(fields[1]), int(fields[2]),
+                                         int(fields[3]), int(fields[19]))
         except (ValueError, UnicodeError) as error:
             raise ResourceFailure("malformed proc stat numeric/state fields") from error
         if (pid != expected_pid or len(state) != 1 or state not in "RSDZTtWXxKPI"
-                or pgrp < 0 or session < 0 or ticks < 0):
+                or ppid < 0 or pgrp < 0 or session < 0 or ticks < 0):
             raise ResourceFailure("invalid proc stat task identity")
         uid = os.fstat(directory).st_uid
         row = {"pid": pid if tgid is None else tgid, "startticks": ticks,
-               "pgrp": pgrp, "session": session, "uid": uid, "state": state}
+               "ppid": ppid, "pgrp": pgrp, "session": session, "uid": uid, "state": state}
         if tgid is not None:
             row["tid"] = pid
         return row
@@ -246,6 +265,8 @@ class _OwnedGroupObservation:
                     os.close(child)
             after = self._stat_row(directory, pid)
             stable = (self._token(after) == self._token(row)
+                      and after["ppid"] == row["ppid"]
+                      and all(thread["ppid"] == after["ppid"] for thread in threads)
                       and sorted(os.listdir(task_root)) == names)
             return after, threads, stable
         finally:
@@ -265,6 +286,7 @@ class _OwnedGroupObservation:
         """Only numeric stat metadata; no command line, environment or payload."""
         self.guard._sample()
         leader = self.leader()
+        initial_leader = leader
         names = sorted(n for n in os.listdir(self.proc_fd) if n.isdigit())
         if len(names) > PROC_ENTRY_LIMIT:
             raise ResourceFailure("proc process-list observation exceeds 4096 entries")
@@ -295,6 +317,7 @@ class _OwnedGroupObservation:
                 if row["pgrp"] != self.proc.pid:
                     continue
                 initially_classified_owned = True
+                initial_ppid = row["ppid"]
                 row, task_rows, unchanged = self._read_process(pid, tasks=True)
                 if row["pgrp"] != self.proc.pid:
                     stable = False
@@ -303,6 +326,7 @@ class _OwnedGroupObservation:
                     continue
                 members.append(row)
                 threads.extend(task_rows)
+                unchanged = unchanged and row["ppid"] == initial_ppid
                 stable = stable and unchanged
                 if not unchanged:
                     note_instability(pid, "owned_task_listing_or_process_token_changed",
@@ -318,6 +342,10 @@ class _OwnedGroupObservation:
             if len(members) > GROUP_MEMBER_LIMIT or len(threads) > GROUP_TASK_LIMIT:
                 raise ResourceFailure("owned group member/task observation bound crossed")
         leader = self.leader()
+        if leader["ppid"] != initial_leader["ppid"]:
+            stable = False
+            note_instability(self.proc.pid, "leader_ppid_changed_during_complete_scan",
+                             "after_owned_group_classification")
         observation = {"leader": leader, "members": sorted(members, key=lambda r: r["pid"]),
                        "tasks": sorted(threads, key=lambda r: (r["pid"], r["tid"])),
                        "stable": stable}
@@ -333,7 +361,7 @@ class _OwnedGroupObservation:
                 or not 1 <= len(observation["members"]) <= GROUP_MEMBER_LIMIT
                 or not 1 <= len(observation["tasks"]) <= GROUP_TASK_LIMIT):
             raise ResourceFailure("invalid bounded group observation schema")
-        process_keys = {"pid", "startticks", "pgrp", "session", "uid", "state"}
+        process_keys = {"pid", "startticks", "ppid", "pgrp", "session", "uid", "state"}
         tagged_rows = [(observation["leader"], process_keys)]
         tagged_rows += [(row, process_keys) for row in observation["members"]]
         tagged_rows += [(row, process_keys | {"tid"}) for row in observation["tasks"]]
@@ -350,10 +378,17 @@ class _OwnedGroupObservation:
                 raise ResourceFailure("tracing-stop is not an owned signal-stop")
         members = observation["members"]
         tasks = observation["tasks"]
+        # Refuse cycles before cross-row PPID checks: no signal is permitted
+        # from a cyclic observed forest, including a selective injected row.
+        self._forest(observation)
         pids = [r["pid"] for r in members]
         tids = [r.get("tid") for r in tasks]
         if (len(set(pids)) != len(pids) or None in tids or len(set(tids)) != len(tids)
                 or any(r["pid"] not in pids for r in tasks)
+                or any(t["ppid"] != r["ppid"] for r in members
+                       for t in tasks if t["pid"] == r["pid"])
+                or not any(r["pid"] == self.proc.pid and
+                           r["ppid"] == observation["leader"]["ppid"] for r in members)
                 or any(not any(t["pid"] == r["pid"] and t["tid"] == r["pid"]
                                and t["startticks"] == r["startticks"] for t in tasks) for r in members)
                 or not any(self._token(r) == self.leader_token for r in members)
@@ -379,6 +414,123 @@ class _OwnedGroupObservation:
         return snapshot["stable"] and all(r["state"] in ("T", "Z")
                                           for r in snapshot["members"] + snapshot["tasks"])
 
+    @staticmethod
+    def _forest(snapshot):
+        members = {row["pid"]: row for row in snapshot["members"]}
+        ancestors = {}
+        for pid in members:
+            seen, chain, current = {pid}, [], members[pid]["ppid"]
+            while current in members:
+                if current in seen:
+                    raise ResourceFailure("owned group ancestry cycle refused")
+                seen.add(current)
+                chain.append(current)
+                current = members[current]["ppid"]
+            ancestors[pid] = tuple(chain)
+        return members, ancestors
+
+    def _assert_pidfd_identity(self, expected, current):
+        if (self.proc.returncode is not None or self._token(current) != self._token(expected)
+                or current["pgrp"] != self.proc.pid or current["session"] != self.proc.pid
+                or current["uid"] != os.getuid()):
+            raise ResourceFailure("owned pidfd process identity changed")
+        if current["ppid"] != expected["ppid"]:
+            raise ResourceFailure("owned pidfd process ancestry changed")
+        if current["state"] == "t":
+            raise ResourceFailure("tracing-stop is not an owned signal-stop")
+
+    def _pidfd_signal_identity(self, pid):
+        """Actual final pre-send read; the hosted negative injects only here."""
+        return self._read_process(pid, tasks=True)
+
+    def _bind_pidfd(self, expected):
+        self.check_time()
+        before, _, stable = self._read_process(expected["pid"], tasks=True)
+        self._assert_pidfd_identity(expected, before)
+        cached = self._pidfds.get(expected["pid"])
+        if cached is not None:
+            if cached["token"] != self._token(before):
+                raise ResourceFailure("owned pidfd process identity changed")
+            return cached if stable else None
+        if not stable:
+            return None
+        if len(self._pidfds) >= GROUP_MEMBER_LIMIT:
+            raise ResourceFailure("owned pidfd binding limit crossed")
+        fd = None
+        try:
+            fd = os.pidfd_open(expected["pid"], 0)
+            if os.get_inheritable(fd):
+                raise ResourceFailure("owned pidfd must be close-on-exec")
+            after, _, stable = self._read_process(expected["pid"], tasks=True)
+            self._assert_pidfd_identity(expected, after)
+            if not stable:
+                return None
+            cached = {"fd": fd, "token": self._token(after)}
+            self._pidfds[expected["pid"]] = cached
+            fd = None
+            return cached
+        finally:
+            if fd is not None:
+                os.close(fd)
+
+    def _close_pidfds(self):
+        first_error = None
+        entries, self._pidfds = self._pidfds, {}
+        for binding in entries.values():
+            try:
+                os.close(binding["fd"])
+            except OSError as error:
+                if first_error is None:
+                    first_error = error
+        if first_error is not None:
+            raise first_error
+
+    def _ancestors_ready(self, snapshot, pid):
+        members, ancestors = self._forest(snapshot)
+        for ancestor in ancestors[pid]:
+            self.check_time()
+            row, tasks, stable = self._read_process(ancestor, tasks=True)
+            self._assert_pidfd_identity(members[ancestor], row)
+            if (not stable or not tasks or row["state"] not in ("T", "Z")
+                    or any(task["state"] not in ("T", "Z") for task in tasks)):
+                return False
+        return True
+
+    def _signal_member(self, row, snapshot):
+        """No external parent or numeric-PID fallback is ever signalled."""
+        self.check_time()
+        if not snapshot["stable"] or not self._ancestors_ready(snapshot, row["pid"]):
+            self.telemetry["parent_first_deferrals"] += 1
+            return False
+        binding = self._bind_pidfd(row)
+        if binding is None:
+            return False
+        # Re-read every owned ancestor after opening/binding the descriptor.
+        # An outside-group PPID is an observed dynamic root, not a target.
+        if not self._ancestors_ready(snapshot, row["pid"]):
+            self.telemetry["parent_first_deferrals"] += 1
+            return False
+        current, _, stable = self._pidfd_signal_identity(row["pid"])
+        self._assert_pidfd_identity(row, current)
+        if binding["token"] != self._token(current):
+            raise ResourceFailure("owned pidfd process identity changed")
+        if not stable:
+            return False
+        self.check_time()
+        self.pause_stage = "pidfd_parent_first_stop_signal"
+        self.telemetry["stop_requests"] += 1
+        self.telemetry["pidfd_stop_requests"] += 1
+        if row["ppid"] not in {member["pid"] for member in snapshot["members"]}:
+            self.telemetry["dynamic_root_stop_requests"] += 1
+        signal.pidfd_send_signal(binding["fd"], signal.SIGSTOP, None, 0)
+        # Only an accepted process-targeted request establishes STOP ownership;
+        # a refused syscall still reaches Guard.run's unchanged owned kill.
+        self.paused = True
+        after = self._read_process(row["pid"])[0]
+        self._assert_pidfd_identity(row, after)
+        self.check_time()
+        return True
+
     def pause(self):
         self.pause_started = time.monotonic()
         self.pause_deadline = min(self.deadline, self.pause_started + QUIESCENCE_TIMEOUT)
@@ -388,31 +540,54 @@ class _OwnedGroupObservation:
         self.pause_stage = "pause_entry"
         self.pause_candidate_snapshot = None
         previous = None
+        sent = set()
+        self.pause_stage = "initial_complete_pre_stop_snapshot"
+        current = self._snapshot()
+        self.telemetry["initial_pre_stop_snapshots"] += 1
         while True:
             self.pause_iteration += 1
             self.pause_candidate_snapshot = previous
             self.pause_stage = "loop_deadline_check"
             self.check_time()
-            self.pause_stage = "leader_validation"
-            self.leader()
-            self.telemetry["stop_requests"] += 1
-            self.pause_stage = "stop_signal"
-            try:
-                os.killpg(self.proc.pid, signal.SIGSTOP)
-            except ProcessLookupError:
-                # A held zombie leader can outlive every signalable member.
-                # Accept no-recipient only with fresh complete all-Z evidence;
-                # the same two-scan and post-count checks still apply.
-                self.pause_stage = "no_live_recipient_snapshot"
-                no_live = self._snapshot()
-                if (not no_live["stable"] or any(r["state"] != "Z"
-                        for r in no_live["members"] + no_live["tasks"])):
-                    raise ResourceFailure("owned group stop had no live recipient without all-zombie evidence")
-                self.telemetry["stop_no_live_group_observations"] += 1
-            self.paused = True
+            if (current["stable"] and all(row["state"] == "Z"
+                    for row in current["members"] + current["tasks"])):
+                # Only a complete all-Z snapshot permits the legacy no-live
+                # group request. No active STOP is sent to a process group.
+                self.leader()
+                self.telemetry["stop_requests"] += 1
+                self.pause_stage = "complete_all_z_no_live_group_stop"
+                self.paused = True
+                try:
+                    os.killpg(self.proc.pid, signal.SIGSTOP)
+                except ProcessLookupError:
+                    self.telemetry["stop_no_live_group_observations"] += 1
+            elif current["stable"]:
+                members, ancestors = self._forest(current)
+                order = sorted(members, key=lambda pid: (
+                    pid != self.proc.pid, len(ancestors[pid]), pid))
+                for pid in order:
+                    self.check_time()
+                    # Fresh whole-group membership/ancestry before each send
+                    # admits new children only through the same strict path.
+                    self.pause_stage = "fresh_ancestry_before_member_stop"
+                    fresh = self._snapshot()
+                    fresh_members, _ = self._forest(fresh)
+                    row = fresh_members.get(pid)
+                    if row is None:
+                        raise ResourceFailure("owned stop candidate disappeared from current group")
+                    if row["state"] == "Z":
+                        continue
+                    tasks = [task for task in fresh["tasks"] if task["pid"] == pid]
+                    token = self._token(row)
+                    if (token in sent and row["state"] == "T"
+                            and all(task["state"] in ("T", "Z") for task in tasks)):
+                        continue
+                    if self._signal_member(row, fresh):
+                        sent.add(token)
             self.pause_stage = "stop_confirmation_snapshot"
             current = self._snapshot()
             self.pause_stage = "quiet_candidate_comparison"
+            self.check_time()
             if self._quiet(current) and current == previous:
                 self.quiet_snapshot = current
                 self.quiet_scan_instability = {
@@ -595,6 +770,7 @@ class _OwnedGroupObservation:
                         raise ResourceFailure("owned group continue had no recipient without all-zombie evidence")
                     self.telemetry["continue_no_live_group_observations"] += 1
                 self.paused = False
+                self._close_pidfds()
         finally:
             if success and self.pause_started is not None:
                 elapsed = time.monotonic() - self.pause_started
@@ -613,9 +789,12 @@ class _OwnedGroupObservation:
             self.telemetry["total_pause_seconds"] += elapsed
             self.telemetry["longest_pause_seconds"] = max(self.telemetry["longest_pause_seconds"], elapsed)
             self.pause_started = None
-        if self.proc_fd is not None:
-            os.close(self.proc_fd)
-            self.proc_fd = None
+        try:
+            self._close_pidfds()
+        finally:
+            if self.proc_fd is not None:
+                fd, self.proc_fd = self.proc_fd, None
+                os.close(fd)
 
 
 class Guard:
@@ -1329,7 +1508,12 @@ class Guard:
                                            "input_hash_limit_seconds": 60,
                                            "sample_interval_seconds": SAMPLE_SECONDS,
                                            "owned_group_quiescent_observations_required": True,
-                                           "quiescence_model": "Linux owned process-and-task T/Z snapshots before/after strict count",
+                                            "quiescence_model": "Linux owned process-and-task T/Z snapshots before/after strict count",
+                                            "observation_row_schema": "owned-process-task-ppid-v2",
+                                            "active_stop_signal_model": "pidfd-process-parent-first-flags0-v1",
+                                            "PPID_is_birth_token": False,
+                                            "outside_group_parents_signalled": False,
+                                            "numeric_PID_STOP_fallback": False,
                                            "continuous_group_stop_verified": False,
                                            "group_stop_confirmation_limit_seconds": QUIESCENCE_TIMEOUT,
                                            "group_member_observation_limit": GROUP_MEMBER_LIMIT,

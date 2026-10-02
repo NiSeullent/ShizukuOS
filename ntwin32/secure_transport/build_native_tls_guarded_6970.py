@@ -20,6 +20,7 @@ import re
 import shlex
 import shutil
 import stat
+import struct
 import sys
 import tarfile
 import time
@@ -37,7 +38,7 @@ ARCHIVE_URL = 'https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6
 PRODUCTION = {'ntwin32/secure_transport/build.py': (19667, 'a9f96b6a4501104b1929a669af4a0f4f6db9b7e68e56ad7241274783f44d787b'), 'ntwin32/secure_transport/i486_format.c': (6346, '3d5a6fd5895801d350ffeffe563e6bf858801fc24ac1139fec07e058d1346965'), 'ntwin32/secure_transport/i486_format.h': (663, '3f7a57cb7c545ba180a2dbb33fdfaf2f2c4bfa31f5cf02a01118cdbfd571a42d'), 'ntwin32/secure_transport/i486_gate.py': (8829, '85e976035c70478e9a2f021a37aa6925dd20ad85f089c7d06a18efadb7b9730f'), 'ntwin32/secure_transport/native.def': (302, '88c1d2cd388bc5d958d8473589fcf18d12d48e1c53da6fb3b2e396aba24b8c82'), 'ntwin32/secure_transport/native_crt.c': (1699, 'dff0e07803d0a6f708b597d6fc54225c6502c2293814e77fe2d95f821cae882f'), 'ntwin32/secure_transport/native_runtime.c': (1423, '268c5eae7b09145ea1ff971e24313b6a0b19cd7a8f85f8dcd44c886e6435cfa8'), 'ntwin32/secure_transport/native_runtime.h': (495, '6425fd3cad0c0a02a48851caf7337b55453ee6259bd35e79496d2de68769ea2e'), 'ntwin32/secure_transport/native_time.c': (2207, '8103149774591687c15554438925e303c99ba42fa1c6a9b4254a6ee6fae99031'), 'ntwin32/secure_transport/native_time_probe.c': (6364, '98c3d61a6cb585d9ce1822c5a233737c7d1d66fe29c16eb2968771814a4459da'), 'ntwin32/secure_transport/probe.c': (28767, '39fa6b3915de7aa2378173fc7ca3258267176e20cb2dd451ea795816d3b15585'), 'ntwin32/secure_transport/sspi_native.c': (35445, '32b6bbd23d7ed61c40d86e08711c631140dfeb3ee6e5e1a6427d9eebb2955672'), 'ntwin32/secure_transport/sspi_native.def': (769, 'd31e87e33f0b51bb175265e0f05a073749e1785d3d4d2cb34713ae7dd59566a7'), 'ntwin32/secure_transport/sspi_native.h': (1972, '172f12027a18b9d04a81936da4169f62793f25aa6d09d13edbc1da4bf81f280c'), 'ntwin32/secure_transport/sspi_native_host_test.py': (45452, 'a1ecceca9c7989d7559b610e6266285b00ba915c3a6f1880a13744d88424aea2'), 'ntwin32/secure_transport/sspi_stream.c': (16139, '873407d0cb80072957d6dacb1c2b4ba0c96eb9cd3b81ab93159c4668610c8ac1'), 'ntwin32/secure_transport/sspi_stream.h': (5600, '87c9038c2a5411a63b6e9cb942f1d6da04f7aaded296933357d5fdfad02b79e2'), 'ntwin32/secure_transport/transport.c': (13450, '353556e66a46c807480436015e1f85c0f80e93988d0d3e581cef4aa9d386b604'), 'ntwin32/secure_transport/transport.h': (3792, '7f3f364ab97fd58d94c03f80432a94b99c0ad28b71b48bc4d0ee4920e3191cda'), 'ntwin32/secure_transport/user_config.h': (1635, '578949f773d5189b149804013880786b2b258c1837fa32d4e9a117031ca31ab6')}
 SUPPORT = {'benchmarks/win98se-ko-oem-native-exports-v1.json': (1866608, '3854198a9b2bf9f54fe0383330d09ed2ea3d0d510c3d7ba24eb13426e37b4f0d'), 'ntwin32/secure_transport/i486_gate_test.py': (5194, '6e90e48f6f690efd29d2db7035478589bca4f140f3c28f05960c9bd0b5a4af69'), 'ntwin32/legacy_provider_bridge/pe_link_script_6970.py': (26070, '9a98336d9c5a0bc417ed816454d3188e79dc4cf326a52bfabad73df8c903b55b'), 'ntwin32/legacy_provider_bridge/build_native_pe32_guarded_6970.py': (76927, 'b7d627c71076b6cbdb1e65d896ab798e4fe3688067ef7b0a1774243d2c3010d9'), 'ntwin32/legacy_provider_bridge/test_native_sspi_6970.py': (41247, '1b52856e537b298ea253d564754afefc35eb340bd7f7090fc1b30786bfa4f44e')}
 NEW_HELPERS = ('native_tls_resources_6970.py', 'i486_stream_6970.py',
-               'native_tls_quiescent_controls_6970.py')
+               'native_tls_quiescent_controls_6970.py', 'native_tls_pidfd_controls_6970.py')
 FALSE_FLAGS = ('native_execution_verified', 'windows98_integration_verified',
                'network_execution_verified', 'credential_execution_verified',
                'os_tls_provider_verified', 'os_registration_verified',
@@ -269,9 +270,15 @@ def require_quiescent_controls(report, controls, guard, resources, source_pins, 
                         'positive actual process/stop cleanup failed')
             else:
                 require(command.get('returncode') == -9 and command.get('group_kill') == 'REQUESTED_BEFORE_REAP'
-                        and isinstance(command.get('aborted'), str) and expected['reason'] in command['aborted']
-                        and quiescence.get('failure_stop_retained_until_owned_kill') is True,
+                        and isinstance(command.get('aborted'), str) and expected['reason'] in command['aborted'],
                         'negative actual command did not fail/kill at expected boundary')
+                if index == 4:
+                    require(quiescence.get('stop_requests') == 0 and quiescence.get('continue_requests') == 0
+                            and quiescence.get('failure_stop_retained_until_owned_kill') is False,
+                            'malformed first observation must refuse before every STOP/CONT')
+                else:
+                    require(quiescence.get('failure_stop_retained_until_owned_kill') is True,
+                            'negative paused command was not held until owned kill')
             for key in ('escaped_writers_excluded_verified', 'continuous_group_stop_verified', 'filesystem_quota_verified'):
                 require(quiescence.get(key) is False, 'command unsupported stop scope: ' + key)
             stdout, stderr = payload(capture.get('stdout_hex')), payload(capture.get('stderr_hex'))
@@ -303,6 +310,295 @@ def require_quiescent_controls(report, controls, guard, resources, source_pins, 
             and guard.capture_bytes == offsets['capture'] + captured <= resources.CAPTURE_LIMIT
             and guard.decoder_bytes == offsets['decoder'] + decoded <= resources.DECODER_LIMIT,
             'actual shared pool accounting differs')
+    return pins
+
+
+def require_pidfd_controls(report, controls, guard, resources, source_pins, tools, offsets):
+    """Read closed five-case evidence and host fixture metadata independently."""
+    def require(condition, message):
+        if not condition:
+            raise ValueError('pidfd controls: ' + message)
+
+    def natural(value):
+        return type(value) is int and value >= 0
+
+    def duration(value, limit):
+        return type(value) in (int, float) and 0 <= value <= limit
+
+    require(isinstance(report, dict) and report.get('schema') == 'native-tls-pidfd-vfork-controls-6970-v1'
+            and report.get('result') == 'PASS_PIDFD_VFORK_CONTROLS_ONLY'
+            and type(report.get('completed')) is int and report['completed'] == 5
+            and type(report.get('failures')) is int and report['failures'] == 0,
+            'complete actual five-case PASS required')
+    names = ('positive-vfork-parent-first','positive-nested-vfork-parent-first',
+             'negative-vfork-preexec-timeout','negative-ancestry-cycle','negative-pidfd-token-change')
+    cases = report.get('cases')
+    require(controls.CONTROL_NAMES == names and isinstance(cases,list) and len(cases)==5
+            and tuple(row.get('name') for row in cases if isinstance(row,dict)) == names,
+            'exact ordered cases required')
+    for key in ('resource_source_before_after_equal','control_source_before_after_equal',
+                'actual_controls_execution_verified','fault_injection_is_not_kernel_identity_reuse_attestation',
+                'readiness_does_not_prove_production_vfork_cause','case_pool_charges_exclude_parent_prepare_commands'):
+        require(report.get(key) is True, 'required observation absent: '+key)
+    for key in ('original_production_and_support_sources_changed','expected_negative_commands_added_to_parent',
+                'host_elf_object_binary_transfer_authorized','tool_dynamic_runtime_closure_verified',
+                'escaped_writers_excluded_verified','continuous_group_stop_verified','filesystem_quota_verified',
+                'native_execution_verified','windows98_integration_verified','tls_execution_verified'):
+        require(report.get(key) is False, 'unsupported scope claim: '+key)
+    require(report.get('resource_source')==source_pins['ntwin32/secure_transport/native_tls_resources_6970.py']
+            and report.get('control_source')==source_pins['ntwin32/secure_transport/native_tls_pidfd_controls_6970.py']
+            and report.get('source_input_count_delta')==1 and report.get('fixture_bytes_limit')==8*1024**2
+            and report.get('case_timeout_seconds')==5 and report.get('total_timeout_seconds')==60
+            and duration(report.get('elapsed_seconds'),60), 'source envelope or bounds differ')
+    fixture=report.get('fixture_build')
+    require(isinstance(fixture,dict) and fixture.get('tools_after_equal') is True
+            and fixture.get('tools_before')=={name:pair[1] for name,pair in tools.items()}
+            and fixture.get('metadata_only_host_binaries') is True
+            and fixture.get('binary_transfer_authorized') is False
+            and fixture.get('headers_libraries_crt_used') is False
+            and fixture.get('tool_dynamic_runtime_closure_verified') is False
+            and fixture.get('source_bytes_limit')==8192 and fixture.get('object_elf_bytes_limit_each')==2*1024**2
+            and fixture.get('map_bytes_limit')==256*1024 and fixture.get('private_stack_memory_bytes')==65536,
+            'explicit native fixture envelope required')
+    paths={name:guard.tmp/('pidfd-fixture'+suffix) for name,suffix in
+           (('source','.S'),('object','.o'),('elf','.ELF'),('map','.map'))}
+    argvs=[[tools['as'][0],'--version'],[tools['ld'][0],'--version'],
+           [tools['as'][0],'--64','--fatal-warnings','-o',str(paths['object']),str(paths['source'])],
+           [tools['ld'][0],'-m','elf_x86_64','-e','_start','--build-id=none','-z','noexecstack',
+            '--fatal-warnings','-Map',str(paths['map']),'-o',str(paths['elf']),str(paths['object'])]]
+    labels=['pidfd-as-version','pidfd-ld-version','pidfd-fixture-as','pidfd-fixture-ld']
+    require(fixture.get('command_indexes')==list(range(offsets['commands'],offsets['commands']+4))
+            and fixture.get('command_labels')==labels and fixture.get('argvs')==argvs
+            and len(guard.commands)==offsets['commands']+4, 'four actual parent preparation commands required')
+    preparation=guard.commands[offsets['commands']:]
+    for index,command in enumerate(preparation):
+        require(command.get('label')==labels[index] and command.get('argv')==argvs[index]
+                and command.get('cwd')==str(guard.tmp) and command.get('returncode')==0
+                and command.get('aborted') is None and command.get('reaped') is True
+                and command.get('raw_stdout_stream') is False,
+                'actual parent preparation command failed or differs')
+    pins,inodes={},set()
+    def proof(record,path,maximum):
+        require(isinstance(record,dict) and set(record)=={'path','relative_path','bytes','sha256','identity'}
+                and record['path']==str(path) and record['relative_path']==str(path.relative_to(guard.output)),
+                'exact fixture/child path required')
+        pin=guard.pin(path,maximum=maximum)
+        require(pin=={key:record[key] for key in ('bytes','sha256','identity')},'actual held bytes changed')
+        if str(path) not in pins:
+            token=tuple(pin['identity'][:2])
+            require(token not in inodes,'duplicate proof inode')
+            inodes.add(token)
+            pins[str(path)]=pin
+        raw,held=regular(path,maximum)
+        require(held==pin,'interpreted held bytes differ from proof pin')
+        return raw
+    fixture_raw={}
+    for name,maximum in (('source',8192),('object',2*1024**2),('elf',2*1024**2),('map',256*1024)):
+        fixture_raw[name]=proof(fixture.get(name),paths[name],maximum)
+    require(fixture_raw['source']==controls.ASSEMBLY.encode('ascii')
+            and [line[5:] for line in fixture_raw['map'].decode('utf-8').splitlines()
+                 if line.startswith('LOAD ')]==[str(paths['object'])], 'literal GAS or only map LOAD differs')
+    for name,kind in (('object',1),('elf',2)):
+        raw=fixture_raw[name]
+        require(len(raw)>=64 and raw[:7]==b'\x7fELF\x02\x01\x01','actual ELF64 little-endian required')
+        fields=struct.unpack_from('<HHIQQQIHHHHHH',raw,16)
+        e_type,machine,version,entry,phoff,shoff,flags,ehsize,phsize,phnum,shsize,shnum,shstr=fields
+        require(e_type==kind and machine==62 and version==1 and ehsize==64
+                and shsize==64 and 1<=shnum<=128 and shoff+shnum*64<=len(raw), 'ELF identity/sections differ')
+        metadata=fixture.get(name+'_metadata')
+        require(isinstance(metadata,dict) and metadata.get('class')=='ELF64'
+                and metadata.get('byteorder')=='little' and metadata.get('machine')=='EM_X86_64'
+                and metadata.get('type')==('ET_REL' if kind==1 else 'ET_EXEC')
+                and metadata.get('file_bytes')==len(raw) and metadata.get('entry')==entry
+                and metadata.get('section_count')==shnum and metadata.get('program_header_count')==phnum
+                and metadata.get('private_nobits_stack_bytes')==65536 and metadata.get('stack_alignment')==16
+                and metadata.get('metadata_only') is True and metadata.get('binary_transfer_authorized') is False
+                and metadata.get('runtime_execution_or_loaded_code_attestation') is False,
+                'host binary metadata is incomplete or promotes unsupported scope')
+        if kind==1:
+            require(phnum==entry==0,'ET_REL must have no executable entry/program headers')
+        else:
+            require(phsize==56 and 1<=phnum<=32 and phoff>=64 and phoff+phnum*56<=len(raw),
+                    'bounded actual ELF program headers required')
+            segments=[struct.unpack_from('<IIQQQQQQ',raw,phoff+i*56) for i in range(phnum)]
+            loads=[row for row in segments if row[0]==1]
+            stacks=[row for row in segments if row[0]==0x6474e551]
+            require(all(row[0] not in (2,3) for row in segments) and len(stacks)==1 and not stacks[0][1]&1
+                    and 1<=len(loads)<=8 and sum(row[6] for row in loads)<=2*1024**2
+                    and all(row[5]<=row[6] and row[2]+row[5]<=len(raw) and row[1]&3!=3 for row in loads)
+                    and sum(row[1]==5 and row[3]<=entry<row[3]+row[5] for row in loads)==1
+                    and all(metadata.get(key) is True for key in
+                        ('no_PT_INTERP','no_PT_DYNAMIC','nonexecutable_GNU_STACK','entry_in_RX_segment')),
+                    'actual static non-RWX host fixture segments differ')
+    expected_paths={paths['source'],paths['map']}
+    expected_paths.update(guard.tmp/('pidfd-%02d'%i)/name for i in range(5)
+                          for name in ('result.json','control.stdout','control.stderr'))
+    records=report.get('proof_files')
+    require(isinstance(records,list) and len(records)==17 and
+            {row.get('path') for row in records if isinstance(row,dict)}=={str(p) for p in expected_paths}
+            and fixture.get('proof_files')==[fixture['source'],fixture['map']], 'exact17 text-only transfer pins required')
+    for record in records:
+        path=Path(record['path'])
+        proof(record,path,resources.RECEIPT_LIMIT)
+    captured=decoded=0
+    prep_capture=sum(command['captured_bytes'] for command in preparation)
+    require(fixture.get('capture_pool_before_prepare')==offsets['capture']
+            and fixture.get('decoder_pool_before_prepare')==offsets['decoder']
+            and fixture.get('capture_pool_after_prepare')==offsets['capture']+prep_capture
+            and fixture.get('decoder_pool_after_prepare')==offsets['decoder']
+            and fixture.get('prepare_capture_pool_delta')==prep_capture
+            and fixture.get('prepare_decoder_pool_delta')==0,'actual four-parent-command pool arithmetic differs')
+    for index,command in enumerate(preparation):
+        for stream in ('stdout','stderr'):
+            raw,pin=regular(guard.output/(labels[index]+'.'+stream),resources.CAPTURE_LIMIT)
+            require(command.get('captured_sha256',{}).get(stream)==pin['sha256']
+                    and command.get('full_'+stream+'_bytes')==len(raw)
+                    and command.get('full_'+stream+'_sha256')==pin['sha256']
+                    and (not raw if stream=='stderr' or index>=2 else raw.startswith(b'GNU ')),
+                    'physical complete preparation captures differ')
+    for index,row in enumerate(cases):
+        expected=controls.CONTROL_EXPECTATIONS[names[index]]
+        require(row.get('result')=='PASS' and row.get('executed') is True
+                and row.get('expected_child_epoch')==row.get('child_epoch')==expected['child_epoch']
+                and row.get('injected_fault') is expected['injected_fault']
+                and row.get('stop_request_expected') is expected['stop_request_expected']
+                and row.get('expected_negative_reason')==expected['reason']
+                and row.get('expected_command_count')==row.get('command_count')==1
+                and duration(row.get('elapsed_seconds'),5), 'case classification or wall bound differs')
+        require(all(natural(row.get(key)) for key in
+                    ('capture_pool_offset','decoder_pool_offset','capture_pool_delta','decoder_pool_delta'))
+                and row['capture_pool_offset']==offsets['capture']+prep_capture+captured
+                and row['decoder_pool_offset']==offsets['decoder']+decoded,'inherited physical pool offsets differ')
+        observed=row.get('observation')
+        require(isinstance(observed,dict) and observed.get('observed_D_ppid_ready') is True
+                and observed.get('ready_before_any_stop') is True and observed.get('wrong_target_stop_requests')==0
+                and observed.get('early_continue_requests')==0
+                and observed.get('injected_fault_count')==int(expected['injected_fault'])
+                and observed.get('readiness_does_not_prove_production_vfork_cause') is True
+                and duration(observed.get('readiness_wait_seconds'),1), 'actual pre-STOP readiness absent')
+        snapshot=observed.get('readiness_snapshot')
+        require(isinstance(snapshot,dict) and snapshot.get('stable') is True
+                and set(snapshot)=={'leader','members','tasks','stable'}
+                and digest(json.dumps(snapshot,sort_keys=True,separators=(',',':')).encode())
+                    ==observed.get('readiness_sha256'), 'full readiness snapshot SHA differs')
+        members,tasks=snapshot['members'],snapshot['tasks']
+        require(isinstance(members,list) and isinstance(tasks,list)
+                and len(members)==len(tasks)==(3 if index==1 else 2),'exact fixture member/task count differs')
+        by_pid={item['pid']:item for item in members}
+        leader=snapshot['leader']
+        require(len(by_pid)==len(members) and leader==by_pid.get(leader.get('pid'))
+                and all(set(item)=={'pid','ppid','startticks','pgrp','session','uid','state'}
+                    and all(natural(item[key]) for key in ('pid','ppid','startticks','pgrp','session','uid'))
+                    and item['pid']>0 and item['pgrp']==item['session']==leader['pid']
+                    and item['uid']==os.getuid() for item in members)
+                and {task.get('pid') for task in tasks}==set(by_pid)
+                and all(set(task)==set(by_pid[task['pid']])|{'tid'} and task.get('tid')==task['pid']
+                        and all(task[key]==value for key,value in by_pid[task['pid']].items()) for task in tasks),
+                'actual readiness identities and PPID task rows differ')
+        if index==1:
+            workers=[item for item in members if item['pid']!=leader['pid']
+                     and item['ppid']==leader['pid'] and item['state']=='D']
+            require(leader['state'] in ('S','R') and len(workers)==1,'nested waiting parent/worker absent')
+            blocking=workers[0]
+        else:
+            require(leader['state']=='D','actual vfork-waiting leader D absent')
+            blocking=leader
+        require(sum(item['pid']!=blocking['pid'] and item['ppid']==blocking['pid']
+                    and item['state'] in ('S','R') for item in members)==1,'actual direct pre-exec child PPID absent')
+        child_path=guard.tmp/('pidfd-%02d'%index)/'result.json'
+        require(row.get('child_receipt_path')==str(child_path)
+                and row.get('child_receipt_sha256')==pins[str(child_path)]['sha256']
+                and row.get('child_receipt_bytes')==pins[str(child_path)]['bytes'],'closed child receipt pin differs')
+        child_raw,child_pin=regular(child_path,resources.RECEIPT_LIMIT)
+        require(child_pin==pins[str(child_path)],'closed child changed during actual read')
+        child=json.loads(child_raw)
+        require(child.get('schema')=='native-tls-pidfd-control-child-6970-v1'
+                and child.get('control')==names[index] and child.get('result')==expected['child_epoch']
+                and child.get('expected_negative') is (index>=2)
+                and child.get('injected_fault') is expected['injected_fault']
+                and child.get('stop_request_expected') is expected['stop_request_expected']
+                and child.get('receipt_accounting_verified') is True and child.get('command_count')==1
+                and child.get('actual_control_observation')==observed and child.get('observed_control_error') is None
+                and child.get('expected_fault_observed')==row.get('observed_error')
+                and child.get('fixture_elf_sha256')==fixture['elf']['sha256']
+                and child.get('inherited_parent_capture_bytes')==row['capture_pool_offset']
+                and child.get('inherited_parent_decoder_bytes')==row['decoder_pool_offset']
+                and all(child.get(key) is False for key in
+                    ('native_execution_verified','windows98_integration_verified','tls_execution_verified')),
+                'closed actual child epoch/observations differ')
+        strings=child.get('command_argv_string_table')
+        require(child.get('command_argv_encoding')=='lossless-string-table-v1'
+                and isinstance(strings,list) and len(strings)<=8192 and len(set(strings))==len(strings)
+                and all(isinstance(value,str) for value in strings) and sum(len(value.encode()) for value in strings)<=256*1024
+                and isinstance(child.get('commands'),list) and len(child['commands'])==1
+                and isinstance(row.get('commands'),list) and len(row['commands'])==1
+                and isinstance(row.get('capture_payloads'),list) and len(row['capture_payloads'])==1,
+                'bounded lossless actual command envelope required')
+        command,actual,capture=row['commands'][0],child['commands'][0],row['capture_payloads'][0]
+        refs=actual.get('argv_refs')
+        require(isinstance(refs,list) and all(natural(ref) and ref<len(strings) for ref in refs),'invalid argv refs')
+        argv=[strings[ref] for ref in refs]
+        mode='direct' if index==0 else 'nested' if index==1 else 'stuck'
+        require(argv==[str(paths['elf']),mode] and command.get('label')=='control'
+                and command.get('argv_sha256')==digest(json.dumps(argv,separators=(',',':')).encode())
+                and all(actual.get(key)==value for key,value in command.items() if key!='argv_sha256')
+                and command.get('reaped') is True and command.get('raw_stdout_stream') is False,
+                'actual fixture invocation/cleanup differs')
+        q=command.get('quiescence')
+        require(isinstance(q,dict) and q.get('stop_signal_model')=='pidfd-process-parent-first-flags0-v1'
+                and q.get('observation_row_schema')=='owned-process-task-ppid-v2'
+                and all(q.get(key) is False for key in
+                    ('escaped_writers_excluded_verified','continuous_group_stop_verified','filesystem_quota_verified')),
+                'declared process-targeted observation model absent')
+        if index<2:
+            require(command.get('returncode')==0 and command.get('aborted') is None
+                    and row.get('observed_error') is None and observed.get('paused_scans',0)>0
+                    and q.get('verified_pauses',0)>0 and q.get('continue_requests',0)>0
+                    and (command.get('group_kill')=='REQUESTED_BEFORE_REAP'
+                         or command.get('group_kill')=='NO_SUCH_GROUP_BEFORE_REAP'
+                         and q.get('stop_no_live_group_observations',0)>0
+                         and observed.get('all_zombie_group_stop_requests',0)>0), 'actual positive stop/count/cleanup failed')
+        else:
+            require(command.get('returncode')==-9 and command.get('group_kill')=='REQUESTED_BEFORE_REAP'
+                    and isinstance(command.get('aborted'),str) and expected['reason'] in command['aborted']
+                    and isinstance(row.get('observed_error'),str) and expected['reason'] in row['observed_error'],
+                    'actual negative kill/reap/reason absent')
+        if expected['stop_request_expected']:
+            require(observed.get('stop_requests',0)>0 and q.get('pidfd_stop_requests',0)>0
+                    and (index<2 or q.get('failure_stop_retained_until_owned_kill') is True), 'actual pidfd STOP not exercised')
+        else:
+            require(observed.get('stop_requests')==q.get('stop_requests')==q.get('continue_requests')==0
+                    and q.get('failure_stop_retained_until_owned_kill') is False, 'pre-STOP refusal fabricated a held STOP')
+        physical=0
+        stdout=None
+        for stream in ('stdout','stderr'):
+            value=capture.get(stream+'_hex')
+            require(isinstance(value,str) and len(value)<=8192 and len(value)%2==0
+                    and re.fullmatch('[0-9a-f]*',value) is not None,'bounded canonical capture required')
+            data=bytes.fromhex(value)
+            path=child_path.parent/('control.'+stream)
+            actual_raw,actual_pin=regular(path,4096)
+            require(actual_raw==data and actual_pin==pins[str(path)] and pins[str(path)]['sha256']==digest(data)
+                    and command.get('captured_sha256',{}).get(stream)==digest(data)
+                    and command.get('full_'+stream+'_sha256')==digest(data)
+                    and command.get('full_'+stream+'_bytes')==len(data),'actual physical capture/fullstream differs')
+            physical+=len(data)
+            if stream=='stdout':stdout=data
+        if index<2:
+            expected_stdout=(b'VFORK_READY\nLEAF_OK\nDIRECT_OK\n' if index==0 else
+                             b'VFORK_READY\nLEAF_OK\nWORKER_OK\nNESTED_OK\n')
+            require(stdout==expected_stdout,'positive self-exec fixture output differs')
+        require(physical==command.get('captured_bytes')==row['capture_pool_delta']==child.get('control_capture_pool_delta')
+                and row['decoder_pool_delta']==child.get('control_decoder_pool_delta')==0
+                and child.get('captured_normal_bytes')==row['capture_pool_offset']+physical
+                and child.get('decoder_observed_bytes')==row['decoder_pool_offset'],'closed shared pool charge differs')
+        captured+=physical
+        decoded+=row['decoder_pool_delta']
+    require(captured==report.get('capture_bytes_charged_to_parent')==report.get('capture_payload_bytes')<=4096
+            and decoded==report.get('raw_bytes_charged_to_parent')==0
+            and guard.capture_bytes==offsets['capture']+prep_capture+captured<=resources.CAPTURE_LIMIT
+            and guard.decoder_bytes==offsets['decoder']<=resources.DECODER_LIMIT
+            and sum(pin['bytes'] for pin in pins.values())<=8*1024**2, 'actual fixture/shared pool bounds differ')
     return pins
 
 
@@ -1014,6 +1310,10 @@ def build(output, prep, expected_preparation_sha):
         quiescent_controls = load(ROOT / quiescent_name,
             (source_pins[quiescent_name]['bytes'], source_pins[quiescent_name]['sha256']),
             'native_tls_quiescent_controls_frozen', guard)
+        pidfd_name = 'ntwin32/secure_transport/native_tls_pidfd_controls_6970.py'
+        pidfd_controls = load(ROOT / pidfd_name,
+            (source_pins[pidfd_name]['bytes'], source_pins[pidfd_name]['sha256']),
+            'native_tls_pidfd_controls_frozen', guard)
         guard.check()
         receipt['stream_controls'] = stream.run_controls(gate)
         receipt['resource_control_plan']=resources.hosted_control_plan()
@@ -1040,6 +1340,7 @@ def build(output, prep, expected_preparation_sha):
         cc = pin_tool('i686-w64-mingw32-gcc-win32')
         objdump = pin_tool('i686-w64-mingw32-objdump')
         cmake_tool, ninja = pin_tool('cmake'), pin_tool('ninja')
+        native_as, native_ld = pin_tool('as'), pin_tool('ld')
         ar, ranlib, windres = (pin_tool('i686-w64-mingw32-' + n) for n in ('ar', 'ranlib', 'windres'))
         python = str(Path(sys.executable).resolve(strict=True))
         tools[python] = guard.pin(Path(python), maximum=256 * 1024**2,
@@ -1115,6 +1416,12 @@ def build(output, prep, expected_preparation_sha):
         receipt['quiescent_controls'] = quiescent_controls.run_controls(guard, resources, python)
         quiescent_pins = require_quiescent_controls(receipt['quiescent_controls'], quiescent_controls,
             guard, resources, source_pins, tools[python], control_offsets)
+        pidfd_offsets = {'commands':len(guard.commands), 'capture':guard.capture_bytes,
+                         'decoder':guard.decoder_bytes}
+        receipt['pidfd_controls'] = pidfd_controls.run_controls(guard, resources, native_as, native_ld)
+        pidfd_pins = require_pidfd_controls(receipt['pidfd_controls'], pidfd_controls, guard,
+            resources, source_pins, {'as':(native_as,tools[native_as]), 'ld':(native_ld,tools[native_ld])},
+            pidfd_offsets)
         # Original in-memory ISA methods run through the existing exact-byte loader.
         r = guard.run([python, '-B', '-c', bridge.I486_CONTROL_CHILD,
                        str(HERE / 'i486_gate.py'), PRODUCTION[gate_name][1],
@@ -1533,6 +1840,10 @@ def build(output, prep, expected_preparation_sha):
         if guard.capture_bytes>resources.CAPTURE_LIMIT or guard.decoder_bytes>resources.DECODER_LIMIT:
             raise ValueError('final actual parent capture/raw pools exceeded unchanged limits')
         receipt['quiescent_control_proof_files_before_after_equal']=True
+        for path,pin in pidfd_pins.items():
+            if guard.pin(Path(path),maximum=pidfd_controls.FIXTURE_BYTES_LIMIT)!=pin:
+                raise ValueError('actual pidfd text proof or metadata-only host fixture changed during build')
+        receipt['pidfd_control_proof_files_before_after_equal']=True
         for relative,pin in source_pins.items():
             if regular(ROOT/relative,2*1024**2)[1]!=pin:
                 raise ValueError('original source/helper changed')
@@ -1540,8 +1851,10 @@ def build(output, prep, expected_preparation_sha):
         if upstream_snapshot(prep,expected_preparation_sha)[1]!=upstream:
             raise ValueError('full prepared original source changed')
         receipt['upstream_before_after_equal']=True
+        host_fixture_binaries={guard.tmp/'pidfd-fixture.o',guard.tmp/'pidfd-fixture.ELF'}
         receipt['compiled_outputs']={str(p.relative_to(output)):guard.pin(p,maximum=8*1024**2)
-            for p in sorted(output.rglob('*')) if p.is_file() and p.suffix in ('.a','.obj','.o','.map','.ld','.rsp')}
+            for p in sorted(output.rglob('*')) if p.is_file() and p not in host_fixture_binaries
+            and p.suffix in ('.a','.obj','.o','.map','.ld','.rsp')}
         receipt['recipe_changes']=['explicit gcc-win32 backend','separate original upstream input',
             'explicit selected windres/ar/ranlib paths',
             'exact literal CMake recipe copied without original helper execution','GEN_FILES explicitly OFF',

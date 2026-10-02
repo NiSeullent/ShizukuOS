@@ -1,0 +1,27 @@
+# Parent-first native TLS source review — 6970
+
+Windows 98 remains the product OS. ShizukuDOS replaces MS-DOS; Kernel32/64 provide Windows 98 backend services. This isolated source lane does not publish main, a live site, an ISO or a native guest result.
+
+The seventh hosted attempt, run36954896029/job110675583418 at861e452e7b46a31be09bcfc6dd376142f73f8830, failed its first object command's original one-second stop confirmation. Root and two independent reviewers read the complete retained failure envelope. The completed diagnostic recorded leader D/member T shortly before timeout; neither a vfork cause nor the timeout-instant state was proved. No PE artifact was produced. The root closed review remains at `/dev/shm/win98-hosted-native-tls-6970-36954896029/root-failure-review.json`, 46,083 bytes, SHA256 fa1516f6ebda1b786b3125fd8806039e5a8335b4c01c289e14ec2dc57db40922. Its pending-at-creation marker remains immutable; later reviews are recorded separately.
+
+The successor changes active STOP requests to flags0 process-targeted pidfds and confirms every currently owned ancestor's process/tasks as T/Z before stopping a descendant. Fresh PPID metadata is separate from the five-field birth token. A complete observation precedes every initial STOP; two identical all-T/Z observations and post-count equality remain mandatory. No numeric-PID STOP fallback, deadline extension, acceptance of D, escaped-writer guarantee or kernel-cause claim is introduced.
+
+One verified-buffer-loaded helper adds five hosted cases: direct and nested real pre-exec vfork, real pre-exec timeout, selective ancestry-cycle refusal and selective bound-token refusal. Its handwritten GAS uses raw Linux syscalls, a private aligned 64KiB NOBITS child stack and exact pinned self-exec. Four parent commands pin/query native GNU as/ld and assemble/link one static fixture. The object and ELF are metadata-only host fixtures excluded from all transfer paths. Seventeen explicit new text proofs comprise five closed child receipts, ten physical captures, GAS and map. Existing ten group cases and fourteen Ninja parser cases remain; only the existing malformed-first-observation assertion changes to zero STOP/CONT and held=false while preserving refusal, rc=-9, owned kill-before-reap and reaped=true.
+
+The original twenty production source pins (201,016 bytes) and five support pins (2,016,046 bytes) match the parent revision. Direct source count becomes thirty. Guard run/count/pin/recursive accounting and cleanup methods remain AST-identical; close_receipt adds declared signal/PPID model metadata only. The old 8MiB bridge profile is unchanged. New preparation/control files remain inside the existing 32MiB proof allowance, 1MiB receipt, 256KiB normal capture, 64MiB aggregate decoder, 20GiB free-space reserve, 512KiB child-text logger, 48MiB transfer payload and 64MiB upload-observation bounds.
+
+| Frozen source | Bytes | SHA256 |
+| --- | ---: | --- |
+| build_native_tls_guarded_6970.py | 125041 | 1d2e59eea56726f85b75f179d3a4484758a0dfd98e9483068c33dd77bcd14b71 |
+| native_tls_resources_6970.py | 87482 | 7c5e2c615dec28c338ece68c14cf0d6dddfb8d723d01ded62d85036ee423db18 |
+| native_tls_quiescent_controls_6970.py | 31062 | ed73af0b390655953aa63b26c6ee5be3ba5b1779c788d2e147761758a428949d |
+| native_tls_pidfd_controls_6970.py | 49553 | 2f86d53ec0e5e4e7cf899df9b063b939f30659ac538aa91d720c26852fa897c3 |
+| i486_stream_6970.py (unchanged) | 22653 | 0b661068ebac98331aac796d4612ee6ef78f3825b12683df9ec03e46f8e3a08f |
+| native-tls-build-6970.yml | 51089 | 54a6a0a47a7699325a8f14e58e2fbb572900ef0c4a3fc61144d47b20f1d615ff |
+| parent-first plan including amendment B | 8785 | ffc3a51ad4a0a53e893678c97d886f9453377d2b62ecd30d3ea7f22647136179 |
+
+Root full held-file reads, Python AST comparisons, YAML/all seven inline Python ASTs, five literal workflow preload pins, all original twenty-plus-five file hashes and diff whitespace checks passed. Two independent source reviewers found no concrete blocker in the resource/helper/builder/old-case amendment. Full workflow review also identified an inherited preparation setup gap: selector construction and registration followed Popen outside its cleanup try. The successor protects that setup immediately after spawn and closes the pipe even if selector closure fails; the same owned kill-before-reap path covers setup exceptions. This is static verification; no helper, compiler, control or VM ran locally because available local space remains below the 20GiB reserve. Actual hosted controls, native compilation, Windows 98 execution, OS TLS, application compatibility and final ISO acceptance are still pending.
+
+Actual NAS47 evidence persistence completed separately at `6970/incremental-tls-failures-20261002T023220Z`, with root and two independent full readbacks. The strict USTAR is 5,990,400 bytes, SHA256 31c13e534378f97da14727e86810ad4558fe74025d819b526682061d86542016, containing 47 nonbinary files totaling 5,953,889 bytes. The original ISO and six earlier published evidence files were preserved. Four compiler binaries and nine seventh-attempt files remain in RAM; all-RAM-persisted=false and reclaimed-space credit=0. The earlier 213-file inventory is historical.
+
+Other-chat collaboration uses actual app status reads and shared custody notes, including c957's recorded acknowledgment of this lane's NAS47 and seventh-log collection. No unsupported direct-send or wake claim is made. Canonical kernel, native guest, main/site and ISO work remain with their designated owners.
