@@ -937,11 +937,11 @@ unsigned run_pma_self_tests(void)
     PMA_CHECK("policy interfaces are available", thread_set_sched_policy && thread_get_sched_policy &&
               sched_get_stats && sched_validate);
     if (pma_failures) {
-        if (k64_cmdline_has("shz.pma=test")) {
+        if (k64_cmdline_has("shz.pma=test") || k64_cmdline_has("shz.pma=report")) {
             kprintf("K64 PMA summary: failures=%u missing_interfaces=1\n", pma_failures);
             shz_evidence(18, 0x504d0000u | pma_failures);
-            shz_exit(1);
         }
+        if (k64_cmdline_has("shz.pma=test")) shz_exit(1);
         return pma_failures;
     }
     test_policy_validation();
@@ -961,9 +961,9 @@ unsigned run_pma_self_tests(void)
     kprintf("K64 PMA summary: failures=%u ticks=%llu switches=%llu preemptions=%llu wakeups=%llu timeouts=%llu ready=%u live=%u cpus=%u\n",
             pma_failures, stats.ticks, stats.context_switches, stats.preemptions, stats.wakeups, stats.timeouts,
             stats.ready_threads, stats.live_threads, stats.cpu_count);
-    if (k64_cmdline_has("shz.pma=test")) {
+    if (k64_cmdline_has("shz.pma=test") || k64_cmdline_has("shz.pma=report")) {
         shz_evidence(18, 0x504d0000u | pma_failures);
-        shz_exit(pma_failures ? 1 : 0);
     }
+    if (k64_cmdline_has("shz.pma=test")) shz_exit(pma_failures ? 1 : 0);
     return pma_failures;
 }
