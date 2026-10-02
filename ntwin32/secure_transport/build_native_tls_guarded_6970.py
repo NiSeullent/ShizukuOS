@@ -2421,6 +2421,57 @@ def build(output, prep, expected_preparation_sha):
         for key in ('capture_bytes_charged_to_parent', 'decoder_bytes_charged_to_parent'):
             if type(cached[key]) is not int or cached[key] != 0:
                 raise ValueError('cached diagnostic controls changed capture pools')
+        first_before = (encode(guard.commands), len(guard.commands), guard.capture_bytes,
+                        guard.decoder_bytes, guard.failure,
+                        encode(getattr(guard, '_first_failure_exception_metadata', None)))
+        if first_before[1] != 33:
+            raise ValueError('first failure metadata controls require actual parent33')
+        first = resources.hosted_first_failure_metadata_controls()
+        receipt['first_failure_metadata_controls'] = first
+        first_after = (encode(guard.commands), len(guard.commands), guard.capture_bytes,
+                       guard.decoder_bytes, guard.failure,
+                       encode(getattr(guard, '_first_failure_exception_metadata', None)))
+        if first_before != first_after:
+            raise ValueError('first failure metadata controls changed actual parent state')
+        first.update(actual_parent_command_count=first_before[1],
+            actual_parent_command_records_before_after_equal=True,
+            actual_parent_capture_pools_before_after_equal=True,
+            actual_parent_failure_before_after_equal=True)
+        first_names = ('raised-oserror-traceback', 'first-string-and-empty-latch',
+            'first-exception-immutable', 'cause-context-cycle-bounds',
+            'traceback-and-byte-bounds', 'malformed-metadata-preserves-latch',
+            'main-only-export-default-wire')
+        first_raw = (json.dumps(first, sort_keys=True, separators=(',', ':'),
+                               ensure_ascii=True, allow_nan=False) + '\n').encode('ascii')
+        if (len(first_raw) > 8192
+                or first['schema'] != 'native-tls-first-failure-metadata-controls-6970-v1'
+                or first['result'] != 'PASS_FIRST_FAILURE_METADATA_CONTROLS_ONLY'
+                or type(first['completed']) is not int or first['completed'] != 7
+                or type(first['failures']) is not int or first['failures'] != 0
+                or type(first['cases']) is not list or len(first['cases']) != 7
+                or tuple(case['name'] for case in first['cases']) != first_names
+                or any(type(case) is not dict
+                       or set(case) != {'name', 'result', 'error', 'observations'}
+                       or case['result'] != 'PASS' or case['error'] is not None
+                       or type(case['observations']) is not dict
+                       or any(type(value) not in (bool, int, float, str, type(None))
+                              for value in case['observations'].values())
+                       for case in first['cases'])
+                or type(first['elapsed_seconds']) not in (int, float)
+                or not 0 <= first['elapsed_seconds'] <= 60):
+            raise ValueError('first failure metadata report schema or bound failed')
+        for key in ('synthetic_inputs_only', 'input_before_after_equal',
+                    'telemetry_counters_before_after_equal'):
+            if first[key] is not True:
+                raise ValueError('first failure metadata synthetic state changed')
+        for key in ('new_commands_or_child_epochs', 'actual_proc_reads_verified',
+                    'process_control_execution_verified', 'native_execution_verified',
+                    'windows98_integration_verified', 'tls_execution_verified'):
+            if first[key] is not False:
+                raise ValueError('first failure controls exceed metadata scope')
+        for key in ('capture_bytes_charged_to_parent', 'decoder_bytes_charged_to_parent'):
+            if type(first[key]) is not int or first[key] != 0:
+                raise ValueError('first failure metadata controls changed capture pools')
         # Original in-memory ISA methods run through the existing exact-byte loader.
         r = guard.run([python, '-B', '-c', bridge.I486_CONTROL_CHILD,
                        str(HERE / 'i486_gate.py'), PRODUCTION[gate_name][1],

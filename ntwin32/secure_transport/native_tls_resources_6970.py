@@ -1852,6 +1852,549 @@ class _OwnedGroupObservation:
                 os.close(fd)
 
 
+def _first_failure_metadata_base(state):
+    return {"schema": "native-tls-first-failure-exception-metadata-6970-v1",
+            "scope": "first_truthy_failure_latch_reason_metadata_only", "capture_state": state,
+            "root_exception_index": None, "exception_nodes": [], "traceback_steps_observed": 0,
+            "traceback_steps_truncated": False, "retained_frame_count": 0,
+            "exception_graph_truncated": False, "cycle_detected": False,
+            "canonical_bytes": 0, "diagnostic_byte_limit": 8192,
+            "exception_node_limit": 4, "traceback_step_limit": 64, "retained_frame_limit": 12,
+            "capture_refusal_reason": ("UNSUPPORTED_INTRINSIC_METADATA" if state == "CAPTURE_REFUSED" else None),
+            "new_proc_read": False, "new_source_read": False, "locals_or_args_inspected": False,
+            "new_time_sample": False, "process_control_executed": False,
+            "original_process_or_task_role_verified": False, "process_birth_or_ownership_verified": False,
+            "producer_cause_verified": False, "kernel_cause_verified": False,
+            "loaded_code_or_runtime_attestation_verified": False}
+
+
+def _first_failure_metadata_encode(metadata):
+    """Copy strict scalar/code metadata and bound its self-inclusive encoding."""
+    accounting_remaining = 32
+
+    def stabilize(data, reserve=4):
+        nonlocal accounting_remaining
+        while accounting_remaining > reserve:
+            accounting_remaining -= 1
+            raw = _stale_canonical(data)
+            if len(raw) > 8192:
+                return None
+            if data["canonical_bytes"] == len(raw):
+                return data
+            data["canonical_bytes"] = len(raw)
+        return None
+
+    def text(value, limit):
+        if type(value) is not str:
+            raise TypeError("intrinsic metadata label must be a string")
+        prefix = value[:limit].encode("utf-8")[:limit].decode("utf-8", errors="ignore")
+        return prefix, len(prefix) != len(value)
+
+    try:
+        base = _first_failure_metadata_base("EXCEPTION_METADATA")
+        if (type(metadata) is not dict or any(type(key) is not str for key in metadata)
+                or set(metadata) != set(base)):
+            raise TypeError("first-failure metadata object shape refused")
+        data = dict(metadata)
+        if (type(data["schema"]) is not str or data["schema"] != base["schema"]
+                or type(data["scope"]) is not str or data["scope"] != base["scope"]
+                or type(data["capture_state"]) is not str
+                or data["capture_state"] not in ("EXCEPTION_METADATA", "NON_EXCEPTION_REASON", "CAPTURE_REFUSED")
+                or data["diagnostic_byte_limit"] != 8192 or type(data["diagnostic_byte_limit"]) is not int
+                or data["exception_node_limit"] != 4 or type(data["exception_node_limit"]) is not int
+                or data["traceback_step_limit"] != 64 or type(data["traceback_step_limit"]) is not int
+                or data["retained_frame_limit"] != 12 or type(data["retained_frame_limit"]) is not int
+                or type(data["canonical_bytes"]) is not int or data["canonical_bytes"] < 0
+                or type(data["traceback_steps_observed"]) is not int
+                or not 0 <= data["traceback_steps_observed"] <= 64
+                or type(data["retained_frame_count"]) is not int
+                or not 0 <= data["retained_frame_count"] <= 12):
+            raise TypeError("first-failure metadata header refused")
+        for key in ("traceback_steps_truncated", "exception_graph_truncated", "cycle_detected"):
+            if type(data[key]) is not bool:
+                raise TypeError("first-failure metadata marker refused")
+        for key, value in base.items():
+            if value is False and key not in ("traceback_steps_truncated", "exception_graph_truncated", "cycle_detected"):
+                if data[key] is not False:
+                    raise TypeError("first-failure metadata cannot claim execution or cause")
+        if data["capture_refusal_reason"] is not None:
+            if (type(data["capture_refusal_reason"]) is not str
+                    or data["capture_refusal_reason"] != "UNSUPPORTED_INTRINSIC_METADATA"):
+                raise TypeError("first-failure refusal marker refused")
+        nodes = data["exception_nodes"]
+        if type(nodes) is not list or len(nodes) > 4:
+            raise TypeError("first-failure exception node bound refused")
+        if data["capture_state"] == "EXCEPTION_METADATA":
+            if not nodes or type(data["root_exception_index"]) is not int or data["root_exception_index"] != 0:
+                raise TypeError("first-failure root index refused")
+        elif nodes or data["root_exception_index"] is not None or data["traceback_steps_observed"]:
+            raise TypeError("nonexception or refused metadata cannot retain a graph")
+        copied_nodes = []
+        keys = {"index", "exception_class", "exception_module", "class_label_truncated", "module_label_truncated",
+                "errno", "numeric_filename_text", "filename_original_type", "filename_omitted",
+                "traceback_present", "traceback_walk_complete", "frames", "frames_truncated",
+                "cause_present", "context_present", "cause_ref", "context_ref", "cause_omitted", "context_omitted",
+                "suppress_context"}
+        frame_keys = {"code_filename", "function", "lineno", "bytecode_offset",
+                      "code_filename_truncated", "function_truncated"}
+        total = 0
+        for index, original in enumerate(nodes):
+            if (type(original) is not dict or any(type(key) is not str for key in original)
+                    or set(original) != keys or type(original["index"]) is not int or original["index"] != index):
+                raise TypeError("first-failure exception node shape refused")
+            node = dict(original)
+            for key in ("class_label_truncated", "module_label_truncated", "filename_omitted", "traceback_present",
+                        "traceback_walk_complete", "frames_truncated", "cause_present", "context_present",
+                        "cause_omitted", "context_omitted", "suppress_context"):
+                if type(node[key]) is not bool:
+                    raise TypeError("first-failure exception node marker refused")
+            for key, flag in (("exception_class", "class_label_truncated"),
+                              ("exception_module", "module_label_truncated")):
+                node[key], clipped = text(node[key], 128)
+                node[flag] = node[flag] or clipped
+            if node["errno"] is not None and type(node["errno"]) is not int:
+                raise TypeError("first-failure errno requires a strict scalar")
+            filename = node["numeric_filename_text"]
+            if (type(node["filename_original_type"]) is not str
+                    or node["filename_original_type"] not in ("none", "str", "bytes")):
+                raise TypeError("first-failure filename type refused")
+            if filename is not None and (type(filename) is not str or not filename
+                                         or len(filename) > 32 or not filename.isascii() or not filename.isdecimal()):
+                raise TypeError("first-failure numeric filename refused")
+            for edge in ("cause", "context"):
+                reference = node[edge + "_ref"]
+                if reference is not None and (type(reference) is not int or not 0 <= reference < len(nodes)):
+                    raise TypeError("first-failure graph reference refused")
+            frames = node["frames"]
+            if type(frames) is not list or len(frames) > 12:
+                raise TypeError("first-failure frame list bound refused")
+            copied_frames = []
+            for original_frame in frames:
+                if (type(original_frame) is not dict or any(type(key) is not str for key in original_frame)
+                        or set(original_frame) != frame_keys):
+                    raise TypeError("first-failure frame shape refused")
+                frame = dict(original_frame)
+                if (type(frame["lineno"]) is not int or frame["lineno"] < 0
+                        or type(frame["bytecode_offset"]) is not int or frame["bytecode_offset"] < -1
+                        or type(frame["code_filename_truncated"]) is not bool
+                        or type(frame["function_truncated"]) is not bool):
+                    raise TypeError("first-failure frame scalar refused")
+                for key, flag, limit in (("code_filename", "code_filename_truncated", 192),
+                                         ("function", "function_truncated", 96)):
+                    frame[key], clipped = text(frame[key], limit)
+                    frame[flag] = frame[flag] or clipped
+                copied_frames.append(frame)
+            total += len(copied_frames)
+            node["frames"] = copied_frames
+            copied_nodes.append(node)
+        if total != data["retained_frame_count"] or total > 12:
+            raise TypeError("first-failure shared frame accounting refused")
+        data["exception_nodes"] = copied_nodes
+        data["canonical_bytes"] = 0
+        # Remove outer retained frames first, preserving actually reached tail
+        # frames. Every omission remains marked; no unvisited tail is invented.
+        for _ in range(13):
+            encoded = stabilize(data)
+            if encoded is not None:
+                return encoded
+            victim = next((node for node in reversed(copied_nodes) if node["frames"]), None)
+            if victim is None:
+                break
+            victim["frames"].pop(0)
+            victim["frames_truncated"] = True
+            data["retained_frame_count"] -= 1
+            data["canonical_bytes"] = 0
+    except BaseException:
+        pass
+    fallback = stabilize(_first_failure_metadata_base("CAPTURE_REFUSED"), reserve=0)
+    if fallback is None:
+        raise ValueError("bounded first-failure metadata fallback could not converge")
+    return fallback
+
+
+def _first_failure_exception_metadata(reason):
+    """Intrinsic slots/code metadata only; retain no live exception or frame."""
+    def mro(kind):
+        return type.__dict__["__mro__"].__get__(kind, type)
+
+    def subtype(kind, parent):
+        return any(item is parent for item in mro(kind))
+
+    def slot(error, name):
+        return BaseException.__dict__[name].__get__(error, BaseException)
+
+    try:
+        if not subtype(type(reason), BaseException):
+            return _first_failure_metadata_encode(_first_failure_metadata_base("NON_EXCEPTION_REASON"))
+        data = _first_failure_metadata_base("EXCEPTION_METADATA")
+        data["root_exception_index"] = 0
+        objects = [reason]
+        nodes = []
+        retained = steps = 0
+
+        def reference(error):
+            if error is None:
+                return None, False
+            if not subtype(type(error), BaseException):
+                raise TypeError("intrinsic exception relation refused")
+            for index, previous in enumerate(objects):
+                if error is previous:
+                    return index, False
+            if len(objects) == 4:
+                data["exception_graph_truncated"] = True
+                return None, True
+            objects.append(error)
+            return len(objects) - 1, False
+
+        index = 0
+        while index < len(objects):
+            error = objects[index]
+            kind = type(error)
+            label = type.__dict__["__name__"].__get__(kind, type)
+            module = type.__dict__["__module__"].__get__(kind, type)
+            if type(label) is not str or type(module) is not str:
+                raise TypeError("intrinsic class labels refused")
+            errno = filename = None
+            filename_type, filename_omitted = "none", False
+            if subtype(kind, OSError):
+                errno = OSError.__dict__["errno"].__get__(error, OSError)
+                filename = OSError.__dict__["filename"].__get__(error, OSError)
+                if errno is not None and type(errno) is not int:
+                    raise TypeError("intrinsic errno requires a strict scalar")
+                if filename is not None:
+                    if type(filename) is str:
+                        filename_type = "str"
+                        if not filename or len(filename) > 32 or not filename.isascii() or not filename.isdecimal():
+                            filename, filename_omitted = None, True
+                    elif type(filename) is bytes:
+                        filename_type = "bytes"
+                        if not filename or len(filename) > 32 or not all(48 <= value <= 57 for value in filename):
+                            filename, filename_omitted = None, True
+                        else:
+                            filename = filename.decode("ascii")
+                    else:
+                        raise TypeError("intrinsic filename requires a string/bytes scalar")
+            cause, context = slot(error, "__cause__"), slot(error, "__context__")
+            cause_ref, cause_omitted = reference(cause)
+            context_ref, context_omitted = reference(context)
+            suppressed = slot(error, "__suppress_context__")
+            if type(suppressed) is not bool:
+                raise TypeError("intrinsic suppression flag refused")
+            tb = slot(error, "__traceback__")
+            present = tb is not None
+            frames = []
+            available = 12 - retained
+            visited = 0
+            while tb is not None and steps < 64:
+                # BaseException's built-in traceback slot admits only genuine
+                # traceback objects; its next/frame slots retain that property.
+                tb_type = type(tb)
+                if available:
+                    frame = tb_type.__dict__["tb_frame"].__get__(tb, tb_type)
+                    code = type(frame).__dict__["f_code"].__get__(frame, type(frame))
+                    code_type = type(code)
+                    frames.append({
+                        "code_filename": code_type.__dict__["co_filename"].__get__(code, code_type),
+                        "function": code_type.__dict__["co_name"].__get__(code, code_type),
+                        "lineno": tb_type.__dict__["tb_lineno"].__get__(tb, tb_type),
+                        "bytecode_offset": tb_type.__dict__["tb_lasti"].__get__(tb, tb_type),
+                        "code_filename_truncated": False, "function_truncated": False})
+                    if len(frames) > available:
+                        frames.pop(0)
+                visited += 1
+                steps += 1
+                tb = tb_type.__dict__["tb_next"].__get__(tb, tb_type)
+            complete = tb is None
+            if not complete:
+                data["traceback_steps_truncated"] = True
+            retained += len(frames)
+            nodes.append({"index": index, "exception_class": label, "exception_module": module,
+                          "class_label_truncated": False, "module_label_truncated": False,
+                          "errno": errno, "numeric_filename_text": filename,
+                          "filename_original_type": filename_type, "filename_omitted": filename_omitted,
+                          "traceback_present": present, "traceback_walk_complete": complete,
+                          "frames": frames, "frames_truncated": not complete or visited > len(frames),
+                          "cause_present": cause is not None, "context_present": context is not None,
+                          "cause_ref": cause_ref, "context_ref": context_ref,
+                          "cause_omitted": cause_omitted, "context_omitted": context_omitted,
+                          "suppress_context": suppressed})
+            index += 1
+        data["exception_nodes"] = nodes
+        data["traceback_steps_observed"] = steps
+        data["retained_frame_count"] = retained
+
+        def cycle(index, route):
+            if index in route:
+                return True
+            return any(cycle(reference, route | {index}) for reference in
+                       (nodes[index]["cause_ref"], nodes[index]["context_ref"]) if reference is not None)
+
+        data["cycle_detected"] = cycle(0, set())
+        return _first_failure_metadata_encode(data)
+    except BaseException:
+        return _first_failure_metadata_encode(_first_failure_metadata_base("CAPTURE_REFUSED"))
+
+
+def _first_failure_main_fields(metadata, main_command_columns):
+    """Actual pure main export/encoder path, also used for minimal FAIL."""
+    if main_command_columns is False:
+        return {}
+    if main_command_columns is not True:
+        raise TypeError("first-failure export requires a strict main-mode flag")
+    return {"first_failure_exception_metadata":
+            None if metadata is None else _first_failure_metadata_encode(metadata)}
+
+
+def hosted_first_failure_metadata_controls():
+    """Declared hosted Python metadata fixtures; no filesystem or process epoch."""
+    started = time.monotonic()
+    names = ("raised-oserror-traceback", "first-string-and-empty-latch",
+             "first-exception-immutable", "cause-context-cycle-bounds",
+             "traceback-and-byte-bounds", "malformed-metadata-preserves-latch",
+             "main-only-export-default-wire")
+    cases = []
+    input_equal = counters_equal = True
+
+    def synthetic_guard():
+        guard = Guard.__new__(Guard)
+        guard.failure = None
+        guard.commands = []
+        guard.capture_bytes, guard.decoder_bytes = 23, 11
+        guard.minimum_free, guard.peak = 29, 31
+        return guard
+
+    def graph_stamp(reason):
+        def scalar(value):
+            kind = type(value)
+            if kind is dict:
+                return ("dict", id(value), tuple((key, scalar(item)) for key, item in value.items()))
+            if kind is list:
+                return ("list", id(value), tuple(scalar(item) for item in value))
+            if kind is float:
+                return ("float", value.hex())
+            if kind in (type(None), bool, int, str, bytes):
+                return (id(kind), value)
+            return ("unsupported", id(value), id(kind))
+
+        def classes(value):
+            return type.__dict__["__mro__"].__get__(type(value), type)
+
+        if not any(kind is BaseException for kind in classes(reason)):
+            return ("nonexception", id(reason), scalar(reason))
+        pending, rows = [reason], []
+        for error in pending:
+            cause = BaseException.__dict__["__cause__"].__get__(error, BaseException)
+            context = BaseException.__dict__["__context__"].__get__(error, BaseException)
+            for value in (cause, context):
+                if value is not None and not any(value is item for item in pending):
+                    assert len(pending) < 16, "synthetic graph input bound"
+                    pending.append(value)
+            errno = filename = None
+            if any(kind is OSError for kind in classes(error)):
+                errno = OSError.__dict__["errno"].__get__(error, OSError)
+                filename = OSError.__dict__["filename"].__get__(error, OSError)
+            rows.append((id(error), id(type(error)), id(cause), id(context),
+                         id(BaseException.__dict__["__traceback__"].__get__(error, BaseException)),
+                         BaseException.__dict__["__suppress_context__"].__get__(error, BaseException),
+                         scalar(errno), scalar(filename)))
+        return tuple(rows)
+
+    def exercise(guard, reason, expected):
+        nonlocal input_equal, counters_equal
+        before = (graph_stamp(reason), _stale_canonical(_first_failure_exception_metadata(reason)))
+        state = {key: value for key, value in guard.__dict__.items()
+                 if key not in ("failure", "_first_failure_exception_metadata")}
+        returned = guard._fail(reason)
+        same_input = before == (graph_stamp(reason), _stale_canonical(_first_failure_exception_metadata(reason)))
+        same_counters = state == {key: value for key, value in guard.__dict__.items()
+                                  if key not in ("failure", "_first_failure_exception_metadata")}
+        input_equal = input_equal and same_input
+        counters_equal = counters_equal and same_counters
+        assert same_input and same_counters, "metadata changed exception graph or nonfailure state"
+        assert type(returned) is ResourceFailure and str(returned) == expected
+        assert guard.failure == expected
+        metadata = getattr(guard, "_first_failure_exception_metadata", None)
+        if metadata is not None:
+            raw = _stale_canonical(metadata)
+            assert len(raw) == metadata["canonical_bytes"] <= 8192
+            assert metadata["retained_frame_count"] == sum(len(node["frames"])
+                                                         for node in metadata["exception_nodes"])
+            assert len(metadata["exception_nodes"]) <= 4
+            assert metadata["traceback_steps_observed"] <= 64 and metadata["retained_frame_count"] <= 12
+            assert metadata["new_time_sample"] is False
+        return metadata
+
+    def raised():
+        raise FileNotFoundError(2, "synthetic first", "2949")
+
+    def deep(depth):
+        if depth:
+            return deep(depth - 1)
+        raise FileNotFoundError(2, "synthetic deep", "2949")
+
+    for index, name in enumerate(names):
+        observations = {}
+        try:
+            if index == 0:
+                guard = synthetic_guard()
+                try:
+                    raised()
+                except FileNotFoundError as reason:
+                    metadata = exercise(guard, reason, "[Errno 2] synthetic first: '2949'")
+                assert metadata["capture_state"] == "EXCEPTION_METADATA"
+                node = metadata["exception_nodes"][0]
+                assert node["exception_class"] == "FileNotFoundError" and node["errno"] == 2
+                assert node["numeric_filename_text"] == "2949" and node["filename_original_type"] == "str"
+                assert any(frame["function"] == "raised" and frame["lineno"] == raised.__code__.co_firstlineno + 1
+                           for frame in node["frames"])
+                observations = {"actual_declared_traceback_line_bound": True,
+                                "retained_frames": metadata["retained_frame_count"]}
+            elif index == 1:
+                guard = synthetic_guard()
+                metadata = exercise(guard, "first string", "first string")
+                saved = _stale_canonical(metadata)
+                assert metadata["capture_state"] == "NON_EXCEPTION_REASON"
+                assert metadata["exception_nodes"] == [] and metadata["root_exception_index"] is None
+                exercise(guard, FileNotFoundError(2, "later", "2949"), "first string")
+                assert _stale_canonical(guard._first_failure_exception_metadata) == saved
+                guard = synthetic_guard()
+                assert exercise(guard, "", "") is None
+                metadata = exercise(guard, FileNotFoundError(2, "after empty", "2949"),
+                                    "[Errno 2] after empty: '2949'")
+                assert metadata["capture_state"] == "EXCEPTION_METADATA"
+                observations = {"string_origin_immutable": True, "empty_string_falsy_behavior_preserved": True}
+            elif index == 2:
+                calls = {"first": 0, "later": 0}
+
+                class CountedError(Exception):
+                    def __str__(self):
+                        calls["first"] += 1
+                        return "counted first"
+
+                class LaterError(Exception):
+                    def __str__(self):
+                        calls["later"] += 1
+                        return "cleanup"
+
+                guard = synthetic_guard()
+                metadata = exercise(guard, CountedError(), "counted first")
+                saved = _stale_canonical(metadata)
+                exercise(guard, LaterError(), "counted first")
+                assert calls == {"first": 1, "later": 0}
+                assert _stale_canonical(guard._first_failure_exception_metadata) == saved
+                observations = {"first_conversion_count": 1, "later_conversion_count": 0,
+                                "original_return_and_latch_preserved": True}
+            elif index == 3:
+                first, cause, context = Exception("root"), Exception("cause"), Exception("context")
+                first.__cause__, first.__context__, first.__suppress_context__ = cause, context, True
+                cause.__context__ = first
+                context.__cause__ = cause
+                metadata = exercise(synthetic_guard(), first, "root")
+                nodes = metadata["exception_nodes"]
+                assert len(nodes) == 3 and nodes[0]["cause_ref"] == 1 and nodes[0]["context_ref"] == 2
+                assert nodes[0]["suppress_context"] is True and nodes[1]["context_ref"] == 0
+                assert nodes[2]["cause_ref"] == 1 and metadata["cycle_detected"] is True
+                chain = [Exception("bounded") for _ in range(7)]
+                for left, right in zip(chain, chain[1:]):
+                    left.__cause__ = right
+                metadata = exercise(synthetic_guard(), chain[0], "bounded")
+                assert len(metadata["exception_nodes"]) == 4 and metadata["exception_graph_truncated"] is True
+                assert metadata["exception_nodes"][-1]["cause_omitted"] is True
+                observations = {"cause_context_and_suppression_preserved": True,
+                                "shared_identity_and_cycle_bound": True, "node_cap_exercised": 4}
+            elif index == 4:
+                try:
+                    deep(100)
+                except FileNotFoundError as reason:
+                    metadata = exercise(synthetic_guard(), reason, "[Errno 2] synthetic deep: '2949'")
+                assert metadata["traceback_steps_observed"] == 64 and metadata["traceback_steps_truncated"] is True
+                assert metadata["retained_frame_count"] == 12
+                assert metadata["exception_nodes"][0]["traceback_walk_complete"] is False
+                assert metadata["exception_nodes"][0]["frames_truncated"] is True
+                fixture = json.loads(_stale_canonical(metadata))
+                for frame in fixture["exception_nodes"][0]["frames"]:
+                    frame["lineno"], frame["bytecode_offset"] = 10 ** 600, 10 ** 600
+                encoded = _first_failure_metadata_encode(fixture)
+                assert encoded["capture_state"] == "EXCEPTION_METADATA"
+                assert len(_stale_canonical(encoded)) == encoded["canonical_bytes"] <= 8192
+                assert encoded["retained_frame_count"] < 12 and encoded["exception_nodes"][0]["frames_truncated"] is True
+                observations = {"observed_step_cap": 64, "retained_frame_cap": 12,
+                                "synthetic_encoder_byte_overflow_exercised": True,
+                                "bounded_encoded_bytes": encoded["canonical_bytes"]}
+            elif index == 5:
+                hooks = {"attributes": 0, "class": 0, "str": 0}
+
+                class HookMeta(type):
+                    def __getattribute__(self, key):
+                        if key in ("__name__", "__module__", "__mro__", "__dict__"):
+                            hooks["class"] += 1
+                            raise AssertionError("user class hook invoked")
+                        return type.__getattribute__(self, key)
+
+                class HookError(OSError, metaclass=HookMeta):
+                    def __getattribute__(self, key):
+                        if key in ("errno", "filename", "__traceback__", "__cause__", "__context__", "__suppress_context__"):
+                            hooks["attributes"] += 1
+                            raise AssertionError("user exception hook invoked")
+                        return object.__getattribute__(self, key)
+
+                    def __str__(self):
+                        hooks["str"] += 1
+                        return "hook fixture"
+
+                metadata = exercise(synthetic_guard(), HookError(2, "fixture", "2949"), "hook fixture")
+                assert metadata["capture_state"] == "EXCEPTION_METADATA" and metadata["exception_nodes"][0]["errno"] == 2
+                for field, bad in (("errno", True), ("errno", {"row": [1]}),
+                                   ("filename", [1]), ("filename", float("nan"))):
+                    reason = HookError(2, "fixture", "2949")
+                    OSError.__dict__[field].__set__(reason, bad)
+                    metadata = exercise(synthetic_guard(), reason, "hook fixture")
+                    assert metadata["capture_state"] == "CAPTURE_REFUSED" and metadata["exception_nodes"] == []
+                assert hooks == {"attributes": 0, "class": 0, "str": 5}
+                observations = {"arbitrary_attribute_hooks": 0, "arbitrary_class_hooks": 0,
+                                "baseline_string_conversions": 5, "malformed_nested_scalars_refused": True}
+            else:
+                metadata = exercise(synthetic_guard(), FileNotFoundError(2, "export", "2949"),
+                                    "[Errno 2] export: '2949'")
+                saved = _stale_canonical(metadata)
+                legacy = {"schema": "synthetic-default-child", "result": "FAIL"}
+                assert _first_failure_main_fields(metadata, False) == {}
+                assert _stale_canonical({**legacy, **_first_failure_main_fields(metadata, False)}) == _stale_canonical(legacy)
+                exported = _first_failure_main_fields(metadata, True)
+                assert set(exported) == {"first_failure_exception_metadata"}
+                assert _stale_canonical(exported["first_failure_exception_metadata"]) == saved
+                assert _first_failure_main_fields(None, True) == {"first_failure_exception_metadata": None}
+                minimal = {"schema": INVALID_RECEIPT_SCHEMA, "result": "FAIL", "evidence_complete": False}
+                minimal.update(_first_failure_main_fields(metadata, True))
+                assert minimal["schema"] == INVALID_RECEIPT_SCHEMA and minimal["result"] == "FAIL"
+                assert len(_stale_canonical(minimal)) + 1 <= RECEIPT_LIMIT
+                assert _stale_canonical(metadata) == saved
+                observations = {"actual_pure_export_and_encoder_exercised": True,
+                                "default_child_wire_unchanged": True, "minimal_FAIL_metadata_retained": True}
+            result, error = "PASS", None
+        except AssertionError as failure:
+            result, error = "FAIL", str(failure)[:128]
+        cases.append({"name": name, "result": result, "error": error, "observations": observations})
+    elapsed = time.monotonic() - started
+    if not 0 <= elapsed <= 60:
+        raise ResourceFailure("hosted first-failure metadata controls exceeded 60 seconds")
+    failures = sum(case["result"] != "PASS" for case in cases)
+    report = {"schema": "native-tls-first-failure-metadata-controls-6970-v1",
+              "result": ("PASS_FIRST_FAILURE_METADATA_CONTROLS_ONLY" if failures == 0 else
+                         "FAIL_FIRST_FAILURE_METADATA_CONTROLS_ONLY"),
+              "completed": len(cases), "failures": failures, "cases": cases,
+              "synthetic_inputs_only": True, "input_before_after_equal": input_equal,
+              "telemetry_counters_before_after_equal": counters_equal,
+              "new_commands_or_child_epochs": False, "capture_bytes_charged_to_parent": 0,
+              "decoder_bytes_charged_to_parent": 0, "actual_proc_reads_verified": False,
+              "process_control_execution_verified": False, "native_execution_verified": False,
+              "windows98_integration_verified": False, "tls_execution_verified": False,
+              "elapsed_seconds": elapsed}
+    if len(_stale_canonical(report)) + 1 > 8192 - 512:
+        raise ResourceFailure("hosted first-failure report exceeds reserved main-receipt bound")
+    return report
+
+
 class Guard:
     """One fresh root, one observed 32-MiB budget, one immutable final receipt."""
 
@@ -1904,7 +2447,20 @@ class Guard:
             raise
 
     def _fail(self, reason):
+        prior_failure = self.failure
         self.failure = self.failure or str(reason)
+        if not prior_failure and self.failure:
+            try:
+                self._first_failure_exception_metadata = _first_failure_exception_metadata(reason)
+            except BaseException:
+                # A second diagnostic-encoding failure must still reach the
+                # original return. Export normalizes this honest unmeasured
+                # refusal through the same bounded encoder when available.
+                self._first_failure_exception_metadata = {
+                    "schema": "native-tls-first-failure-exception-metadata-6970-v1",
+                    "capture_state": "CAPTURE_REFUSED",
+                    "capture_refusal_reason": "DIAGNOSTIC_CAPTURE_FAILED",
+                    "new_time_sample": False}
         return ResourceFailure(self.failure)
 
     def _root(self):
@@ -2533,6 +3089,9 @@ class Guard:
                 receipt["rejected_receipt_candidate"] = dict(rejected_candidate)
             if command_encoding_failure is not None:
                 receipt["command_records_encoding_failure"] = dict(command_encoding_failure)
+            if main_command_columns:
+                receipt.update(_first_failure_main_fields(
+                    getattr(self, "_first_failure_exception_metadata", None), main_command_columns))
 
         def encoded(base):
             receipt.update(output_bytes_before_receipt=base, final_output_bytes=base)
@@ -2635,6 +3194,9 @@ class Guard:
                                            "implicit_backend_runtime_attestation_verified": False})
             if column_metadata is not None and not minimal:
                 receipt.update(column_metadata)
+            if main_command_columns:
+                receipt.update(_first_failure_main_fields(
+                    getattr(self, "_first_failure_exception_metadata", None), main_command_columns))
 
         def encode_or_minimal(base):
             try:
@@ -2702,6 +3264,9 @@ class Guard:
                         raise ResourceFailure("refuse replacement of substituted receipt")
                     receipt.update(result="FAIL", resource_failure=self.failure,
                                    receipt_accounting_verified=False)
+                    if main_command_columns:
+                        receipt.update(_first_failure_main_fields(
+                            getattr(self, "_first_failure_exception_metadata", None), main_command_columns))
                     base = self.count(failure_evidence=True) - os.fstat(fd).st_size
                     replacement = encode_or_minimal(base)
                     os.lseek(fd, 0, os.SEEK_SET)

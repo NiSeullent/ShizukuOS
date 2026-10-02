@@ -266,7 +266,7 @@ jobs:
           import hashlib,os,stat,sys,types
           from pathlib import Path
           root=Path.cwd().resolve()
-          pins={'ntwin32/secure_transport/build_native_tls_guarded_6970.py': 'f9b843e15aef81050af5722e117ebb86b75ae07895e2a0eac2aa3c809c0989df', 'ntwin32/secure_transport/i486_stream_6970.py': '0b661068ebac98331aac796d4612ee6ef78f3825b12683df9ec03e46f8e3a08f', 'ntwin32/secure_transport/native_tls_resources_6970.py': '4bab8ebb7fef06a3460ec89dcff8d10ae59b452c79e5268ba9fe873de946d727', 'ntwin32/secure_transport/native_tls_quiescent_controls_6970.py': 'ed73af0b390655953aa63b26c6ee5be3ba5b1779c788d2e147761758a428949d', 'ntwin32/secure_transport/native_tls_pidfd_controls_6970.py': '46149184b734e221f267eed268711dbd94c754ee102256276cdd2cafe6a58071', 'ntwin32/secure_transport/native_tls_stale_order_controls_6970.py': '36282f2bdabf25c7cd970e426de1c3a835346c000888cc1761c33a952c012aae', 'ntwin32/secure_transport/native_tls_count_epoch_controls_6970.py': '3391ada5ad42a2e10554932a40240b3f8fe4ca9a77e6c0647f7f5c0f5598bc3e'}
+          pins={'ntwin32/secure_transport/build_native_tls_guarded_6970.py': '76212c7483e2bb505dfbcf27e58bb8d62e77f1d1f1f1d5b65e8daa275c088b4f', 'ntwin32/secure_transport/i486_stream_6970.py': '0b661068ebac98331aac796d4612ee6ef78f3825b12683df9ec03e46f8e3a08f', 'ntwin32/secure_transport/native_tls_resources_6970.py': '29c6eca4e9effd92efdf101d653be2dcbf7566915d17d34ca6b8306c40ef6999', 'ntwin32/secure_transport/native_tls_quiescent_controls_6970.py': 'ed73af0b390655953aa63b26c6ee5be3ba5b1779c788d2e147761758a428949d', 'ntwin32/secure_transport/native_tls_pidfd_controls_6970.py': '46149184b734e221f267eed268711dbd94c754ee102256276cdd2cafe6a58071', 'ntwin32/secure_transport/native_tls_stale_order_controls_6970.py': '36282f2bdabf25c7cd970e426de1c3a835346c000888cc1761c33a952c012aae', 'ntwin32/secure_transport/native_tls_count_epoch_controls_6970.py': '3391ada5ad42a2e10554932a40240b3f8fe4ca9a77e6c0647f7f5c0f5598bc3e'}
           before={}
           identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
           for relative,expected in pins.items():
@@ -819,6 +819,25 @@ jobs:
               assert len(part)<=8192-cached_report_bytes
               cached_report_bytes+=len(part.encode('ascii'))
           assert cached_report_bytes<=8192
+          first_failure=x['first_failure_metadata_controls']
+          first_failure_names=('raised-oserror-traceback','first-string-and-empty-latch','first-exception-immutable','cause-context-cycle-bounds','traceback-and-byte-bounds','malformed-metadata-preserves-latch','main-only-export-default-wire')
+          assert type(first_failure) is dict and first_failure['schema']=='native-tls-first-failure-metadata-controls-6970-v1' and first_failure['result']=='PASS_FIRST_FAILURE_METADATA_CONTROLS_ONLY'
+          assert type(first_failure['completed']) is type(first_failure['failures']) is int and first_failure['completed']==7 and first_failure['failures']==0
+          assert type(first_failure['cases']) is list and len(first_failure['cases'])==7 and all(type(case) is dict for case in first_failure['cases'])
+          assert tuple(case['name'] for case in first_failure['cases'])==first_failure_names and len(set(first_failure_names))==7
+          for key in ('synthetic_inputs_only','input_before_after_equal','telemetry_counters_before_after_equal','actual_parent_command_records_before_after_equal','actual_parent_capture_pools_before_after_equal','actual_parent_failure_before_after_equal'):assert first_failure[key] is True
+          for key in ('new_commands_or_child_epochs','actual_proc_reads_verified','process_control_execution_verified','native_execution_verified','windows98_integration_verified','tls_execution_verified'):assert first_failure[key] is False
+          assert type(first_failure['capture_bytes_charged_to_parent']) is type(first_failure['decoder_bytes_charged_to_parent']) is int and first_failure['capture_bytes_charged_to_parent']==first_failure['decoder_bytes_charged_to_parent']==0
+          assert type(first_failure['actual_parent_command_count']) is int and first_failure['actual_parent_command_count']==cached['actual_parent_command_count']==codec['actual_parent_command_count']==count_epoch['parent_command_count_after']==33<=len(x['commands'])
+          assert type(first_failure['elapsed_seconds']) in (int,float) and 0<=first_failure['elapsed_seconds']<=60
+          for case in first_failure['cases']:
+              assert set(case)=={'name','result','error','observations'} and type(case['name']) is str and case['result']=='PASS' and case['error'] is None
+              assert type(case['observations']) is dict and all(type(key) is str and type(value) in (bool,int,float,str,type(None)) for key,value in case['observations'].items())
+          first_failure_report_bytes=1  # Charge the trailing newline inside the existing report bound.
+          for part in json.JSONEncoder(sort_keys=True,separators=(',',':'),ensure_ascii=True,allow_nan=False).iterencode(first_failure):
+              assert len(part)<=8192-first_failure_report_bytes
+              first_failure_report_bytes+=len(part.encode('ascii'))
+          assert first_failure_report_bytes<=8192
           excluded_fixture_binaries={fixture_paths['object'],fixture_paths['elf']}
           assert not excluded_fixture_binaries&{proof/name for name in x['compiled_outputs']}
           for name,pin in x['compiled_outputs'].items():selected[proof/name]=pin
