@@ -30,6 +30,9 @@ ROM_BYTES = 256 << 10
 ESP_MIB = 2304
 RESERVE = 17 << 30
 CONFIG = (0x38395753, 1, 128, 0)
+OPTIONAL_NATIVE_SIZES = {"VGACFG.BIN": 136, "VGAROM.BIN": 65536, "W98PERS.BIN": 192}
+VGA_PROVENANCE_NAME = "vga-build-receipt"
+VGA_RECEIPT_MAX = 1 << 20
 
 
 def safe_path(path):
@@ -268,6 +271,185 @@ def validate_config(data):
         raise ValueError("WIN98CFG.BIN must be exact version 1 / 128 MiB / reserved-zero config")
 
 
+def held_bytes(fd, maximum):
+    """Read bounded metadata from the already pinned original descriptor."""
+    size = os.fstat(fd).st_size
+    if not 0 < size <= maximum:
+        raise ValueError("bounded held optional input extent required")
+    data, at = bytearray(), 0
+    while at < size:
+        block = os.pread(fd, size - at, at)
+        if not block:
+            raise ValueError("short held optional input read")
+        data.extend(block); at += len(block)
+    if os.pread(fd, 1, size):
+        raise ValueError("held optional input extent changed")
+    return bytes(data)
+
+
+def validate_vga_config(data):
+    if len(data) != 136:
+        raise ValueError("VGACFG.BIN must have its exact 136-byte ABI")
+    magic, version, size, flags, bdf, reserved, base, span = struct.unpack_from("<6I2Q", data)
+    if ((magic, version, size, flags, reserved) != (0x41475657, 1, 136, 1, 0) or
+        bdf >= 256 or span != 16 << 20 or base < 0x08000000 or
+        base > 0xfec00000 - span or base % span):
+        raise ValueError("unsupported standard VGA config flags/BDF/LFB/reserved fields")
+    digests = tuple(data[at:at + 32].hex() for at in (40, 72, 104))
+    if any(value == "0" * 64 for value in digests) or len(set(digests)) != 3:
+        raise ValueError("distinct nonzero ROM/source/config VGA digests required")
+    return digests
+
+
+def validate_vga_rom(data):
+    if len(data) != 65536 or data[:2] != b"\x55\xaa" or not data[2]:
+        raise ValueError("exact 64KiB VGA ROM with x86 option-ROM signature required")
+    extent = data[2] * 512
+    pcir = struct.unpack_from("<H", data, 0x18)[0]
+    if not 512 <= extent <= len(data) or not 0x1a <= pcir <= extent - 24:
+        raise ValueError("bounded VGA ROM/PCIR extent required")
+    length = struct.unpack_from("<H", data, pcir + 10)[0]
+    if (data[pcir:pcir + 4] != b"PCIR" or
+        struct.unpack_from("<HH", data, pcir + 4) != (0x1234, 0x1111) or
+        not 24 <= length <= extent - pcir or data[pcir + 13:pcir + 16] != b"\x00\x00\x03" or
+        struct.unpack_from("<H", data, pcir + 16)[0] * 512 != extent or
+        data[pcir + 20:pcir + 22] != b"\x00\x80" or sum(data[:extent]) % 256 or
+        any(data[extent:])):
+        raise ValueError("standard VGA x86 PCIR/checksum/last-image/zero-padding mismatch")
+    return extent
+
+
+def validate_persistence_config(data):
+    if len(data) != 192:
+        raise ValueError("W98PERS.BIN must have its separate exact 192-byte ABI")
+    magic, version, bdf, vendor, device, r16, esp, member, volume, r32 = struct.unpack_from("<II4HQQII", data)
+    if ((magic, version, vendor, esp, member, volume) !=
+        (0x52503957, 1, 0x1af4, 2304 << 20, 2 << 30, 0x53485739) or
+        device not in (0x1042, 0x1001) or r16 or r32 or struct.unpack_from("<Q", data, 184)[0]):
+        raise ValueError("unsupported persistence version/device/geometry/reserved fields")
+    bars = [struct.unpack_from("<QQII", data, 40 + 24 * i) for i in range(6)]
+    memory = False
+    for i, (base, span, kind, reserved) in enumerate(bars):
+        if reserved or kind not in (0, 1, 2, 3):
+            raise ValueError("unsupported persistence BAR kind/reserved fields")
+        if kind == 0:
+            if base or span:
+                raise ValueError("unused persistence BAR must be entirely zero")
+            continue
+        end = base + span
+        if not base or not span or span & (span - 1) or base % span or end > (1 << 64) - 1:
+            raise ValueError("bounded aligned persistence BAR resource required")
+        if kind == 3:
+            if end > 1 << 16:
+                raise ValueError("persistence I/O BAR exceeds port space")
+        else:
+            memory = True
+            if span < 16 or end > 64 << 30 or (kind == 1 and end > 1 << 32):
+                raise ValueError("persistence memory BAR exceeds native identity mapping")
+            if kind == 2 and (i == 5 or any(bars[i + 1])):
+                raise ValueError("64-bit persistence BAR requires its zero upper slot")
+        for old_base, old_span, old_kind, _ in bars[:i]:
+            if old_kind and (old_kind == 3) == (kind == 3) and base < old_base + old_span and old_base < end:
+                raise ValueError("overlapping persistence BAR resources")
+    if not memory:
+        raise ValueError("persistence config requires an admitted memory BAR")
+    # Syntax/resource admission does not grant an actual owned PCI-device epoch.
+
+
+def optional_native_names(names, provenance_names):
+    names, provenance_names = set(names), set(provenance_names)
+    vga = {"VGACFG.BIN", "VGAROM.BIN"}
+    if (names - set(OPTIONAL_NATIVE_SIZES) or provenance_names - {VGA_PROVENANCE_NAME} or
+        bool(names & vga) != (vga <= names) or
+        bool(names & vga) != bool(provenance_names)):
+        raise ValueError("only complete known VGA pair/receipt and separate persistence opt-ins are allowed")
+
+
+def validate_optional_native(descriptors, provenance_descriptors):
+    """Bind optional ABI/provenance from the same original leased descriptions.
+
+    A source producer receipt is metadata admission, never physical-device or
+    installed-Windows runtime authority. Referenced producer artifacts are not
+    reopened: their independent pins come from this held receipt's bytes.
+    """
+    optional_native_names(descriptors, provenance_descriptors)
+    for name, fd in descriptors.items():
+        validate_contents(name, fd)
+    if "VGACFG.BIN" not in descriptors:
+        return
+    config = held_bytes(descriptors["VGACFG.BIN"], 136)
+    rom = held_bytes(descriptors["VGAROM.BIN"], 65536)
+    rom_sha, source_sha, config_sha = validate_vga_config(config)
+    extent = validate_vga_rom(rom)
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate VGA producer receipt field")
+            result[key] = value
+        return result
+    receipt = json.loads(held_bytes(provenance_descriptors[VGA_PROVENANCE_NAME], VGA_RECEIPT_MAX),
+                         object_pairs_hook=unique,
+                         parse_constant=lambda _: (_ for _ in ()).throw(ValueError("nonfinite VGA metadata")))
+    if (type(receipt) is not dict or receipt.get("schema") != "shizukuos.actual-source-built-stdvga-rom.v1" or
+        receipt.get("status") != "ACTUAL_SOURCE_BOUND_STDVGA_ROM_BUILT_NOT_RUN" or
+        any(receipt.get(key) is not True for key in (
+            "all_original_copied_source_tools_config_RDLKs_held_through_build_final_SHA",
+            "exact_source_and_primary_tools_final_SHA_unchanged", "actual_final_unit_descendant_census_empty")) or
+        any(receipt.get(key) is not False for key in ("VM_executed", "public_artifact", "complete_SDK_shared_library_closure"))):
+        raise ValueError("actual source-bound unexecuted VGA producer receipt required")
+    rows = receipt.get("source_files")
+    if type(rows) is not list or not 0 < len(rows) <= 30000:
+        raise ValueError("bounded frozen VGA source manifest required")
+    paths = set()
+    for row in rows:
+        if type(row) is not dict or list(row) != ["path", "bytes", "mode", "sha256"]:
+            raise ValueError("exact ordered VGA source-manifest row required")
+        name = row["path"]
+        if (type(name) is not str or not name or len(name) > 4096 or Path(name).is_absolute() or
+            str(Path(name)) != name or ".." in Path(name).parts or name in paths or
+            type(row["bytes"]) is not int or not 0 <= row["bytes"] <= 16 << 20 or
+            type(row["mode"]) is not int or not 0 <= row["mode"] <= 0o777 or
+            type(row["sha256"]) is not str or not re.fullmatch("[0-9a-f]{64}", row["sha256"]) or
+            row["sha256"] == "0" * 64):
+            raise ValueError("invalid/duplicate frozen VGA source-manifest row")
+        paths.add(name)
+    manifest = (json.dumps(rows, indent=2) + "\n").encode()
+    raw_sha = hashlib.sha256(rom[:extent]).hexdigest()
+    if (hashlib.sha256(rom).hexdigest() != rom_sha or hashlib.sha256(manifest).hexdigest() != source_sha or
+        receipt.get("source_tree_digest_sha256") != source_sha or
+        receipt.get("generated_configuration_sha256") != config_sha):
+        raise ValueError("VGA ROM/source/generated-config receipt digest mismatch")
+    raw, padded, pcir, pins = (receipt.get(key) for key in ("raw_ROM", "padded_ROM", "PCIR", "RAM_artifact_pins"))
+    if (type(raw) is not dict or type(padded) is not dict or type(pcir) is not dict or type(pins) is not dict or
+        type(raw.get("bytes")) is not int or raw.get("bytes") != extent or raw.get("sha256") != raw_sha or
+        type(padded.get("bytes")) is not int or padded.get("bytes") != 65536 or padded.get("sha256") != rom_sha or
+        any(type(pcir.get(key)) is not int or pcir.get(key) != value for key, value in {
+            "vendor_id": 0x1234, "device_id": 0x1111, "image_bytes": extent, "code_type": 0, "last_image": 128}.items())):
+        raise ValueError("VGA producer raw/padded ROM or PCIR crosslink mismatch")
+    for name, size, digest in (("source-manifest.json", len(manifest), source_sha),
+                               ("generated.config", None, config_sha),
+                               ("vgabios-stdvga.bin", extent, raw_sha), ("VGAROM.BIN", 65536, rom_sha)):
+        row = pins.get(name)
+        if (type(row) is not dict or set(row) != {"path", "bytes", "sha256"} or
+            type(row["path"]) is not str or not Path(row["path"]).is_absolute() or
+            str(Path(row["path"])) != row["path"] or ".." in Path(row["path"]).parts or
+            type(row["bytes"]) is not int or not 0 < row["bytes"] <= VGA_RECEIPT_MAX or
+            (size is not None and row["bytes"] != size) or row["sha256"] != digest):
+            raise ValueError("independent VGA producer artifact pin mismatch")
+
+
+def boot_policy(names):
+    names = set(names) & set(OPTIONAL_NATIVE_SIZES)
+    optional_native_names(names, {VGA_PROVENANCE_NAME} if "VGACFG.BIN" in names else set())
+    raw = b"mode=supervisor\r\nmenu_timeout=0\r\n"
+    if "VGACFG.BIN" in names:
+        raw += b"win98_vga=yes\r\n"
+    if "W98PERS.BIN" in names:
+        raw += b"win98_persistence=yes\r\n"
+    return raw
+
+
 def validate_contents(name, fd):
     """Inspect the same pinned, read-leased descriptor that supplies the copy.
 
@@ -284,6 +466,12 @@ def validate_contents(name, fd):
         mbr = os.read(fd, 512)
         if len(mbr) != 512 or mbr[-2:] != b"\x55\xaa":
             raise ValueError("the owned disk lacks an MBR signature")
+    elif name == "VGACFG.BIN":
+        validate_vga_config(held_bytes(fd, 136))
+    elif name == "VGAROM.BIN":
+        validate_vga_rom(held_bytes(fd, 65536))
+    elif name == "W98PERS.BIN":
+        validate_persistence_config(held_bytes(fd, 192))
     os.lseek(fd, 0, os.SEEK_SET)
 
 
@@ -418,7 +606,7 @@ def _assemble(out, copies, loader, receipt, *, placement=None, ram_guard=None):
     step(["mkfs.vfat", "-F", "32", "-g", "1/1", "-n", "SHZWIN98", "-i", "53485739", esp])
     step(["mmd", "-i", esp, "::/EFI", "::/EFI/BOOT", "::/EFI/SHIZUKU", "::/SHZDOS"])
     policy = out / "BOOT.INI"
-    policy.write_bytes(b"mode=supervisor\r\nmenu_timeout=0\r\n")
+    policy.write_bytes(boot_policy(copies))
     members = {"EFI/BOOT/BOOTX64.EFI": loader, "EFI/SHIZUKU/BOOT.INI": policy,
                **{"SHZDOS/" + name: source for name, source in copies.items()}}
     identities = {}
@@ -583,7 +771,8 @@ def main(argv=None, *, receipt_sink=None):
         raise TypeError("receipt_sink must be callable")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--make-config", type=Path, help="create a new public 16-byte opt-in config and print its SHA")
-    for name in ("disk", "rom", "config", "kernel32", "kernel64", "win64-img"):
+    optional_args = ("vga-config", "vga-rom", "persistence-config", "vga-build-receipt")
+    for name in ("disk", "rom", "config", "kernel32", "kernel64", "win64-img", *optional_args):
         parser.add_argument("--" + name, type=Path)
         parser.add_argument("--" + name + "-sha256")
     parser.add_argument("--out", type=Path)
@@ -592,7 +781,8 @@ def main(argv=None, *, receipt_sink=None):
     parser.add_argument("--validate-only", action="store_true", help="check all explicit inputs without output or compilation")
     args = parser.parse_args(argv)
     if args.make_config:
-        if any(getattr(args, name) for name in ("disk", "rom", "config", "kernel32", "kernel64", "win64_img", "out")):
+        if (any(getattr(args, name) for name in ("disk", "rom", "config", "kernel32", "kernel64", "win64_img", "out")) or
+            any(getattr(args, name.replace("-", "_") + suffix) for name in optional_args for suffix in ("", "_sha256"))):
             parser.error("--make-config is separate from private build inputs")
         path = safe_path(args.make_config)
         with path.open("xb") as stream:
@@ -604,12 +794,17 @@ def main(argv=None, *, receipt_sink=None):
         parser.error("explicit disk, ROM, config, Kernel32, Kernel64 and each SHA-256 are required for the native Win98 foundation")
     if args.win64_img and not args.kernel64:
         parser.error("WIN64.IMG requires an explicit Kernel64 input")
-    sizes = {"disk": DISK_BYTES, "rom": ROM_BYTES, "config": 16}
+    sizes = {"disk": DISK_BYTES, "rom": ROM_BYTES, "config": 16,
+             "vga_config": 136, "vga_rom": 65536, "persistence_config": 192}
     targets = {"disk": "DISK.IMG", "rom": "SEABIOS.BIN", "config": "WIN98CFG.BIN",
                "kernel32": "KERNEL32.BIN", "kernel64": "KERNEL64.BIN", "win64_img": "WIN64.IMG"}
+    base_names = set(targets.values())
+    targets.update(vga_config="VGACFG.BIN", vga_rom="VGAROM.BIN", persistence_config="W98PERS.BIN",
+                   vga_build_receipt=VGA_PROVENANCE_NAME)
     # The current loader gives K64 64 MiB and puts its archive at 32 MiB.
     # Larger archives require an explicit RAM/layout change, not a success claim.
-    maximum = {"kernel32": 8 << 20, "kernel64": 16 << 20, "win64_img": 32 << 20}
+    maximum = {"kernel32": 8 << 20, "kernel64": 16 << 20, "win64_img": 32 << 20,
+               "vga_build_receipt": VGA_RECEIPT_MAX}
     selected = {}
     for name, target in targets.items():
         path, pin = getattr(args, name), getattr(args, name + "_sha256")
@@ -618,33 +813,47 @@ def main(argv=None, *, receipt_sink=None):
         if path:
             selected[target] = {"path": safe_path(path), "sha256": pin_format(pin),
                                 "required_size": sizes.get(name), "maximum": maximum.get(name, DISK_BYTES)}
+    optional_native_names(set(selected) & set(OPTIONAL_NATIVE_SIZES),
+                          set(selected) & {VGA_PROVENANCE_NAME})
     out, receipt = None, None
     try:
         with contextlib.ExitStack() as artifact_stack, contextlib.ExitStack() as stack:
             # Artifact custody closes after every original input and its registry.
             artifact_registry = artifact_stack.enter_context(ReadLeaseRegistry())
             registry = stack.enter_context(ReadLeaseRegistry())
-            inputs, descriptors = {}, {}
+            inputs, descriptors, provenance_inputs, provenance_descriptors = {}, {}, {}, {}
             for name, item in selected.items():
                 fd, checkpoint = stack.enter_context(read_leased(item["path"], item["sha256"],
                                                                  item["required_size"], item["maximum"], registry=registry))
-                inputs[name] = {"path": item["path"], "sha256": item["sha256"], "bytes": os.fstat(fd).st_size}
-                descriptors[name] = fd
+                pin = {"path": item["path"], "sha256": item["sha256"], "bytes": os.fstat(fd).st_size}
+                if name == VGA_PROVENANCE_NAME:
+                    provenance_inputs[name] = pin; provenance_descriptors[name] = fd
+                else:
+                    inputs[name] = pin; descriptors[name] = fd
             for name, fd in descriptors.items():
                 validate_contents(name, fd)
                 registry.check()
+            validate_optional_native({n: fd for n, fd in descriptors.items() if n in OPTIONAL_NATIVE_SIZES},
+                                     provenance_descriptors)
+            registry.check()
             if not args.validate_only:
                 if not args.out:
                     parser.error("a new --out private directory is required for building")
                 out = fresh_output(args.out)
-                budget = preparation_budget(inputs)
+                budget = preparation_budget({**inputs, **provenance_inputs})
                 space(out, budget)
                 out.mkdir()
                 receipt = {"status": "FAIL_BUILD_PRESERVED", "private": True, "commands": [],
                            "preparation_budget_bytes": budget, "retained_free_space_bytes": RESERVE, "copies": {},
-                           "input_pins": {n: {**item, "path": str(item["path"])} for n, item in inputs.items()},
+                           "input_pins": {n: {**item, "path": str(item["path"])} for n, item in inputs.items() if n in base_names},
                            "Windows98_installation_identity_verified": False, "VM_executed": False,
                            "Windows98_boot_verified": False, "MS_DOS_replaced": False, "native_Win64_app_verified": False}
+                if any(n in OPTIONAL_NATIVE_SIZES for n in inputs):
+                    receipt["optional_native_inputs"] = {n: {**item, "path": str(item["path"])}
+                                                         for n, item in inputs.items() if n in OPTIONAL_NATIVE_SIZES}
+                if provenance_inputs:
+                    receipt["optional_native_provenance"] = {n: {**item, "path": str(item["path"])}
+                                                             for n, item in provenance_inputs.items()}
                 copies = {}
                 for name, item in inputs.items():
                     destination = out / name

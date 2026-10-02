@@ -399,8 +399,38 @@ def admitted_module(name,row,union):
                        for path,entry in union.rows.items() if path.endswith('.py') and entry['pin']['bytes']<=1<<20}
     union.check();return loader.load(name,Path(row['path']))
 
+def admit_optional_native_inputs(manifest,built,union,builder):
+    """Hold only explicitly declared optional originals, never infer PCI authority."""
+    sizes={'VGACFG.BIN':136,'VGAROM.BIN':65536,'W98PERS.BIN':192}
+    maps={}
+    for field in ('optional_native_inputs','optional_native_provenance'):
+        declared=manifest.get(field,{});actual=built.get(field,{})
+        need(type(declared) is dict and type(actual) is dict and declared==actual,'optional manifest/builder original pin map differs')
+        need((field not in manifest or bool(declared)) and (field not in built or bool(actual)),'present optional map must be nonempty')
+        maps[field]=declared
+    blobs=maps['optional_native_inputs'];provenance=maps['optional_native_provenance']
+    builder.optional_native_names(blobs,provenance)
+    members=built.get('members',{})
+    need(type(members) is dict,'exact optional member map')
+    descriptors={};provenance_descriptors={}
+    for name,row in blobs.items():
+        pin(row,sizes[name]);need(row['bytes']==sizes[name],'exact separate optional ABI extent')
+        member=members.get('SHZDOS/'+name)
+        need(type(member) is dict and set(member)=={'bytes','sha256'} and
+             type(member['bytes']) is int and member['bytes']==row['bytes'] and member['sha256']==row['sha256'],'optional original/ESP member crosslink differs')
+        descriptors[name]=union.add(row)['fd']
+    need({name for name in sizes if 'SHZDOS/'+name in members}==set(blobs),'undeclared optional ESP member')
+    for name,row in provenance.items():
+        pin(row,builder.VGA_RECEIPT_MAX)
+        need('SHZDOS/'+name not in members,'provenance receipt must not be an ESP member')
+        provenance_descriptors[name]=union.add(row)['fd']
+    union.check();builder.validate_optional_native(descriptors,provenance_descriptors);union.check()
+
 def admit_manifest(manifest,union):
-    need(set(manifest) in ({'schema','plan','repo','sources','lineage','producers','limits','timeout'},{'schema','plan','repo','sources','lineage','producers','limits','timeout','preparation_receipt'}) and manifest['schema']=='shizukuos.native-custody-manifest.v1','exact task manifest')
+    fields={'schema','plan','repo','sources','lineage','producers','limits','timeout'}
+    need(type(manifest) is dict and fields<=set(manifest) and
+         set(manifest)<=fields|{'preparation_receipt','optional_native_inputs','optional_native_provenance'} and
+         manifest['schema']=='shizukuos.native-custody-manifest.v1','exact task manifest')
     need(type(manifest['timeout']) is int and 20<=manifest['timeout']<=900,'existing observation timeout')
     repo=Path(manifest['repo']);need(repo.is_absolute() and repo.resolve()==repo,'canonical source root')
     sources=manifest['sources'];need(type(sources) is dict and set(sources)==set(SOURCES),'exact runtime/guardian/lineage source closure')
@@ -413,6 +443,10 @@ def admit_manifest(manifest,union):
     built=union.json(plan['input_pins']['build_receipt']);need(built.get('status')=='PASS_PRIVATE_WIN98_DOMAIN_ESP_PREPARED_NOT_RUN' and built.get('VM_executed') is False and built.get('source_before_after_match') is True and built.get('originals_before_after_match') is True,'source-bound private builder receipt')
     need(set(built['input_pins'])=={'DISK.IMG','SEABIOS.BIN','WIN98CFG.BIN','KERNEL32.BIN','KERNEL64.BIN','WIN64.IMG'},'six original builder inputs')
     for item in built['input_pins'].values():union.add(item)
+    if (any(field in manifest or field in built for field in ('optional_native_inputs','optional_native_provenance')) or
+        any('SHZDOS/'+name in built.get('members',{}) for name in ('VGACFG.BIN','VGAROM.BIN','W98PERS.BIN'))):
+        builder=admitted_module('admitted_optional_builder',sources[HELPERS[0]],union)
+        admit_optional_native_inputs(manifest,built,union,builder)
     need(built['artifact']['bytes']==plan['input_pins']['esp']['bytes'] and built['artifact']['sha256']==plan['input_pins']['esp']['sha256'],'prepared ESP/builder crosslink')
     need(type(built.get('sources_sha256')) is dict and 0<len(built['sources_sha256'])<=30000,'actual native builder source closure required')
     for relative,sha in built['sources_sha256'].items():
