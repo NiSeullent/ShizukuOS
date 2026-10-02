@@ -21,9 +21,7 @@ void kmain(const shz_bootinfo_t *bi)
     unsigned native_count=0;
     const int native_policy=k32_ap_policy(bi,&native_count);
     if(native_policy<0 || (native_policy && k32_ap_snapshot(bi,native_count)))shz_exit(97);
-    service_mode = native_policy ? 0 : shz_win98_foundation_policy(bi);
-    if (!service_mode && !native_policy)
-        service_mode = k32_boot_service_mode(bi); /* reviewed earlier native profile */
+    service_mode = native_policy ? 0 : k32_boot_runtime_service_mode(bi);
     if (service_mode < 0)
         shz_exit(97);
     arch_init();
