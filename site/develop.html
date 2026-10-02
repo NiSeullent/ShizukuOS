@@ -3,78 +3,68 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#008080">
+  <meta name="theme-color" content="#eef3f8">
   <meta name="description" content="실제 Windows 98을 유지하는 ShizukuOS의 아키텍처, 공개 소스, 라이선스와 검증 원칙을 확인하세요.">
   <title>개발과 공개 소스 · ShizukuOS</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="./styles.css?v=20261001-refactor1">
+  <link rel="stylesheet" href="./styles.css?v=20261003-rebuild1">
   <link rel="alternate" hreflang="ko" href="https://m98.nyase.kr/develop.html">
   <link rel="alternate" hreflang="en" href="https://m98.nyase.kr/en/develop.html">
 </head>
-<body>
+<body class="guide-page">
 <a class="skip" href="#main">본문으로 건너뛰기</a>
+
 <header class="top site-header"><a class="brand" href="./index.html"><span class="brand-mark" aria-hidden="true">S</span><span><strong>ShizukuOS</strong><small>1.0.0 개발 중</small></span></a><nav class="site-nav" aria-label="주 메뉴"><a href="./index.html">프로젝트</a><a href="./downloads.html">다운로드</a><a href="./install.html">설치 안내</a><a href="./apps.html">앱 지원</a><a href="./develop.html" aria-current="page">개발·소스</a><a class="language-link" href="./en/develop.html" lang="en" hreflang="en">English</a></nav></header>
+
 <main id="main">
-  <nav class="breadcrumbs" aria-label="현재 위치"><a href="./index.html">홈</a><span aria-hidden="true">/</span><span>개발과 공개 소스</span></nav>
-  <section class="page-hero" aria-labelledby="page-title">
-    <p class="eyebrow">Windows 98, 새로운 기반 위에</p>
-    <h1 id="page-title">익숙한 시스템을<br>끝까지 연결합니다.</h1>
-    <p class="lead">ShizukuOS의 본체는 실제 Windows 98입니다. ShizukuDOS가 MS-DOS 기반을 대체하고, 보호 모드·64비트 서비스와 현대 하드웨어를 Windows 98에 연결하는 것이 목표입니다.</p>
-    <div class="hero-actions"><a class="button primary" href="https://github.com/NiSeullent/Win98-Modern">GitHub 공개 소스</a><a class="button secondary" href="./continuation/guide.html">다른 환경에서 개발 이어가기</a></div>
-  </section>
 
-  <section id="architecture" aria-labelledby="architecture-title">
-    <div class="section-heading"><div><p class="eyebrow">통합 아키텍처</p><h2 id="architecture-title">Windows 98이 시스템의 중심입니다.</h2></div></div>
-    <div class="card-grid">
-      <article class="info-card"><span class="status-pill component">Windows 98 환경</span><h3>VMM · USER · GDI · Explorer</h3><p>실제 Windows 98의 VMM, Win16/Win32 앱 환경과 데스크톱을 유지합니다. 창·입력·파일·앱 수명이 이 환경에서 이어져야 합니다.</p></article>
-      <article class="info-card"><span class="status-pill pending">DOS → VMM 연결 개발 중</span><h3>ShizukuDOS</h3><p>Windows 98이 사용하는 MS-DOS 기반을 대체합니다. 현재 DOS16은 고정 FreeDOS·FreeCOM 소스와 기록된 패치에 기반한 호환 부트스트랩입니다. WIN.COM 시작과 DOS 상주 상태·초기화 계약의 실제 연결을 구현하고 있습니다.</p></article>
-      <article class="info-card"><span class="status-pill component">서비스 구성요소</span><h3>Kernel32 · Kernel64 · PMA</h3><p>Kernel32는 보호 모드 서비스, Kernel64는 Long Mode와 x64 라이브러리 실행을 맡습니다. PMA와 Supervisor는 Windows 98의 실행 상태를 보존하며 서비스 요청을 연결하기 위한 기반입니다. 단독 커널 부팅과 내부 loopback은 구성요소 시험입니다.</p></article>
-      <article class="info-card"><span class="status-pill pending">전체 통합 검증 필요</span><h3>GOP · 드라이버 · NT 호환 계층</h3><p>UEFI GOP의 기본 화면 출력, 현대 저장장치·USB·PCI-E와 NT 계열 앱 API를 Windows 98에 연결합니다. GOP 소프트웨어 출력은 GPU 3D 가속 완료를 뜻하지 않으며, API 이름이나 빌드 성공만으로 앱 기능을 지원한 것으로 판정하지 않습니다.</p></article>
-    </div>
-    <p><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/SHIZUKUDOS_WINDOWS98_ARCHITECTURE.md">DOS → Windows 98 아키텍처 감사</a> · <a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/SHIZUKUOS_ARCHITECTURE_SUPPLEMENT.md">1.0.0 통합 계약</a> · <a href="https://github.com/NiSeullent/Win98-Modern/blob/main/shizukudos/supervisor/native_win98/README.md">Windows 도메인 소스·현재 한계</a></p>
-  </section>
+<section class="page-hero"><p class="eyebrow">개발·소스</p><h1>Windows 98에 새 기반을.</h1><p class="lead">실제 Windows 98을 ShizukuDOS 위에서 구동하고 현대 하드웨어와 앱을 연결합니다.</p></section>
+<div class="hero-actions"><a class="button primary" href="https://github.com/NiSeullent/Win98-Modern">GitHub 소스</a><a class="button secondary" href="./continuation/environment-guide.md">개발 환경</a></div>
+<section class="section-block" id="architecture"><h2>시스템 구성</h2><div class="card-grid">
+<article class="info-card"><h3>ShizukuDOS</h3><p>MS-DOS를 대체하는 기반입니다. 현재 DOS16은 고정 FreeDOS·FreeCOM과 기록된 패치에 기반하며, WIN.COM → VMM 연결은 개발 중입니다.</p></article>
 
-  <section id="remaining" aria-labelledby="verification-title">
-    <div class="section-heading"><div><p class="eyebrow">완료 기준</p><h2 id="verification-title">한 단계의 통과를 전체 성공으로 바꾸지 않습니다.</h2></div><a href="./apps.html">앱별 현황</a></div>
-    <div class="table-wrap" role="region" aria-labelledby="verification-title" tabindex="0">
-      <table>
-        <caption>현재 공개 기록의 범위와 최종 통합에 필요한 실제 검증</caption>
-        <thead><tr><th scope="col">검증 단계</th><th scope="col">확인하는 내용</th><th scope="col">전체 완료를 위해 남은 내용</th></tr></thead>
-        <tbody>
-          <tr><th scope="row">소스·호스트 검사</th><td>실제 소스의 ABI, 경계·수명·오류 처리, 입력 해시와 빌드 결과를 검사합니다. 특권 CPU·장치 경계를 모델링한 시험은 그 범위를 표시합니다.</td><td>호스트 검사와 컴파일 성공은 Windows 98 게스트 부팅이나 앱 실행의 증거가 아닙니다.</td></tr>
-          <tr><th scope="row">독립 구성요소 실행</th><td>실제 CPU·UEFI·커널·서비스·디스크의 제한된 동작을 시험합니다. 독립 Kernel64 앱 기록도 이 단계로 분류합니다.</td><td>Windows 98의 VMM·창·입력·파일 수명과 연결한 시험이 필요합니다.</td></tr>
-          <tr><th scope="row">원래 DOS 경로의 Win98 대조 시험</th><td>실제 Windows 98의 GOP 출력과 제한된 Notepad++·VLC 작업을 원본 캡처로 보존합니다.</td><td>Microsoft DOS를 실행한 대조군은 ShizukuDOS가 MS-DOS를 교체했다는 증거가 아닙니다.</td></tr>
-          <tr><th scope="row">ShizukuDOS 기반 Windows 98</th><td><span class="status-pill pending">최종 수락 미완료</span><p>ShizukuDOS 진입 → WIN.COM → 실제 VMM과 Windows 98 데스크톱, Windows ↔ PMA 서비스 왕복을 실제 실행으로 확인해야 합니다.</p></td><td>두 번의 콜드 부팅, GOP·입력·저장·재열기, 필수 드라이버와 가속, 각 앱의 실제 기능·정상 종료가 필요합니다.</td></tr>
-          <tr><th scope="row">1.0.0 설치·배포</th><td><span class="status-pill pending">최종 배포 준비 중</span><p>프로젝트 자체 설치 시스템, Classic·ShizukuOS 테마, 최종 ISO와 체크섬을 같은 검증된 소스로 준비합니다.</p></td><td>실제 설치·재부팅·전체 통합 검증과 공식 다운로드의 전달 확인이 필요합니다. 현재 개발 ZIP과 구성요소 ISO로 대체하지 않습니다.</td></tr>
-        </tbody>
-      </table>
-    </div>
-    <p>원본 성공·실패 기록은 보존합니다. 공개 화면은 <a href="./preview.html">13개 실제 시험 모음</a>에서 환경과 미검증 범위를 함께 확인할 수 있습니다.</p>
-  </section>
+<article class="info-card"><h3>실제 Windows 98</h3><p>VMM·USER·GDI·Explorer를 유지합니다. 창·입력·파일·앱 실행이 실제 Windows 98에서 이어져야 합니다.</p></article>
 
-  <section id="source" aria-labelledby="source-title">
-    <div class="section-heading"><div><p class="eyebrow">개발 시작점</p><h2 id="source-title">소스와 재현 자료를 함께 읽으세요.</h2></div></div>
-    <div class="card-grid">
-      <article class="info-card"><h3>공개 소스</h3><p>GitHub에는 공개 가능한 개발 소스와 패치를 제공합니다. <a href="https://github.com/NiSeullent/Win98-Modern/blob/main/README.md">프로젝트 README</a>에서 현재 경로와 과거 경로를 확인하세요.</p><a href="https://github.com/NiSeullent/Win98-Modern">소스 저장소 열기</a></article>
-      <article class="info-card"><h3>빌드·개발 환경</h3><p>Linux 빌드 도구와 단계별 명령, 실제 입력 준비와 현재 한계는 인계 문서에 있습니다. 전체 ISO에는 DOS16·UEFI·Win64 도구가 추가로 필요합니다.</p><a href="./continuation/environment-guide.md">개발 환경 안내</a></article>
-      <article class="info-card"><h3>앱 재시험</h3><p>원본 앱의 버전·공식 체크섬·전체 파일 해시를 고정하고, 실제 앱 기능을 각각 시험합니다. 공통 API 통과와 최종 앱 수락을 분리합니다.</p><a href="./continuation/modern-apps-guide.md">앱별 다음 작업</a></article>
-      <article class="info-card"><h3>공식 배포</h3><p>최종 ShizukuOS 1.0.0은 자체 설치 시스템을 사용합니다. <strong>ISO는 m98.nyase.kr에서만 배포</strong>하며 GitHub는 공개 개발 소스·패치의 배포 경로입니다.</p><a href="./downloads.html">현재 다운로드 범위</a></article>
-    </div>
-    <aside class="scope-note"><h3>Windows와 앱 원본은 사용자가 준비합니다.</h3><p>Microsoft 설치 미디어·제품 키·설치된 개인 디스크·비공개 VM·비밀정보를 공개 소스나 다운로드에 포함하지 않습니다. 실제 Windows 98와 앱의 원본 입력은 사용 권한이 있는 자신의 자료로 준비합니다.</p></aside>
-  </section>
+<article class="info-card"><h3>Kernel32 · Kernel64 · PMA</h3><p>보호 모드·x64 서비스와 Supervisor를 연결하는 구성요소입니다. 단독 커널과 loopback 시험은 통합 검증과 별도입니다.</p></article>
 
-  <section id="licenses" aria-labelledby="licenses-title">
-    <div class="section-heading"><div><p class="eyebrow">출처와 라이선스</p><h2 id="licenses-title">구성요소의 출처를 유지합니다.</h2></div><a href="./authorship/">제작·시험 증거</a></div>
-    <div class="table-wrap" role="region" aria-labelledby="licenses-title" tabindex="0"><table><caption>공개 소스에 기록된 주요 라이선스 · 파일별 원문과 동봉 고지를 우선 확인하세요.</caption><thead><tr><th scope="col">소스</th><th scope="col">기록된 조건</th><th scope="col">출처 문서</th></tr></thead><tbody>
-      <tr><th scope="row">프로젝트 작성 코드</th><td>GPL-2.0-only. 외부 소스와 데이터에는 각각의 원래 고지가 적용됩니다.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/LICENSE">LICENSE</a> · <a href="https://github.com/NiSeullent/Win98-Modern/blob/main/THIRD_PARTY.md">파일별 기록</a></td></tr>
-      <tr><th scope="row">FreeDOS kernel · FreeCOM</th><td>GPL-2.0-or-later. 고정 리비전과 프로젝트 패치를 기록하며 외부 구현을 독자 구현으로 표시하지 않습니다.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/shizukudos/upstream/manifest.json">고정 upstream manifest</a></td></tr>
-      <tr><th scope="row">CSMWrap · SeaBIOS</th><td>CSMWrap 자체 코드는 LGPL-2.1-only, 고정 SeaBIOS CSM 코드는 LGPL-3.0-only. 포함된 하위 프로젝트는 별도 조건을 유지합니다.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/shizukudos/upstream/manifest.json">펌웨어 소스·라이선스 핀</a></td></tr>
-      <tr><th scope="row">Wine · ReactOS 참조·이식</th><td>선택된 Wine 코드·데이터는 LGPL-2.1-or-later, ReactOS는 파일별 GPL/LGPL 고지를 확인합니다. 참조만 한 파일과 실제 이식한 파일을 구분합니다.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/THIRD_PARTY.md">리비전과 파일별 출처</a></td></tr>
-      <tr><th scope="row">Shizuku GOP 외부 기반</th><td>고정 VMDisp9x·fixlink는 MIT, 프로젝트의 GOP 파서·화면 메모리 코드는 GPL-2.0-only입니다.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/THIRD_PARTY.md#native-shizuku-gop-display-package">GOP 패키지 출처</a></td></tr>
-    </tbody></table></div>
-    <p>이 표는 전체 라이선스 고지의 대체물이 아닙니다. 배포별 실제 소스·패치·원문 고지와 <a href="https://github.com/NiSeullent/Win98-Modern/blob/main/THIRD_PARTY.md">THIRD_PARTY.md</a>를 함께 확인하세요.</p>
-  </section>
+<article class="info-card"><h3>그래픽·드라이버·호환 계층</h3><p>GOP 출력, 저장장치·USB·PCI-E, NT 앱 API를 연결합니다. 기본 GOP 출력은 GPU 3D 가속 완료가 아닙니다.</p></article>
+</div></section>
+
+<section class="scope-note"><h2>1.0.0의 완료 기준</h2><p>ShizukuDOS → WIN.COM → 실제 Windows 98 부팅과 서비스 왕복, 두 번의 콜드 부팅, 드라이버·가속·앱 기능·정상 종료, 자체 설치 시스템을 실제 실행으로 검증해야 합니다. 현재 최종 수락은 미완료입니다.</p></section>
+
+<section class="section-block" id="source"><h2>개발 문서</h2><ul><li><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/SHIZUKUDOS_WINDOWS98_ARCHITECTURE.md">DOS → Windows 98 아키텍처</a></li><li><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/SHIZUKUOS_ARCHITECTURE_SUPPLEMENT.md">통합 계약과 현재 한계</a></li><li><a href="./continuation/modern-apps-guide.md">앱 재시험과 다음 작업</a></li><li><a href="./preview.html">원본 성공·실패 기록</a></li></ul></section>
+
+<section class="section-block" id="licenses"><h2>출처와 라이선스</h2>
+<details><summary id="licenses-title">주요 구성요소의 라이선스</summary><div class="table-wrap" role="region" aria-labelledby="licenses-title" tabindex="0"><table><caption>공개 소스에 기록된 주요 라이선스 · 파일별 원문과 동봉 고지를 우선 확인하세요.</caption>
+<thead>
+<tr><th scope="col">소스</th><th scope="col">기록된 조건</th><th scope="col">출처 문서</th></tr>
+</thead>
+
+<tbody>
+
+<tr><th scope="row">프로젝트 작성 코드</th><td>GPL-2.0-only. 외부 소스와 데이터에는 각각의 원래 고지가 적용됩니다.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/LICENSE">LICENSE</a> · <a href="https://github.com/NiSeullent/Win98-Modern/blob/main/THIRD_PARTY.md">파일별 기록</a></td></tr>
+
+
+<tr><th scope="row">FreeDOS kernel · FreeCOM</th><td>GPL-2.0-or-later. 고정 리비전과 프로젝트 패치를 기록하며 외부 구현을 독자 구현으로 표시하지 않습니다.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/shizukudos/upstream/manifest.json">고정 upstream manifest</a></td></tr>
+
+
+<tr><th scope="row">CSMWrap · SeaBIOS</th><td>CSMWrap 자체 코드는 LGPL-2.1-only, 고정 SeaBIOS CSM 코드는 LGPL-3.0-only. 포함된 하위 프로젝트는 별도 조건을 유지합니다.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/shizukudos/upstream/manifest.json">펌웨어 소스·라이선스 핀</a></td></tr>
+
+
+<tr><th scope="row">Wine · ReactOS 참조·이식</th><td>선택된 Wine 코드·데이터는 LGPL-2.1-or-later, ReactOS는 파일별 GPL/LGPL 고지를 확인합니다. 참조만 한 파일과 실제 이식한 파일을 구분합니다.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/THIRD_PARTY.md">리비전과 파일별 출처</a></td></tr>
+
+
+<tr><th scope="row">Shizuku GOP 외부 기반</th><td>고정 VMDisp9x·fixlink는 MIT, 프로젝트의 GOP 파서·화면 메모리 코드는 GPL-2.0-only입니다.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/THIRD_PARTY.md#native-shizuku-gop-display-package">GOP 패키지 출처</a></td></tr>
+
+    </tbody>
+</table></div></details>
+<p><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/THIRD_PARTY.md">파일별 출처·원문 고지</a>와 배포 ZIP의 동봉 라이선스를 확인하세요.</p></section>
+
+<section class="section-block"><h2>배포 원칙</h2><p>ISO는 <strong>m98.nyase.kr 전용</strong>이며 GitHub에는 공개 소스·패치만 제공합니다. Windows 미디어·제품 키·개인 디스크·비밀정보는 포함하지 않습니다.</p><a href="./downloads.html">현재 다운로드</a></section>
+
 </main>
+
 <footer class="site-footer"><span>ShizukuOS · 1.0.0 개발판</span><nav aria-label="하단 메뉴"><a href="./downloads.html">다운로드</a><a href="./authorship/">출처</a><a href="./en/develop.html" lang="en" hreflang="en">English</a></nav></footer>
+
 </body>
 </html>
