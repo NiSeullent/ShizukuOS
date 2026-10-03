@@ -24,7 +24,7 @@ class PrivateISO(unittest.TestCase):
  def test_configured_native_without_source_bios_refuses_before_output(self):
   with tempfile.TemporaryDirectory(dir='/var/tmp') as temp:
    out=Path(temp)/'absent'
-   with patch.object(private.admission.policy,'NATIVE_SOURCE_MAP_SHA','a'*64),patch.object(private.admission.policy,'NATIVE_ARTIFACTS',{}):
+   with patch.object(private.admission.policy,'NATIVE_SOURCE_MAP_SHA','a'*64),patch.object(private.admission.policy,'NATIVE_ARTIFACTS',{}),patch.object(private.admission.policy,'NATIVE_SYSTEM_BIOS_SOURCE',None,create=True):
     with self.assertRaisesRegex(ValueError,'source-built native system BIOS closure absent'):
      private.build_private_iso('/absent',out,'/absent','/untrusted-receipt')
    self.assertFalse(out.exists())
