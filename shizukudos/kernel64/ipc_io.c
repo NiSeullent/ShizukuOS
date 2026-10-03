@@ -16,6 +16,7 @@
  */
 #include "ipc.h"
 #include "auth_policy.h"
+#include "../kcommon/nt_file_rights.h"
 
 #define NT_ERROR(s) ((uint32_t)(s) >= 0xC0000000u)
 #define PORT_USER_PACKET_LIMIT 16384u
@@ -95,6 +96,7 @@ void irp_free(irp_t *irp)
 {
     if (irp->event) ob_deref(irp->event);
     if (irp->port) ob_deref(irp->port);
+    if (irp->fobj->type == OB_FILE) file_object_closed(irp->fobj);
     ob_deref(irp->fobj);
     ob_deref(irp->proc->object);
     --ipc_stat_irps;
@@ -555,23 +557,35 @@ int32_t ipc_query_completion_info(process_t *p, kobject_t *fobj, uint64_t buf, u
 }
 
 /* ---------------------------------------------------------------- RAM-disk files: overlapped completion */
+static void file_io_release(kobject_t *o)
+{
+    /* Capturing a handle keeps the object alive, even if another thread closes
+     * its last handle before authorization or IRP preparation finishes. */
+    file_object_closed(o);
+    ob_deref(o);
+}
+
 /* NtReadFile / NtWriteFile(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, Buffer, Length, ByteOffset, Key) */
 static int32_t file_rw(process_t *p, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4)
 {
     const uint64_t iosb = (uint64_t)stack_arg(p, r, 5);
     kobject_t *fobj;
     irp_t *irp;
-    int handled = 0;
     int32_t st;
     struct ipc_iosb v = { 0, 0 };
-    st = ipc_ref_handle(p, a1, OB_FILE, &fobj, 0);
+    uint32_t access = 0;
+    st = ipc_ref_handle(p, a1, OB_FILE, &fobj, &access);
     if (st) return st;
+    /* Reject a reduced-right handle before resetting events or preparing an IRP. */
+    if (num == SYS_NtWriteFile ? !shz_file_can_write(access) : !shz_file_can_read(access)) {
+        file_io_release(fobj); return STATUS_ACCESS_DENIED;
+    }
     {file_t *file=fobj->u.file.file;
-     if(file&&file->node&&!shz_auth_node_access(p,file->node,num==SYS_NtWriteFile)){ob_deref(fobj);return STATUS_ACCESS_DENIED;}}
+     if(file&&file->node&&!shz_auth_node_access(p,file->node,num==SYS_NtWriteFile)){file_io_release(fobj);return STATUS_ACCESS_DENIED;}}
     st = irp_prepare(p, fobj, a2, a3, a4, iosb, num == SYS_NtReadFile ? IRP_READ : IRP_WRITE, &irp);
-    ob_deref(fobj);
-    if (st) return st;
-    st = sysfile_dispatch(p, r, num, a1, a2, a3, a4, &handled);   /* the RAM disk completes every request at once */
+    if (st) { file_io_release(fobj); return st; }
+    st = sysfile_rw_captured(p, r, num, a1, fobj, access);  /* use this IRP's captured object and handle grant */
+    file_io_release(fobj);
     if (iosb) copy_from_user(p, &v, iosb, sizeof v);
     irp->done = v.information;
     irp_complete(irp, st, NT_ERROR(st) ? 0 : v.information);

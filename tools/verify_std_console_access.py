@@ -15,7 +15,7 @@ import subprocess
 
 
 def function(source, name):
-    match = re.search(r'^([^\n]*\b' + re.escape(name) + r'\([^\n]*)', source, re.M)
+    match = re.search(r'^([^\n]*\b' + re.escape(name) + r'\s*\([^\n]*)', source, re.M)
     if not match:
         raise ValueError('missing actual function ' + name)
     start = source.index('{', match.start())
@@ -120,6 +120,9 @@ static process_t proc;static _Alignas(8)uint8_t params[64];static DWORD last_err
 static SHORT g_x,g_y;static WORD g_attr=7;static CHAR_INFO g_cells[2000];static int g_cells_init;
 static int k32t_checks,k32t_failed,controls;
 static uint64_t irq_save(void){return 0;}static void irq_restore(uint64_t f){(void)f;}
+/* Console objects have no account realm gate; full account policy is covered by
+ * the Kernel64 authority controls, outside this console constructor fixture. */
+static int shz_auth_handle_allowed(process_t*p,kobject_t*o){(void)p;(void)o;return 1;}
 static void*kzalloc(size_t n){if(alloc_fail)return 0;return calloc(1,n);}static void kfree(void*p){free(p);}
 static kobject_t*ob_create(int t,int unused){(void)unused;kobject_t*o=kzalloc(sizeof*o);if(o){o->type=t;o->refs=1;}return o;}
 static void ob_deref(kobject_t*o){if(o&&!--o->refs){free(o->u.file.file);free(o);}}
@@ -197,8 +200,10 @@ def compile_run(directory, cc, flags, label, sources, wanted, controls):
     code += '\n'.join(function(sources['objects'], n) for n in ('handle_insert', 'handle_lookup')) + constructor(sources['ldr'])
     code += NATIVE
     branch_start=sources['sysfile'].index('    if (!strcmp(path, "\\\\??\\\\CONOUT$") || !strcmp(path, "\\\\??\\\\CONIN$")) {')
-    branch_end=sources['sysfile'].index('\n    {   /* NT driver host:',branch_start)
-    code += 'static int32_t explicit_console(process_t*p,const char*path,uint32_t a2,uint64_t*result){kobject_t*o;int32_t st;uint32_t h;uint64_t a1=(uintptr_t)result,a4=0;\n'+sources['sysfile'][branch_start:branch_end]+'\nreturn ERROR_INVALID_HANDLE;}\n'
+    # Capture only this balanced branch. Later admission checks belong to the
+    # complete NtCreateFile router and require their own real syscall fixtures.
+    branch=function(sources['sysfile'][branch_start:],'if')
+    code += 'static int32_t explicit_console(process_t*p,const char*path,uint32_t a2,uint64_t*result){kobject_t*o;int32_t st;uint32_t h;uint64_t a1=(uintptr_t)result,a4=0;\n'+branch+'\nreturn ERROR_INVALID_HANDLE;}\n'
     code += '\n'.join(function(file, n) for n in ('GetStdHandle','SetStdHandle','k32_console_handle','k32_console_check'))
     code += '\n'.join(function(console, n) for n in ('cells_init','scroll_model','track_char','k32_console_track','out_handle','out_write_handle','GetConsoleScreenBufferInfo','SetConsoleTextAttribute'))
     code += TRANSPORT + function(file,'WriteConsoleW')
