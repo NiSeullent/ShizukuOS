@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """Actual Linux service/IPC/FD controls; no QEMU or Windows execution."""
 import importlib.util,json,os,pickle,signal,subprocess,tempfile,time,unittest
+from unittest.mock import patch
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[3]
 s=importlib.util.spec_from_file_location('baseline_provider_controls',ROOT/'shizukudos/install/native_baseline_provider.py');m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
@@ -125,6 +126,34 @@ class Controls(unittest.TestCase):
         with self.assertRaises(ValueError):
             with self.client():pass
 class DelegatedCleanup(unittest.TestCase):
+    @unittest.skipUnless(os.environ.get('SHZ_PROVIDER_TEST_UNIT'),'requires independently owned delegated Linux test unit')
+    def test_actual_member_exit_between_pidfd_and_proc_read(self):
+        group=m.OwnedKeeperGroup(os.environ['SHZ_PROVIDER_TEST_UNIT'])
+        child=subprocess.Popen(['/usr/bin/sleep','60'],preexec_fn=group.enter_child)
+        pidfd=os.pidfd_open(child.pid);original=m.actual_group
+        def exiting(pid='self'):
+            if pid==child.pid:
+                child.kill();child.wait(timeout=5)
+            return original(pid)
+        try:
+            with patch.object(m,'actual_group',side_effect=exiting):
+                group.signal_members(signal.SIGTERM,set())
+            self.assertIsNotNone(child.returncode);self.assertFalse(group.members())
+        finally:group.cleanup(child,pidfd);os.close(pidfd);group.remove()
+    @unittest.skipUnless(os.environ.get('SHZ_PROVIDER_TEST_UNIT'),'requires independently owned delegated Linux test unit')
+    def test_live_missing_proc_path_is_not_waived(self):
+        group=m.OwnedKeeperGroup(os.environ['SHZ_PROVIDER_TEST_UNIT'])
+        child=subprocess.Popen(['/usr/bin/sleep','60'],preexec_fn=group.enter_child)
+        pidfd=os.pidfd_open(child.pid);original=m.actual_group
+        def missing(pid='self'):
+            if pid==child.pid:raise FileNotFoundError('modeled inaccessible live proc path')
+            return original(pid)
+        try:
+            with patch.object(m,'actual_group',side_effect=missing):
+                with self.assertRaisesRegex(ValueError,'live owned cleanup'):
+                    group.signal_members(signal.SIGTERM,set())
+            self.assertIsNone(child.poll())
+        finally:group.cleanup(child,pidfd);os.close(pidfd);group.remove()
     @unittest.skipUnless(os.environ.get('SHZ_PROVIDER_TEST_UNIT'),'requires independently owned delegated Linux test unit')
     def test_actual_long_child_cleanup_before_observation_keeps_keeper_alive(self):
         # Actual Linux cgroup/Popen/pidfd with MODELED pre-OBSERVE keeper phase.

@@ -75,6 +75,11 @@ class OwnedKeeperGroup:
                 need(group==self.path or self.path in group.parents,'cleanup PID left owned descendant group')
                 signal.pidfd_send_signal(fd,number)
             except ProcessLookupError:pass
+            except FileNotFoundError:
+                # /proc can disappear after pidfd_open; only actual kernel death
+                # permits skipping this member, never a live/moved process.
+                need(fd is not None and bool(select.select([fd],[],[],0)[0]),
+                     "live owned cleanup member path disappeared")
             finally:
                 if fd is not None:os.close(fd)
     @staticmethod
