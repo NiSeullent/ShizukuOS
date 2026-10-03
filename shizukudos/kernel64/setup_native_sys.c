@@ -12,7 +12,13 @@ struct owner {
 };
 static struct owner owners[OWNERS];
 static kmutex_t lock;static volatile unsigned lock_state;static uint64_t sequence;
-static uint8_t bounce[SHZ_NATIVE_SYS_IO_MAX];
+/* Allocate only when a real source/target transfer needs it. Keeping 64 KiB in
+ * image BSS crosses the fixed 3 MiB loader/heap boundary in the disk profile.
+ * The existing syscall mutex serializes allocation and use; retain this one
+ * kernel buffer for the boot lifetime, including uncertain driver completion. */
+static uint8_t *bounce;
+static int transfer_buffer(void)
+{if(!bounce)bounce=kmalloc(SHZ_NATIVE_SYS_IO_MAX);return bounce?0:-1;}
 static void acquire(void)
 {
  unsigned expected=0;
@@ -95,7 +101,8 @@ int32_t setup_native_syscall(process_t *p,uint64_t user,uint64_t bytes)
   else if(r.operation==SHZ_NATIVE_INFO){archive_source_info_t info;rc=archive_source_info(o,s->cap,&s->info,&info);if(!rc)memcpy(&r.source,&info,sizeof r.source);}
   else if(r.operation==SHZ_NATIVE_CLOSE){rc=archive_source_close(o,s->cap,&s->info);if(!rc)memset(s,0,sizeof *s);}
   else{
-   if(!r.length||r.length>sizeof bounce){status=STATUS_INVALID_PARAMETER;break;}
+   if(!r.length||r.length>SHZ_NATIVE_SYS_IO_MAX){status=STATUS_INVALID_PARAMETER;break;}
+   if(transfer_buffer()){status=STATUS_INSUFFICIENT_RESOURCES;break;}
    rc=archive_source_read(o,s->cap,&s->info,r.offset,bounce,r.length);
    if(!rc&&copy_to_user(p,r.buffer,bounce,r.length)){status=STATUS_ACCESS_VIOLATION;goto done;}
   }
@@ -121,7 +128,8 @@ int32_t setup_native_syscall(process_t *p,uint64_t user,uint64_t bytes)
   else if(r.operation==SHZ_NATIVE_FLUSH)rc=blk_authority_flush(o,o->claim,&o->target);
   else if(r.operation==SHZ_NATIVE_RELEASE){rc=blk_authority_release(o,o->claim,&o->target);if(!rc){o->claim=0;o->claim_token=0;}}
   else{
-   if(!r.length||r.length>sizeof bounce||r.length%512){status=STATUS_INVALID_PARAMETER;break;}
+   if(!r.length||r.length>SHZ_NATIVE_SYS_IO_MAX||r.length%512){status=STATUS_INVALID_PARAMETER;break;}
+   if(transfer_buffer()){status=STATUS_INSUFFICIENT_RESOURCES;break;}
    if(r.operation==SHZ_NATIVE_TARGET_WRITE){
     if(copy_from_user(p,bounce,r.buffer,r.length)){status=STATUS_ACCESS_VIOLATION;goto done;}
     rc=blk_authority_write(o,o->claim,&o->target,r.offset,r.length/512,bounce);
@@ -141,7 +149,8 @@ publish:
   if(created_claim&&!blk_authority_release(o,o->claim,&o->target)){o->claim=0;o->claim_token=0;}
  }
 done:
- memset(bounce,0,sizeof bounce);tidy(o);mutex_unlock(&lock);return status;
+ if(bounce)memset(bounce,0,SHZ_NATIVE_SYS_IO_MAX);
+ tidy(o);mutex_unlock(&lock);return status;
 }
 void setup_native_process_teardown(process_t *p)
 {

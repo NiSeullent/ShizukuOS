@@ -8,6 +8,7 @@
 #include <stdio.h>
 static unsigned checks,failures,random_seq,pages_allocated,pages_freed;
 static int page_budget=-1,heap_fail,driver_fail;
+static unsigned io_buffer_allocations,io_buffer_attempts;
 #define CHECK(x) do{checks++;if(!(x)){failures++;fprintf(stderr,"FAIL line %u %s\n",(unsigned)__LINE__,#x);}}while(0)
 void mutex_init(kmutex_t *m){if(pthread_mutex_init(m,0))abort();}
 void mutex_lock(kmutex_t *m){if(pthread_mutex_lock(m))abort();}
@@ -16,7 +17,7 @@ uint64_t irq_save(void){return 0;}
 void irq_restore(uint64_t f){(void)f;}
 void krandom_get(void *p,size_t n){size_t i;random_seq++;for(i=0;i<n;i++)((uint8_t *)p)[i]=(uint8_t)(random_seq*17+i);}
 void kprintf(const char *f,...){(void)f;}
-void *kmalloc(size_t n){return heap_fail?0:malloc(n);}
+void *kmalloc(size_t n){void *p;if(n==SHZ_NATIVE_SYS_IO_MAX)io_buffer_attempts++;p=heap_fail?0:malloc(n);if(p&&n==SHZ_NATIVE_SYS_IO_MAX)io_buffer_allocations++;return p;}
 void *kzalloc(size_t n){return calloc(1,n);}
 void kfree(void *p){free(p);}
 uint64_t ticks_now(void){return 0;}
@@ -92,6 +93,7 @@ int main(int argc,char **argv)
 
  init(&r,SHZ_NATIVE_CAPS);CHECK(call(&process,&r)==STATUS_SUCCESS);
  CHECK(r.max_source_bytes==(256ull<<20)&&r.max_io_bytes==65536);
+ CHECK(io_buffer_attempts==0&&io_buffer_allocations==0); /* caps/default absence consumes no IO heap */
 #ifdef SHZ_TEST_COMPILED_ADMISSION
  CHECK(r.producer_admission_available==1);
 #else
@@ -105,7 +107,12 @@ int main(int argc,char **argv)
  before=pages_freed;fail_copy_out=1;CHECK(call(&process,&r)==STATUS_ACCESS_VIOLATION);fail_copy_out=0;CHECK(pages_freed==before+3);
  CHECK(call(&process,&r)==STATUS_SUCCESS);a=r.handle;memcpy(&admitted[0],&r.source,sizeof r.source);
  init(&r,SHZ_NATIVE_READ);r.handle=a;r.offset=3500;r.length=6000;r.buffer=(uint64_t)(uintptr_t)out;
- CHECK(call(&other,&r)==STATUS_INVALID_HANDLE);CHECK(call(&process,&r)==STATUS_SUCCESS);CHECK(!memcmp(out,archive+288+3500,6000));
+ CHECK(call(&other,&r)==STATUS_INVALID_HANDLE);CHECK(io_buffer_attempts==0);
+ heap_fail=1;CHECK(call(&process,&r)==STATUS_INSUFFICIENT_RESOURCES);heap_fail=0;
+ CHECK(io_buffer_attempts==1&&io_buffer_allocations==0);CHECK(writes==0&&flushes==0);
+ CHECK(call(&process,&r)==STATUS_SUCCESS);CHECK(!memcmp(out,archive+288+3500,6000));
+ CHECK(io_buffer_attempts==2&&io_buffer_allocations==1);
+ CHECK(call(&process,&r)==STATUS_SUCCESS);CHECK(io_buffer_attempts==2&&io_buffer_allocations==1); /* one retained buffer */
  r.length=65537;CHECK(call(&process,&r)==STATUS_INVALID_PARAMETER);r.length=6000;r.offset=9999;CHECK(call(&process,&r)!=STATUS_SUCCESS);
  init(&r,SHZ_NATIVE_OPEN);strcpy(r.path,"C:\\SHZ\\INPUTS\\SECOND.BIN");CHECK(call(&process,&r)==STATUS_SUCCESS);b=r.handle;memcpy(&admitted[1],&r.source,sizeof r.source);
  CHECK(call(&process,&r)!=STATUS_SUCCESS); /* two source slots only */
