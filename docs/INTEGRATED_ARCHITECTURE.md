@@ -1,0 +1,1209 @@
+# Win98-Modern 통합 아키텍처 원칙
+
+## 1. 가장 중요한 전제: 이 프로젝트의 본체는 Windows 98이다
+
+이 프로젝트는 새로운 운영체제를 만든 뒤 Windows 98을 그 위에서 에뮬레이션하는 프로젝트가 아니다.
+
+또한 ShizukuDOS, Kernel32, Kernel64, NT compatibility layer를 각각 독립적인 운영체제로 만드는 프로젝트도 아니다.
+
+**최종적으로 사용자가 사용하는 운영체제 본체는 Windows 98이다.**
+
+정확하게 말하면 최종 사용자 환경의 중심은 다음 구성이다.
+
+```text
+Windows 98
+
+VMM
+VxD
+USER
+GDI
+Win16
+Win32
+Explorer
+Windows 98 Desktop
+Windows 98 application environment
+```
+
+ShizukuDOS와 그 주변 구성요소는 모두 이 Windows 98 환경을 현대 하드웨어와 현대 소프트웨어 환경에서 계속 사용할 수 있도록 지원하기 위한 기반이다.
+
+따라서 전체 프로젝트의 방향은 다음과 같다.
+
+```text
+새 OS를 만들고 Windows 98을 호환시키는 것
+                    X
+
+Windows 98을 본체로 유지하면서
+그 밑과 주변을 현대화하는 것
+                    O
+```
+
+이 원칙은 모든 구현보다 우선한다.
+
+---
+
+# 2. 전체 시스템 구조
+
+개념적으로 전체 시스템은 다음과 같다.
+
+```text
+┌──────────────────────────────────────────────┐
+│                 Modern Hardware              │
+│                                              │
+│ UEFI / ACPI / APIC / PCIe / NVMe / USB3     │
+│ GOP / Modern GPU / Modern NIC / Modern CPU   │
+└──────────────────────┬───────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────┐
+│                  ShizukuDOS                  │
+│                                              │
+│ MS-DOS replacement                          │
+│ boot environment                            │
+│ hardware abstraction                        │
+│ PMA scheduler                               │
+│ modern firmware support                     │
+│ DOS compatibility                           │
+│ Supervisor                                  │
+└──────────┬───────────────────────┬───────────┘
+           │                       │
+           ▼                       ▼
+┌──────────────────┐       ┌──────────────────┐
+│ Shizuku Kernel32 │       │ Shizuku Kernel64 │
+│                  │       │                  │
+│ 32-bit services  │       │ x64 services     │
+│ driver bridge    │       │ modern runtime   │
+│ compatibility    │       │ translation      │
+│ worker runtime   │       │ worker runtime   │
+└─────────┬────────┘       └─────────┬────────┘
+          │                          │
+          └────────────┬─────────────┘
+                       │
+                       ▼
+              compatibility bridge
+                       │
+                       ▼
+┌──────────────────────────────────────────────┐
+│                  Windows 98                  │
+│                                              │
+│                 WIN.COM                      │
+│                    │                         │
+│                    ▼                         │
+│                   VMM                        │
+│                    │                         │
+│          VxD / Win16 / Win32                 │
+│                    │                         │
+│          USER / GDI / KERNEL                 │
+│                    │                         │
+│                Explorer                      │
+│                    │                         │
+│           Windows 98 Desktop                 │
+└──────────────────────────────────────────────┘
+```
+
+여기서 가장 아래에 그려졌다고 해서 Windows 98이 종속적인 게스트 OS라는 의미가 아니다.
+
+**제품 관점에서 Windows 98이 본체이며, 그 위와 아래에 존재하는 Shizuku 구성요소는 Windows 98을 지원하기 위한 시스템 구성요소다.**
+
+---
+
+# 3. ShizukuDOS의 역할
+
+ShizukuDOS는 Windows 98을 대체하지 않는다.
+
+ShizukuDOS가 대체하려는 대상은 기본적으로 **Windows 98 아래에 존재하던 MS-DOS 기반**이다.
+
+원래 Windows 98은 대략 다음 경로를 가진다.
+
+```text
+BIOS
+ ↓
+DOS boot environment
+ ↓
+IO.SYS
+ ↓
+DOS services
+ ↓
+WIN.COM
+ ↓
+VMM
+ ↓
+Windows 98
+```
+
+ShizukuDOS 프로젝트의 목표 구조는 다음과 같다.
+
+```text
+BIOS / UEFI
+     ↓
+ShizukuDOS
+     ↓
+Windows 98 boot contract
+     ↓
+WIN.COM
+     ↓
+VMM
+     ↓
+Windows 98
+```
+
+즉:
+
+> ShizukuDOS는 Windows 98 대신 실행되는 OS가 아니라,
+> Windows 98이 부팅되고 동작하기 위해 사용하는 현대화된 DOS/시스템 기반이다.
+
+ShizukuDOS가 담당할 수 있는 것은 다음과 같다.
+
+- UEFI 부팅
+- GOP framebuffer
+- 현대 CPU 초기화
+- SMP/PMA 실행 기반
+- ACPI
+- APIC
+- 현대 PCI/PCIe 탐색
+- NVMe/AHCI 지원
+- USB 지원
+- 현대 입력장치 지원
+- 네트워크 하드웨어 지원
+- DOS compatibility environment
+- V86 또는 legacy compatibility
+- VGA/SVGA virtualization
+- Windows 98와 Kernel32/Kernel64 사이의 Supervisor 역할
+
+그러나 이 기능을 가졌다는 이유로 ShizukuDOS 자체가 최종 데스크톱 OS가 되어서는 안 된다.
+
+ShizukuDOS shell이나 자체 GUI는 개발, 복구, 테스트 환경으로 존재할 수 있다.
+
+최종 정상 부팅의 목표는:
+
+```text
+ShizukuDOS shell
+```
+
+이 아니라:
+
+```text
+Windows 98 Desktop
+```
+
+이다.
+
+---
+
+# 4. Shizuku Kernel32의 의미
+
+여기서 말하는 **Shizuku Kernel32**는 Microsoft Windows의 `KERNEL32.DLL`을 의미하지 않는다.
+
+이 둘은 반드시 구분해야 한다.
+
+```text
+Shizuku Kernel32
+≠
+Windows KERNEL32.DLL
+```
+
+Shizuku Kernel32는 ShizukuDOS 시스템 내부의 **32비트 보호 모드 서비스 도메인**이다.
+
+주요 역할은 다음과 같다.
+
+```text
+32-bit native execution
+device service
+hardware abstraction
+driver translation
+compatibility worker
+Windows 98 bridge
+legacy↔modern transition
+```
+
+예를 들어 Windows 98에서 직접 처리하기 어려운 현대 장치 서비스를 Kernel32 쪽에서 수행한 뒤 Windows 98에 결과만 제공할 수 있다.
+
+개념적으로:
+
+```text
+Windows 98
+   │
+   ▼
+VxD / wrapper
+   │
+   ▼
+Shizuku Kernel32
+   │
+   ▼
+modern device/service
+```
+
+같은 형태다.
+
+Kernel32가 Windows 98 커널을 대체해서는 안 된다.
+
+Kernel32가 새로운 Win32 subsystem의 주인 역할을 해서도 안 된다.
+
+Windows 98의 프로세스와 GUI, 메시지 루프, USER/GDI 환경은 여전히 Windows 98에 속한다.
+
+---
+
+# 5. Shizuku Kernel64의 의미
+
+Kernel64 역시 별도의 사용자 운영체제가 아니다.
+
+Kernel64는 Windows 98이 직접 수행할 수 없는 **Long Mode / x86-64 실행과 현대 런타임 서비스**를 제공하기 위한 보조 실행 도메인이다.
+
+구조적으로는:
+
+```text
+Windows 98 application
+        │
+        ▼
+compatibility wrapper
+        │
+        ▼
+VxD / bridge
+        │
+        ▼
+Shizuku Kernel64
+        │
+        ▼
+x86-64 runtime / modern implementation
+```
+
+형태를 취할 수 있다.
+
+Kernel64가 맡을 수 있는 작업은 다음과 같다.
+
+- x86-64 code execution
+- 64비트 PE 실행 지원
+- 현대 라이브러리 실행
+- wrapper backend
+- 현대 드라이버 backend
+- graphics translation
+- networking worker
+- storage worker
+- cryptography
+- media processing
+- asynchronous I/O
+- modern runtime service
+
+그러나 사용자 관점에서 프로그램은 계속 Windows 98 환경에 존재해야 한다.
+
+가능하면 다음처럼 보여야 한다.
+
+```text
+Windows 98 desktop
+    │
+    ├─ legacy Win32 app
+    ├─ Win16 app
+    ├─ DOS app
+    └─ modern compatibility app
+```
+
+마지막 앱의 일부 코드가 Kernel64에서 실행되더라도, 그 앱이 Windows 98 데스크톱의 창으로 존재한다면 사용자에게는 여전히 Windows 98 프로그램이다.
+
+---
+
+# 6. Windows 98 VMM은 제거 대상이 아니다
+
+이 프로젝트에서 Windows 98 VMM은 폐기 대상이 아니다.
+
+다음과 같은 구조는 잘못된 목표다.
+
+```text
+Shizuku kernel
+ ↓
+Windows 98 API emulation
+ ↓
+Windows 98 applications
+```
+
+이렇게 되면 사실상 Windows 98을 제거하고 새로운 운영체제 위에 Win98 compatibility layer를 만드는 프로젝트가 된다.
+
+원하는 구조는:
+
+```text
+ShizukuDOS
+ ↓
+WIN.COM
+ ↓
+real Windows 98 VMM
+ ↓
+real Windows 98 USER/GDI/VxD
+ ↓
+Windows 98 desktop
+```
+
+이다.
+
+따라서 원본 Windows 98의 중요한 구성은 유지해야 한다.
+
+- VMM
+- VxD
+- V86 environment
+- Win16 subsystem
+- USER
+- GDI
+- KERNEL
+- Windows 98 process model
+- Windows 98 desktop
+- Windows 98 shell
+
+PMA 역시 VMM을 없애기 위한 시스템이 아니다.
+
+PMA는 ShizukuDOS와 Kernel32/Kernel64의 현대적인 실행 기반이며, VMM과는 bridge를 통해 동기화한다.
+
+즉:
+
+```text
+Shizuku PMA scheduler
+        ↕
+VMM/PMA synchronization bridge
+        ↕
+Windows 98 VMM scheduler
+```
+
+이다.
+
+---
+
+# 7. 스케줄러도 하나로 억지 통합하지 않는다
+
+Windows 98 VMM이 관리하는 스레드를 전부 Shizuku PMA thread로 강제로 변환하면 안 된다.
+
+그렇게 하면:
+
+- VMM scheduling semantics
+- Win16 serialization
+- VxD critical sections
+- V86 assumptions
+- legacy timing behavior
+
+등이 깨질 가능성이 매우 높다.
+
+따라서 기본 원칙은:
+
+```text
+Windows scheduling
+        =
+Windows VMM이 담당
+
+Shizuku native scheduling
+        =
+PMA가 담당
+```
+
+이고 두 세계 사이에 synchronization bridge를 둔다.
+
+예:
+
+```text
+Windows thread
+    │
+    │ wrapper request
+    ▼
+PMA bridge
+    │
+    ▼
+Kernel64 worker thread
+    │
+    │ async work
+    ▼
+completion
+    │
+    ▼
+Windows event signaled
+```
+
+이것이 가장 중요한 통합 방식 중 하나다.
+
+---
+
+# 8. 현대 드라이버 지원의 의미
+
+프로젝트의 장기 목표 중 하나는 **Windows 7~10 시대의 드라이버 구조를 Windows 98에서 사용할 수 있도록 하는 것**이다.
+
+그러나 이것은 Windows 7 또는 Windows 10 커널을 Windows 98에 집어넣는다는 뜻이 아니다.
+
+또한 Windows NT kernel을 별도로 부팅한다는 의미도 아니다.
+
+목표는:
+
+```text
+modern NT driver
+       │
+       ▼
+driver compatibility layer
+       │
+       ▼
+Shizuku Kernel32 / Kernel64
+       │
+       ▼
+Shizuku hardware services
+       │
+       ▼
+Windows 98 driver-facing bridge
+```
+
+형태다.
+
+즉 modern driver가 기대하는 NT kernel contract 일부를 Shizuku 쪽에서 제공하는 것이다.
+
+---
+
+# 9. NTDRVWrapper 계열
+
+이를 위해 다음과 같은 compatibility family를 사용할 수 있다.
+
+```text
+NTDRVWrapper9x
+NTOSKRNLWrapper9x
+NTHALWrapper9x
+
+NTIRPWrapper9x
+NTIOWrapper9x
+NTMEMWrapper9x
+NTSYNCWrapper9x
+NTTHREADWrapper9x
+NTOBJWrapper9x
+
+NTPNPWrapper9x
+NTPOWERWrapper9x
+NTDMAWrapper9x
+NTPCIWrapper9x
+NTACPIWrapper9x
+
+NTWORKITEMWrapper9x
+NTDPCWrapper9x
+NTTIMERWrapper9x
+```
+
+예를 들어 현대 WDM/NT 드라이버가:
+
+```text
+IoCreateDevice
+IoCallDriver
+IoCompleteRequest
+KeWaitForSingleObject
+KeSetEvent
+ExAllocatePool
+MmMapIoSpace
+```
+
+같은 인터페이스를 기대한다고 하자.
+
+이때 해당 API를 Windows 98 VMM에 억지로 직접 추가하는 것이 아니라:
+
+```text
+modern driver
+      │
+      ▼
+NTDRVWrapper
+      │
+      ▼
+Shizuku NT compatibility ABI
+      │
+      ▼
+Kernel32 / Kernel64
+      │
+      ▼
+actual hardware
+```
+
+구조로 처리할 수 있다.
+
+---
+
+# 10. Windows 7~10 드라이버 지원 목표
+
+드라이버 지원 목표도 계층적으로 접근해야 한다.
+
+## 1단계 — WDM 계열
+
+Windows 2000/XP 계열 WDM과 Windows 98 WDM 사이의 공통점을 최대한 활용한다.
+
+```text
+Windows 98 WDM
+↕
+Windows 2000/XP WDM
+```
+
+이 구간은 비교적 직접적인 compatibility work가 가능하다.
+
+## 2단계 — Vista/7 NT driver model
+
+Vista 이후 증가한 kernel contract를 wrapper를 통해 제공한다.
+
+예:
+
+```text
+modern NT kernel expectation
+             ↓
+        NT wrappers
+             ↓
+Shizuku compatibility services
+```
+
+## 3단계 — Windows 8/10-era drivers
+
+필요한 경우 더 현대적인:
+
+```text
+KMDF
+WDF
+WDDM
+NDIS
+StorPort
+USB
+audio stack
+```
+
+의 필요한 부분만 구현한다.
+
+목표는 NT kernel 전체를 다시 만드는 것이 아니다.
+
+**실제 드라이버가 요구하는 계약을 최소 단위로 구현하는 것**이다.
+
+---
+
+# 11. WDDM 또한 Windows 98을 대체하지 않는다
+
+NTWDDMWrapper9x의 목적도 동일하다.
+
+잘못된 해석:
+
+```text
+Windows 98 GDI 삭제
+↓
+WDDM desktop
+```
+
+올바른 구조:
+
+```text
+Windows 98 USER/GDI
+        │
+        ▼
+graphics compatibility bridge
+        │
+        ├── legacy Windows 98 graphics
+        │
+        └── modern graphics API
+                    │
+                    ▼
+           NTWDDMWrapper9x
+                    │
+                    ▼
+       Shizuku graphics backend
+```
+
+따라서 Windows 98의 창 관리자와 데스크톱은 여전히 Windows 98의 것이다.
+
+WDDMWrapper는 필요한 현대 그래픽 기능을 제공하는 backend다.
+
+---
+
+# 12. GOP도 Windows 98 GUI를 대체하지 않는다
+
+UEFI 시스템에서는 GOP가 기본 physical framebuffer가 된다.
+
+하지만 GOP 자체가 desktop system은 아니다.
+
+```text
+UEFI GOP
+  ↓
+Shizuku framebuffer backend
+  ↓
+Windows 98 display bridge
+  ↓
+Windows 98 GDI
+  ↓
+Windows 98 desktop
+```
+
+형태가 목표다.
+
+ShizukuDOS 자체 GOP shell은:
+
+- 초기 부팅
+- 복구
+- 디버깅
+- 개발
+- Windows 부팅 실패
+
+상황에서 사용할 수 있다.
+
+정상 사용 시 최종 화면은 Windows 98 desktop이어야 한다.
+
+---
+
+# 13. DOS 프로그램은 Windows 98의 legacy capability다
+
+DOS compatibility도 ShizukuDOS의 별도 사용자 생태계가 아니다.
+
+Windows 98의 역사적 강점인:
+
+```text
+DOS
+Win16
+Win32
+```
+
+동시 호환성을 유지하기 위한 것이다.
+
+UEFI 시스템에서는 물리 VGA를 직접 사용할 필요가 없다.
+
+DOS 프로그램이 VGA를 요구하면:
+
+```text
+DOS application
+     │
+     ▼
+virtual VGA/SVGA
+     │
+     ▼
+shadow framebuffer
+     │
+     ▼
+GOP compositor
+```
+
+형태로 실행할 수 있다.
+
+이 역시 최종적으로는 Windows 98 환경의 legacy compatibility 기능이다.
+
+---
+
+# 14. 통합된 I/O 구조
+
+가능하면 실제 하드웨어의 소유권은 Shizuku 계층에 집중한다.
+
+예:
+
+```text
+NVMe SSD
+   │
+   ▼
+Shizuku NVMe driver
+   │
+   ├── DOS filesystem
+   │
+   ├── Windows 98 disk bridge
+   │
+   └── NT driver compatibility service
+```
+
+USB도 동일하다.
+
+```text
+xHCI
+ │
+ ▼
+Shizuku USB stack
+ │
+ ├── Windows 98 USB bridge
+ ├── HID
+ ├── storage
+ └── NT USB compatibility
+```
+
+Network:
+
+```text
+modern NIC
+   │
+   ▼
+Shizuku NIC backend
+   │
+   ├── Windows 98 NDIS bridge
+   └── modern NDIS compatibility
+```
+
+이렇게 하면 동일한 장치를 여러 커널이 경쟁해서 소유하는 상황을 피할 수 있다.
+
+---
+
+# 15. 핵심 설계 철학: hardware backend와 OS frontend 분리
+
+전체 프로젝트를 이해하는 가장 좋은 방식은:
+
+```text
+Windows 98
+=
+frontend OS
+
+ShizukuDOS / Kernel32 / Kernel64
+=
+modern backend
+```
+
+라고 보는 것이다.
+
+예를 들어:
+
+```text
+Windows 98 filesystem API
+        │
+        ▼
+Windows 98 VxD
+        │
+        ▼
+Shizuku storage backend
+        │
+        ▼
+NVMe
+```
+
+또는:
+
+```text
+Windows 98 application
+        │
+        ▼
+DirectWrite compatibility API
+        │
+        ▼
+NTDWRITEWrapper9x
+        │
+        ▼
+Kernel64 rendering worker
+        │
+        ▼
+GDI/GOP surface
+        │
+        ▼
+Windows 98 window
+```
+
+이런 식이다.
+
+---
+
+# 16. Process / Thread ownership
+
+AI가 특히 혼동하기 쉬운 부분이다.
+
+모든 프로세스가 Shizuku process인 것은 아니다.
+
+다음과 같이 구분한다.
+
+### Windows process
+
+```text
+ownership:
+Windows 98 VMM
+
+GUI:
+Windows 98 USER/GDI
+
+scheduler:
+Windows VMM
+
+API:
+Win16/Win32
+```
+
+### Shizuku worker process/thread
+
+```text
+ownership:
+Shizuku PMA
+
+scheduler:
+Shizuku PMA
+
+purpose:
+backend service
+driver service
+compatibility translation
+x64 execution
+```
+
+한 modern application을 실행하더라도 두 종류가 함께 존재할 수 있다.
+
+```text
+Windows-visible process
+      │
+      ├── Windows UI thread
+      ├── Windows message loop
+      │
+      └── compatibility calls
+                  │
+                  ▼
+         Shizuku worker
+                  │
+                  ▼
+            modern code
+```
+
+---
+
+# 17. Kernel64에서 GUI를 독립적으로 만들지 않는다
+
+Kernel64가 GUI capability를 가질 수는 있다.
+
+그러나 이것은 주로:
+
+- recovery UI
+- diagnostics
+- development environment
+- framebuffer testing
+
+용이다.
+
+최종 modern application의 GUI는 가능한 경우:
+
+```text
+Kernel64-native independent window
+```
+
+가 아니라:
+
+```text
+Windows 98 native window
+```
+
+로 표현해야 한다.
+
+즉 Kernel64가 Chromium rendering을 실행한다고 해도:
+
+```text
+Chromium process backend
+          │
+          ▼
+Kernel64
+          │
+          ▼
+shared surface
+          │
+          ▼
+Windows 98 USER/GDI window
+```
+
+형태가 이상적인 구조다.
+
+---
+
+# 18. wrapper는 별도 OS subsystem이 아니다
+
+다음과 같은 wrapper들은:
+
+```text
+NTUSER32Wrapper9x
+NTGDI32Wrapper9x
+NTKERNEL32Wrapper9x
+NTDLLWrapper9x
+NTWDDMWrapper9x
+NTDRVWrapper9x
+NTWS2_32Wrapper9x
+NTDWRITEWrapper9x
+```
+
+각자 독립적인 Windows 구현이 아니다.
+
+모든 wrapper는 하나의 통합 compatibility fabric에 속한다.
+
+공통 구조는 다음과 같다.
+
+```text
+Windows 98 application
+        │
+        ▼
+wrapper frontend
+        │
+        ▼
+common Shizuku ABI
+        │
+        ▼
+Kernel32 / Kernel64 service
+        │
+        ▼
+hardware / modern library
+```
+
+wrapper가 자체 scheduler, 자체 hardware stack, 자체 object model을 무분별하게 만들면 안 된다.
+
+가능한 한 공통 Shizuku 서비스를 사용해야 한다.
+
+---
+
+# 19. AI 구현 시 절대 금지할 착시
+
+AI 에이전트는 다음과 같은 구현을 절대로 해서는 안 된다.
+
+## 금지 1
+
+```text
+Windows 98이 어려우니까
+ShizukuOS desktop을 만들어 대체한다.
+```
+
+금지.
+
+본체는 Windows 98이다.
+
+---
+
+## 금지 2
+
+```text
+Windows 98 VMM 대신
+Shizuku PMA scheduler를 사용한다.
+```
+
+금지.
+
+둘은 synchronization bridge로 연결한다.
+
+---
+
+## 금지 3
+
+```text
+Kernel64에서 새 Win32 desktop을 구현한다.
+```
+
+금지.
+
+Kernel64는 backend다.
+
+---
+
+## 금지 4
+
+```text
+Windows 10 driver 지원을 위해
+NT kernel 전체를 구현한다.
+```
+
+금지.
+
+필요한 driver contract만 compatibility layer로 제공한다.
+
+---
+
+## 금지 5
+
+```text
+WDDM 지원을 위해
+Windows 98 GDI를 없앤다.
+```
+
+금지.
+
+WDDM translation은 GDI 및 modern API의 backend다.
+
+---
+
+## 금지 6
+
+```text
+DOS 지원을 위해
+항상 VGA emulator를 실행한다.
+```
+
+금지.
+
+GOP가 기본이며 VGA/SVGA는 필요한 프로세스에만 제공한다.
+
+---
+
+## 금지 7
+
+```text
+ShizukuDOS
+Kernel32
+Kernel64
+Windows 98
+
+네 개의 OS를 별도로 구현한다.
+```
+
+절대 금지.
+
+실제 제품 구조는:
+
+```text
+                Windows 98
+                    ▲
+                    │
+            compatibility frontend
+                    │
+       ┌────────────┴────────────┐
+       │                         │
+   Kernel32                  Kernel64
+       │                         │
+       └────────────┬────────────┘
+                    │
+               ShizukuDOS
+                    │
+                    ▼
+                Hardware
+```
+
+이다.
+
+---
+
+# 20. 프로젝트를 한 문장으로 정의하면
+
+이 프로젝트는:
+
+> **Windows 98을 본체로 유지하면서, MS-DOS 기반을 ShizukuDOS로 현대화하고, Kernel32/Kernel64 및 NT compatibility layers를 통해 현대 하드웨어·x64 소프트웨어·Windows 7~10 시대 드라이버 모델을 Windows 98에 연결하는 프로젝트다.**
+
+더 짧게 표현하면:
+
+```text
+Windows 98 frontend
++
+Shizuku modern backend
+```
+
+이다.
+
+---
+
+# 21. 최종 제품의 사용자 관점
+
+사용자가 컴퓨터를 켠다.
+
+```text
+UEFI
+ ↓
+ShizukuDOS
+ ↓
+modern hardware initialization
+ ↓
+WIN.COM
+ ↓
+Windows 98 VMM
+ ↓
+Windows 98 boot screen
+ ↓
+Windows 98 desktop
+```
+
+사용자는 Windows 98을 사용한다.
+
+하지만 내부에서는:
+
+```text
+NVMe
+USB3
+modern GPU
+modern NIC
+multicore CPU
+x64 execution
+modern driver translation
+modern APIs
+```
+
+를 Shizuku 계층이 처리한다.
+
+결과적으로 목표는:
+
+```text
+겉:
+Windows 98
+
+속:
+현대화된 Shizuku execution platform
+```
+
+이다.
+
+단, 여기서 “겉”이라는 표현은 단순 스킨을 뜻하지 않는다.
+
+실제로 Windows 98 VMM, USER, GDI, Win16/Win32, Explorer가 동작해야 한다.
+
+---
+
+# 22. 개발 완료 판단 기준
+
+어떤 기능을 구현할 때 항상 다음 질문을 한다.
+
+> 이 기능이 Windows 98을 강화하고 있는가,
+> 아니면 Windows 98을 몰래 대체하고 있는가?
+
+후자라면 설계를 다시 검토한다.
+
+정상적인 데이터 흐름은 가능한 한 다음과 같아야 한다.
+
+```text
+Application
+   ↓
+Windows 98
+   ↓
+compatibility bridge
+   ↓
+Shizuku service
+   ↓
+modern hardware/runtime
+```
+
+그리고 결과는 다시:
+
+```text
+modern hardware/runtime
+   ↓
+Shizuku service
+   ↓
+Windows 98
+   ↓
+Application
+```
+
+으로 돌아온다.
+
+---
+
+# 23. 최종 아키텍처 원칙
+
+프로젝트의 모든 AI 에이전트와 개발자는 다음 원칙을 공유해야 한다.
+
+```text
+1. Windows 98 is the product OS.
+
+2. ShizukuDOS replaces and modernizes the DOS/boot/hardware foundation,
+   not Windows 98 itself.
+
+3. Windows 98 VMM remains the Windows execution authority.
+
+4. Shizuku PMA is the native modern scheduler outside Windows 98.
+
+5. VMM and PMA cooperate through explicit synchronization.
+
+6. Kernel32 and Kernel64 are backend execution/service domains.
+
+7. Shizuku Kernel32 is NOT Microsoft's KERNEL32.DLL.
+
+8. Kernel64 provides x86-64 and modern runtime capability,
+   not a replacement desktop OS.
+
+9. Modern drivers are supported through compatibility and translation layers.
+
+10. Windows 7–10 driver support does NOT imply booting an NT kernel.
+
+11. NT wrappers implement required contracts, not an entire second Windows.
+
+12. Windows 98 USER/GDI/VxD/Win16/Win32 remain first-class components.
+
+13. GOP is the physical modern display backend.
+
+14. VGA/SVGA exists only as legacy compatibility virtualization.
+
+15. Modern hardware should preferably have one Shizuku-native backend
+    and multiple compatibility frontends.
+
+16. Do not create duplicate schedulers, driver stacks, hardware owners,
+    or compatibility subsystems when a shared backend can be used.
+
+17. Do not fake compatibility using successful stubs.
+
+18. Preserve Windows 98 behavior unless a verified compatibility layer
+    deliberately extends it.
+
+19. The final normal boot target is the Windows 98 desktop.
+
+20. Every subsystem exists to extend Windows 98, not to compete with it.
+```
+
+## Canonical architecture statement
+
+**Win98-Modern / ShizukuDOS is not a replacement operating system for Windows 98. Windows 98 is the primary and user-visible operating system. ShizukuDOS replaces and modernizes the DOS, boot, firmware, hardware-access, scheduling-support, and compatibility foundation underneath Windows 98. Shizuku Kernel32 and Kernel64 operate as auxiliary execution and translation domains that provide modern 32-bit, 64-bit, driver, graphics, storage, networking, and runtime services. Windows 98 retains its VMM, VxD, Win16, Win32, USER, GDI, shell, process environment, and desktop. Modern Windows driver and API compatibility must therefore be implemented as bridges from Windows 98 into shared Shizuku backend services, not as separate operating systems or replacement kernels.**
