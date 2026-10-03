@@ -77,13 +77,20 @@ filesystem hole metadata is consulted, and no sparse-allocation guarantee is
 made. The complete logical budget and remaining-byte capacity checks still
 apply even to an all-zero source. Destination extent/hash are read back in both
 modes. Disk sizes above 64 MiB
-are confined to the reserved NAS lane
-`/root/_drive/0001/volume1/working_stuff_by_nyase/root6970/replacement`; small synthetic
-host controls use private temporary directories. Root allocates and coordinates
-real NAS jobs. No large NAS copy is launched by the test suite.
+use the reserved NAS lane
+`/root/_drive/0001/volume1/working_stuff_by_nyase/root6970/replacement` by default.
+When that mount is unavailable, `--large-private-output-root /private/owned-area`
+explicitly selects an existing mode-0700 directory owned by the current user.
+The fresh output must be strictly below it. The root identity and permissions
+are checked during copying and before publication; symlink, visible Git,
+device and public paths remain refused. The same option is available on
+`install/win98_source_profile.py`. It changes output placement only: all input
+leases, provenance checks, copy budgets and the 17 GiB floor still apply.
+Small synthetic host controls use private temporary directories; they launch
+no large NAS/local production copy.
 An output inside a Git checkout must be under an explicitly ignored `build/`
 directory. Visible source paths are refused before an output directory exists;
-all real disk jobs remain in the private NAS lane.
+all real disk jobs remain in the selected private work area.
 
 The production guard preserves 17 GiB plus the explicit 1 MiB..1 GiB future
 capture budget, remaining copy budget, payload/backups and bounded metadata.
@@ -98,7 +105,7 @@ under the allocated lane and perform input-only validation:
 ```sh
 python3 -B shizukudos/win98_boot/prepare_replacement.py \
   --profile /private/replacement-inputs.json --profile-sha256 ACTUAL_PROFILE_SHA256 \
-  --out /mnt/shizukuos-native-workspace-fada-20261001/fada/replacement/NEW_EPOCH \
+  --out /private/owned-area/NEW_EPOCH --large-private-output-root /private/owned-area \
   --copy-mode full --copy-budget-bytes 2147483648 --capture-budget-bytes 1073741824 \
   --validate-only
 ```

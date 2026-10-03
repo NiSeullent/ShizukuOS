@@ -158,7 +158,7 @@ def publish(path, data):
     finally:temporary.unlink(missing_ok=True)
 
 
-def generate(request_path, request_sha, out, capture_budget):
+def generate(request_path, request_sha, out, capture_budget, *, large_output_root=None):
     request_path,out=replacement.safe_path(request_path),replacement.safe_path(out)
     replacement.private_output(out)
     if out.exists():raise FileExistsError(out)
@@ -180,7 +180,7 @@ def generate(request_path, request_sha, out, capture_budget):
     # Existing constructor validates source/artifact bindings and assembles the
     # pinned template. No disk/output is created. Its SIGIO context fully closes
     # before this producer admits the same pinned inputs into its own registry.
-    validation=replacement.prepare(Path(base_pin['path']),base_pin['sha256'],out,'full',base['disk']['bytes'],capture_budget,validate_only=True)
+    validation=replacement.prepare(Path(base_pin['path']),base_pin['sha256'],out,'full',base['disk']['bytes'],capture_budget,validate_only=True,large_output_root=large_output_root)
     xms=request['xms']
     need(isinstance(xms,dict) and set(xms)=={'file','build_receipt','source_root'},'exact XMS producer inputs required')
     root=replacement.safe_path(xms['source_root']);need(root.is_dir(),'actual XMS source root required')
@@ -223,7 +223,9 @@ def generate(request_path, request_sha, out, capture_budget):
         auto=('@ECHO OFF\r\nSET COMSPEC=C:\\COMMAND.COM\r\nSET windir='+selected+'\r\n'
               'SET PATH='+selected+';'+selected+'\\COMMAND;C:\\\r\nC:\r\nCD \\'+windows+'\r\n'+
               ''.join(v+'\r\n' for v in nls)+selected+'\\WIN.COM\r\n').encode('ascii')
-        replacement.capacity(out.parent,4<<20,capture_budget);out.mkdir(mode=0o700)
+        replacement.capacity(out.parent,4<<20,capture_budget)
+        replacement.check_output_scope(validation['output_scope'])
+        out.mkdir(mode=0o700)
         backups=out/'original-config';backups.mkdir(mode=0o700)
         stage=out/'payloads';stage.mkdir(mode=0o700)
         backup_pins=[]
@@ -271,6 +273,7 @@ def generate(request_path, request_sha, out, capture_budget):
     need(len(receipt_bytes)<=4<<20,'bounded producer receipt required')
     receipt_pin={'path':str(receipt_path),'bytes':len(receipt_bytes),'sha256':replacement.digest(receipt_bytes)}
     replacement.capacity(out,len(profile_bytes)+len(receipt_bytes)+(1<<20),capture_budget)
+    replacement.check_output_scope(validation['output_scope'])
     try:
         # The usable constructor profile is last; each pin is derived from the
         # intended serialization. A failed publish/readback/lease removes both.
@@ -286,7 +289,9 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--request',type=Path,required=True);ap.add_argument('--request-sha256',required=True)
     ap.add_argument('--out',type=Path,required=True);ap.add_argument('--capture-budget-bytes',type=int,required=True)
-    args=ap.parse_args();result=generate(args.request,args.request_sha256,args.out,args.capture_budget_bytes)
+    ap.add_argument('--large-private-output-root',type=Path,
+                    help='explicit existing owned mode-0700 work area for a large private source disk')
+    args=ap.parse_args();result=generate(args.request,args.request_sha256,args.out,args.capture_budget_bytes,large_output_root=args.large_private_output_root)
     print(json.dumps({'status':result['status'],'constructor_profile':result['constructor_profile'],'Windows98_boot_verified':False}))
 
 
