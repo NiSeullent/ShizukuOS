@@ -3,8 +3,10 @@
 #define NTWV_BRIDGE_H
 #include <stdint.h>
 #include "../include/ntwrapper.h"
+#include "../../shizukudos/abi/shz_clock.h"
 
 #define NTWV_IOCTL_QUERY 0x4e540001u
+#define NTWV_IOCTL_CLOCK 0x4e540003u /* no input; output shz_clock_reply_t; +1 stays unsupported */
 #define NTWV_QUERY_MAGIC 0x3957544eu
 #define NTWV_MAP_GLOBAL 0x40000000u
 #define NTWV_ERROR_INVALID_PARAMETER 87u

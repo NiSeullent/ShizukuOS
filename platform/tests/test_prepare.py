@@ -148,7 +148,7 @@ class PrepareTests(unittest.TestCase):
                     'GetModuleFileNameA','CreateFileA','ReadFile','CloseHandle',
                     'GetEnvironmentVariableA','OutputDebugStringA',
                     # WIN64 subsystem client (ntwin32/win64/ntw64.c): the NTWRAP9X.VXD transport
-                    'DeviceIoControl')
+                    'DeviceIoControl', 'VirtualQuery')
         self.assertEqual(set(imported), {('KERNEL32.DLL', name) for name in expected})
         # Every import exists in the pinned Windows 98 SE OEM KERNEL32 export manifest.
         manifest = json.loads((ROOT / 'benchmarks/win98se-ko-oem-native-exports-v1.json').read_text())
@@ -168,7 +168,11 @@ class PrepareTests(unittest.TestCase):
         tool = mod.PE((ROOT / 'build/platform/NTW64RUN.EXE').read_bytes())
         imported = {(d['dll'].upper(), e[1]) for d in tool.imports() for e in d['entries']}
         self.assertEqual({name for dll, name in imported if dll == 'NTW32.DLL'},
-                         set(mod.routes()['provider_api']))
+                         {'NtwQuerySubsystem64', 'NtwCreateProcess64W', 'NtwWaitProcess64',
+                          'NtwReadConsole64', 'NtwWriteConsole64', 'NtwCloseConsole64',
+                          'NtwKillProcess64', 'NtwCloseProcess64'})
+        self.assertTrue({'NtwQueryCoreClock', 'NtQueryPerformanceCounter', 'NtwShutdownCoreClock'} <=
+                        set(mod.routes()['provider_api']))
         self.assertEqual({dll for dll, _ in imported}, {'NTW32.DLL', 'KERNEL32.DLL'})
         self.assertEqual((tool.u16(tool.opt+48), tool.u16(tool.opt+50)), (4, 10))
         self.assertEqual(tool.u16(tool.opt+68), 3)          # console subsystem

@@ -25,3 +25,6 @@ EXPORTS
     NtwCloseConsole64=NtwCloseConsole64@4
     NtwKillProcess64=NtwKillProcess64@8
     NtwCloseProcess64=NtwCloseProcess64@4
+    NtwQueryCoreClock=NtwQueryCoreClock@8
+    NtQueryPerformanceCounter=NtwNtQueryPerformanceCounter@8
+    NtwShutdownCoreClock=NtwShutdownCoreClock@0

@@ -10,6 +10,7 @@
 #include "initonce.h"
 #include "unicode/utf.h"
 #include "exception/k32veh.h"
+#include "core_clock.h"
 typedef char pointer_width_must_be_32[(sizeof(void *) == 4) ? 1 : -1];
 typedef char once_matches_win32[(sizeof(ntw_once) == sizeof(INIT_ONCE)) ? 1 : -1];
 typedef char wchar_matches_utf16[(sizeof(WCHAR) == sizeof(uint16_t)) ? 1 : -1];
@@ -468,6 +469,8 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
         if (!native_kernel32) return FALSE;
         if (ntw_k32_init() != NTWE_OK) return FALSE;
         configure(instance);
+    } else if (reason == DLL_PROCESS_DETACH) {
+        ntw_core_clock_native_stop();
     }
     return TRUE;
 }

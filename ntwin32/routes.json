@@ -34,9 +34,10 @@
   ],
   "provider_api": [
     "NtwQuerySubsystem64", "NtwCreateProcess64W", "NtwWaitProcess64", "NtwReadConsole64",
-    "NtwWriteConsole64", "NtwCloseConsole64", "NtwKillProcess64", "NtwCloseProcess64"
+    "NtwWriteConsole64", "NtwCloseConsole64", "NtwKillProcess64", "NtwCloseProcess64",
+    "NtwQueryCoreClock", "NtQueryPerformanceCounter", "NtwShutdownCoreClock"
   ],
-  "provider_api_note": "NTW32-specific WIN64 subsystem client (win64/ntw64.h); never routed from KERNEL32 imports and absent from the routing table",
+  "provider_api_note": "Explicit WIN64 and Core clock APIs; never routed from KERNEL32 imports and absent from the routing table. NtQueryPerformanceCounter has an NTDLL-level contract, selected by explicitly loading NTW32.DLL.",
   "stubs": [
     {"module": "KERNEL32.DLL", "name": "CompareStringW", "provider": "native", "category": "guest_observed_stub",
      "evidence": "docs/NLS_EX_PORT.md: static CompareStringEx bound to the original Win98 CompareStringW returned 0 with ERROR_CALL_NOT_IMPLEMENTED (120); recorded guest observation from the KernelEx-era work, not re-run here"},

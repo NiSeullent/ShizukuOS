@@ -33,7 +33,7 @@ def main():
                   HERE/'link.ld',HERE/'le.py',HERE/'inspect_le.py',HERE/'build.py',HERE/'query_probe.c',
                   ROOT/'ntwin32/pma/client.c',ROOT/'ntwin32/pma/client.h',ROOT/'ntwin32/pma/probe.c',
                   HERE.parent/'core.c',HERE.parent/'include/ntwrapper.h',
-                  ROOT/'shizukudos/abi/shz_abi.h',ROOT/'shizukudos/abi/shz_ipc.h',ROOT/'shizukudos/abi/shz_vmm_pma.h')
+                  ROOT/'shizukudos/abi/shz_abi.h',ROOT/'shizukudos/abi/shz_clock.h',ROOT/'shizukudos/abi/shz_ipc.h',ROOT/'shizukudos/abi/shz_vmm_pma.h')
     source_hashes={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in source_paths}
     compiler = os.environ.get('CLANG', 'clang')
     mingw = os.environ.get('MINGW_CC', 'i686-w64-mingw32-gcc')

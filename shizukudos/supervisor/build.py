@@ -220,7 +220,7 @@ def main():
     esp = build_esp(loader, disk)
     conformance_esp = build_esp(loader, conformance_disk, "esp-conformance.img")
     sources = sorted([p for p in SRC.rglob("*") if p.is_file() and p.suffix in (".c", ".h", ".asm", ".ld")] +
-                     [SHZ / "abi" / "shz_abi.h", SHZ / "abi" / "shz_ipc.h",
+                     [SHZ / "abi" / "shz_abi.h", SHZ / "abi" / "shz_clock.h", SHZ / "abi" / "shz_ipc.h",
                       REPO / "shizukudos/uefi/boot.c", REPO / "shizukudos/uefi/boot.h",
                       REPO / "shizukudos/uefi/efi.h", SHZ / "kernel64/standalone/memholes.h"])
     sources += [SHZ / "kernel64" / name for name in ("smp_acpi.c", "smp_acpi.h")]

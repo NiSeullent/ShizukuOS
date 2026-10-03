@@ -234,6 +234,59 @@ static uint32_t dioc_query(const struct ntwv_dioc *request, const struct ntwv_pa
     return result;
 }
 
+static uint32_t dioc_clock(const struct ntwv_dioc *request, const struct ntwv_pages *ops,
+                           const struct ntwv_hv *hv)
+{
+    shz_clock_reply_t reply = { SHZ_CLOCK_MAGIC, sizeof(shz_clock_reply_t),
+                                SHZ_CLOCK_VERSION, 0, 0, SHZ_CLOCK_FREQUENCY };
+    struct pinned output, returned;
+    uint32_t bytes = sizeof(reply), version = 0, low = 0, high = 0;
+    uint32_t result = NTWV_ERROR_NOACCESS;
+    int32_t status;
+    uintptr_t saved;
+    if (request->input || request->input_bytes || request->overlapped)
+        return NTWV_ERROR_INVALID_PARAMETER;
+    if (request->output_bytes < bytes) return NTWV_ERROR_INSUFFICIENT_BUFFER;
+    if (!user_range(request->output, bytes) || !user_range(request->returned, 4) ||
+        (request->output < request->returned + 4 && request->returned < request->output + bytes))
+        return NTWV_ERROR_INVALID_PARAMETER;
+    if (!ops || !ops->check || !ops->lock || !ops->unlock || !ops->ptes ||
+        !ops->enter || !ops->leave || !ops->write ||
+        !hv || !hv->hypervisor_present || !hv->hcall)
+        return NTWV_ERROR_NOT_SUPPORTED;
+    if (!hv->hypervisor_present()) return NTWV_ERROR_NOT_SUPPORTED;
+    status = hv->hcall(SHZ_HC_ABI_VERSION, 0, 0, &version, 0);
+    if (status != SHZ_OK) return NTWV_ERROR_GEN_FAILURE;
+    if ((version >> 16) != SHZ_ABI_MAJOR) return NTWV_ERROR_REVISION_MISMATCH;
+    if (!pin(ops, request->output, bytes, &output)) return NTWV_ERROR_NOACCESS;
+    if (!pin(ops, request->returned, 4, &returned)) {
+        (void)unpin(&output);
+        return NTWV_ERROR_NOACCESS;
+    }
+    /* One admitted, readonly hypercall. Only local scalars go to VMCALL. An
+     * old Supervisor's unsupported response never falls back to HC_TIME. */
+    status = hv->hcall(SHZ_HC_CLOCK_SPLIT, SHZ_CLOCK_VERSION, 0, &low, &high);
+    if (status == SHZ_E_UNSUPPORTED) result = NTWV_ERROR_NOT_SUPPORTED;
+    else if (status == SHZ_E_DENIED) result = 5; /* ERROR_ACCESS_DENIED */
+    else if (status != SHZ_OK) result = NTWV_ERROR_GEN_FAILURE;
+    else if (high & 0x80000000u) result = NTWV_ERROR_GEN_FAILURE;
+    else {
+        reply.counter = ((uint64_t)high << 32) | low;
+        saved = ops->enter(0);
+        if (writable_alias(ops, &output) && writable_alias(ops, &returned)) {
+            ops->write(output.alias + output.offset, &reply, bytes);
+            ops->write(returned.alias + returned.offset, &bytes, 4);
+            result = 0;
+        }
+        ops->leave(0, saved);
+    }
+    /* Always release both leases. Preserve an earlier Core error if cleanup
+     * also fails; retained aliases still block subsequent page admission. */
+    if (!unpin(&returned) && !result) result = NTWV_ERROR_NOACCESS;
+    if (!unpin(&output) && !result) result = NTWV_ERROR_NOACCESS;
+    return result;
+}
+
 /* ------------------------------------------------------------------ WIN64 subsystem bridge */
 static struct {
     int open;
@@ -776,6 +829,8 @@ static uint32_t dispatch_dioc(const struct ntwv_dioc *request, const struct ntwv
         return 1; /* DIOC_CLOSEHANDLE: documented VXD_SUCCESS. */
     if (request->code == NTWV_IOCTL_QUERY)
         return dioc_query(request, ops);
+    if (request->code == NTWV_IOCTL_CLOCK)
+        return dioc_clock(request, ops, hv);
     if (request->code >= NTWV_IOCTL_PMA_REGISTER && request->code <= NTWV_IOCTL_PMA_CLOSE)
         return dioc_pma(request, ops);
     if (request->code >= NTWV_IOCTL_W64_OPEN && request->code <= NTWV_IOCTL_W64_WAIT) {
@@ -798,7 +853,7 @@ uint32_t ntwv_dioc_ex(const struct ntwv_dioc *request, const struct ntwv_pages *
     uint32_t result;
     if(!request) return NTWV_ERROR_INVALID_PARAMETER;
     if(!__atomic_load_n(&live,__ATOMIC_ACQUIRE)) return NTWV_ERROR_NOT_READY;
-    if(request->code!=NTWV_IOCTL_QUERY &&
+    if(request->code!=NTWV_IOCTL_QUERY && request->code!=NTWV_IOCTL_CLOCK &&
        !(request->code>=NTWV_IOCTL_W64_OPEN && request->code<=NTWV_IOCTL_W64_WAIT) &&
        !(request->code>=NTWV_IOCTL_PMA_REGISTER && request->code<=NTWV_IOCTL_PMA_CLOSE))
         return dispatch_dioc(request,ops,hv);
