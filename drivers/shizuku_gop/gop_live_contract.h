@@ -5,6 +5,8 @@
 #define SHIZUKU_GOP_LIVE_CONTRACT_H
 #include "gop_contract.h"
 #define OP_SHZGOP_CURRENT_BOOT 0x4f10
+#define OP_SHZGOP_GUARDIAN_EPOCH 0x4f11
+#define SHZGOP_EPOCH_BYTES 160u
 #define SHZGOP_PM16_DEVICE 0x4353
 #define SHZGOP_PROBE_BYTES 288u
 #define SHZGOP_HDA_BYTES 280u
@@ -50,5 +52,21 @@ static int shzgop_probe_admit(const unsigned char *p,size_t n,
        shzgop_u32(h+56)!=mode->aperture || shzgop_u32(h+60)!=mode->visible) return 0;
     for(i=0;i<16;i++) if(h[64+i]!=name[i]) return 0;
     return 1;
+}
+/* Additive separate160B readonly HC14 observation. Existing288B probe unchanged.
+ * Nonce is independently held from the current owned guardian, not an INI flag. */
+static int shzgop_epoch_admit(const unsigned char *e,size_t n,
+                             const unsigned char *nonce,const unsigned char *probe) {
+    unsigned i;uint32_t nonzero=0,config=0,rom=0;shzgop_mode m;
+    if(!e || !nonce || !probe || n!=SHZGOP_EPOCH_BYTES ||
+       shzgop_u32(e)!=0x31455047UL || shzgop_u32(e+4)!=1 || shzgop_u32(e+8)!=40 ||
+       shzgop_u32(e+12)!=5 || !shzgop_u32(e+16) || shzgop_u32(e+20)>=256 ||
+       shzgop_u32(e+24)!=3 || shzgop_u32(e+28)>=256 ||
+       shzgop_u32(e+32)!=0x11111234UL || shzgop_u32(e+36)!=0x030000UL ||
+       !shzgop_parse(probe+112,96,&m) || m.bus || m.devfn!=shzgop_u32(e+28) ||
+       ((uint32_t)m.vendor|((uint32_t)m.device<<16))!=shzgop_u32(e+32) ||
+       (shzgop_u32(e+40)&15u)!=8 || (shzgop_u32(e+40)&~15UL)!=m.base) return 0;
+    for(i=0;i<32;i++) {if(e[64+i]!=nonce[i]) return 0;nonzero|=nonce[i];config|=e[96+i];rom|=e[128+i];}
+    return nonzero && config && rom;
 }
 #endif

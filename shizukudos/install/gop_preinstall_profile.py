@@ -58,7 +58,9 @@ def compose_profile(launch, profile, receipt, artifacts, read):
          'raw baseline GOP producer receipt and three exact driver artifacts required')
     identity = receipt.get('live_provider_identity_sha256')
     need(type(identity) is str and len(identity) == 64 and identity != '0'*64 and all(c in '0123456789abcdef' for c in identity) and
-         receipt.get('live_query_opcode') == '0x4f10', 'actual readonly native GOP provider identity/query required')
+         receipt.get('live_query_opcode') == '0x4f10' and
+         receipt.get('guardian_epoch_query_opcode') == '0x4f11' and
+         receipt.get('guardian_epoch_query_bytes') == 160 and receipt.get('guardian_epoch_HCALL') == 14, 'actual readonly native GOP provider identity/query required')
     for name in DRIVERS:
         pin = artifacts[name]; replacement.pin_fields(pin)
         need(receipt['artifacts'].get(name) == {'bytes': pin['bytes'], 'sha256': pin['sha256']},
@@ -179,8 +181,10 @@ def generate(request_path, request_sha, out, capture_budget):
                   'Windows98_boot_verified': False, 'native_apps_verified': False, 'constructor_profile': profile_pin,
                   'request': request_pin, 'launch_profile': request['launch_profile'], 'gop_receipt': request['gop_receipt'],
                   'gop_artifacts': artifacts, 'staged_payloads': staged,
-                  'live_provider_identity_sha256': provider_hash.hexdigest(), 'live_query_opcode': '0x4f10',
-                  'Supervisor_epoch_in_descriptor_ABI': False, 'recorded_lineage_pins': source_rows,
+                  'live_provider_identity_sha256': provider_hash.hexdigest(), 'live_query_opcode': '0x4f10', 'guardian_epoch_query_opcode': '0x4f11',
+                  'guardian_epoch_query_bytes': 160, 'guardian_epoch_HCALL': 14,
+                  'Supervisor_epoch_in_descriptor_ABI': False, 'Supervisor_epoch_verified': False,
+                  'current_guardian_nonce_required': r'C:\SHZGOP\GPEPOCH.NON', 'recorded_lineage_pins': source_rows,
                   'producer_inputs': producer_inputs,
                   'native_ingester_compatible': False,
                   'required_live_operation': 'Win98 SetupX16 display class installation for the explicitly observed display devnode and SHZGOP.INF; then registry/file readback and a fresh GOP cold boot',

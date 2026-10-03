@@ -93,9 +93,9 @@ int PASCAL WinMain(HINSTANCE self,HINSTANCE prev,LPSTR cmd,int show)
     char enumkey[256],devicekey[256],classkey[256],defaultkey[270];
     char expected[4][66],system[256],path[270],oldsource[MAX_PATH_LEN],atomname[256];
     char drv[64],vxd[64]; HKEY h; unsigned i,count; ATOM atom=0,oldatom=0;
-    int locks[5]={-1,-1,-1,-1,-1},logfd;
+    int locks[6]={-1,-1,-1,-1,-1,-1},logfd;
     int code=1,source_changed=0; RETERR installed;
-    char provider_hex[66];unsigned char provider[32],snapshot[SHZGOP_PROBE_BYTES];
+    char provider_hex[66];unsigned char provider[32],snapshot[SHZGOP_PROBE_BYTES],nonce[32],epoch[SHZGOP_EPOCH_BYTES];
     const char *names[3]={"SHZGOP.DRV","SHZGOP.VXD","SHZGOP.INF"};
     const char *pins[4]={"DRV_SHA256","VXD_SHA256","INF_SHA256","SETUPX_SHA256"};
     (void)self;(void)prev;(void)show;
@@ -103,6 +103,10 @@ int PASCAL WinMain(HINSTANCE self,HINSTANCE prev,LPSTR cmd,int show)
     if(strcmp(cmd,"/install")!=0) return 2;
     locks[4]=sopen(REQUEST,O_RDONLY|O_BINARY,SH_DENYWR);
     if(locks[4]<0) return 2;
+    /* Fixed separately staged actual guardian bytes; never an INI success flag.
+     * Deny writers and retain the exact descriptor until after class readback. */
+    locks[5]=sopen("C:\\SHZGOP\\GPEPOCH.NON",O_RDONLY|O_BINARY,SH_DENYWR);
+    if(locks[5]<0 || filelength(locks[5])!=32 || read(locks[5],nonce,32)!=32) {code=4;goto early;}
     if(!field("EnumKey",enumkey,sizeof enumkey) ||
        strnicmp(enumkey,"Enum\\",5)!=0 || strstr(enumkey,"..")) {code=3;goto early;}
     for(i=0;i<4;++i) if(!field(pins[i],expected[i],66)) {code=4;goto early;}
@@ -170,7 +174,7 @@ int PASCAL WinMain(HINSTANCE self,HINSTANCE prev,LPSTR cmd,int show)
     memset(oldsource,0,sizeof oldsource);
     if(!winner || getpath(LDID_SRCPATH,oldsource)!=OK ||
        !memchr(oldsource,0,sizeof oldsource)) goto cleanup;
-    if(!shz_gop_current_boot_ready(provider,snapshot,sizeof snapshot)) {
+    if(!shz_gop_current_guardian_ready(provider,nonce,snapshot,sizeof snapshot,epoch,sizeof epoch)) {
         fprintf(logfile,"native_current_boot_probe=FAIL_INSTALL_REFUSED\n");
         goto cleanup;
     }
@@ -180,14 +184,25 @@ int PASCAL WinMain(HINSTANCE self,HINSTANCE prev,LPSTR cmd,int show)
        !save_key(classkey,"C:\\GOPBAK\\CLASS.BAK")) goto cleanup;
     for(i=0;i<3;++i) {strcpy(path,"C:\\");strcat(path,names[i]);
         if(!hash_file(path,expected[i])) goto cleanup;}
-    if(!shz_gop_current_boot_ready(provider,snapshot,sizeof snapshot)) goto cleanup;
-    fprintf(logfile,"native_current_boot_query=PASS\nSupervisor_epoch_verified=false\nprovider_identity_sha256=%s\nsnapshot_hex=",provider_hex);
+    if(!shz_gop_current_guardian_ready(provider,nonce,snapshot,sizeof snapshot,epoch,sizeof epoch)) goto cleanup;
+    fprintf(logfile,"native_current_boot_query=PASS\nSupervisor_epoch_verified=true\nprovider_identity_sha256=%s\nsnapshot_hex=",provider_hex);
     for(i=0;i<sizeof snapshot;++i) fprintf(logfile,"%02x",(unsigned)snapshot[i]);
     fprintf(logfile,"\n");
     if(fflush(logfile)!=0 || ferror(logfile)) goto cleanup;
     if(setpath(LDID_SRCPATH,"C:\\")!=OK) goto cleanup;
     source_changed=1;selected->lpSelectedDriver=winner;
+    /* Re-read the held file and actual live provider at the last boundary,
+       after logging/LDD changes and immediately before the real class call. */
+    {
+        unsigned char current_nonce[32];
+        if(lseek(locks[5],0,SEEK_SET)!=0 || filelength(locks[5])!=32 ||
+           read(locks[5],current_nonce,32)!=32 || memcmp(current_nonce,nonce,32) ||
+           !shz_gop_current_guardian_ready(provider,nonce,snapshot,sizeof snapshot,epoch,sizeof epoch)) goto cleanup;
+    }
     installed=install(DIF_INSTALLDEVICE,selected);
+    fprintf(logfile,"pre_class_guardian_epoch_hex=");
+    for(i=0;i<sizeof epoch;i++) fprintf(logfile,"%02x",(unsigned)epoch[i]);
+    fprintf(logfile,"\n");
     fprintf(logfile,"class_install_result=%u\nrestart_needed=%u\nreboot_needed=%u\n",
             installed,!!(selected->Flags&DI_NEEDRESTART),!!(selected->Flags&DI_NEEDREBOOT));
     if(installed!=OK || !driver_class(enumkey,classkey,sizeof classkey)) goto cleanup;
@@ -210,6 +225,6 @@ done:
     if(fclose(logfile)!=0) code=1;
     if(sx) FreeLibrary(sx);
 early:
-    for(i=0;i<5;++i) if(locks[i]>=0) close(locks[i]);
+    for(i=0;i<6;++i) if(locks[i]>=0) close(locks[i]);
     return code;
 }

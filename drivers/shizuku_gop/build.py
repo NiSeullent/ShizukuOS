@@ -151,12 +151,15 @@ def adapt(work):
     replace("res/display.rcv", '#define VER_PRODUCTNAME_STR         "Windows 9x Display Driver\\0"',
             '#define VER_PRODUCTNAME_STR         "Shizuku basic graphics driver\\0"')
     replace("vxd_main.c", '\t\tcase OP_FBHDA_SETUP:\n\t\t\t{\n\t\t\t\tDWORD dptr = (DWORD)FBHDA_setup();',
-            '\t\tcase OP_SHZGOP_CURRENT_BOOT:\n\t\t{\n'
+            '\t\tcase OP_SHZGOP_GUARDIAN_EPOCH:\n\t\t{\n'
+            '\t\t\tDWORD epoch = SHZGOP_guardian_epoch_probe();\n'
+            '\t\t\tstate->Client_ECX = epoch;\n\t\t\trc = epoch ? 1 : 0xFFFF;\n'
+            '\t\t\tbreak;\n\t\t}\n\t\tcase OP_SHZGOP_CURRENT_BOOT:\n\t\t{\n'
             '\t\t\tDWORD probe = SHZGOP_current_boot_probe();\n'
             '\t\t\tstate->Client_ECX = probe;\n\t\t\trc = probe ? 1 : 0xFFFF;\n'
             '\t\t\tbreak;\n\t\t}\n\t\tcase OP_FBHDA_SETUP:\n\t\t\t{\n\t\t\t\tDWORD dptr = (DWORD)FBHDA_setup();')
     replace("vxd_main.c", 'void VXD_API_entry();',
-            '#include "gop_live_contract.h"\nDWORD SHZGOP_current_boot_probe(void);\nvoid VXD_API_entry();')
+            '#include "gop_live_contract.h"\nDWORD SHZGOP_current_boot_probe(void);\nDWORD SHZGOP_guardian_epoch_probe(void);\nvoid VXD_API_entry();')
     # Backend and bounded wire parser are original root-owned GPL sources.
     original["vxd_vesa.c"] = (work / "vxd_vesa.c").read_text()
     shutil.copy2(HERE / "backend.c", work / "vxd_vesa.c")
@@ -474,7 +477,8 @@ def main():
                "runtime_validation": "pending: native install/load/GDI rendering requires guest evidence",
                "upstreams": {"vmdisp9x": {"repository": "https://github.com/JHRobotics/vmdisp9x", "commit": VMDISP_COMMIT, "license": "MIT", "sources": upstream_inputs},
                              "fixlink": {"repository": "https://github.com/JHRobotics/fixlink", "commit": FIXLINK_COMMIT, "license": "MIT", "sources": fixlink_inputs}},
-               "live_provider_identity_sha256": provider_identity(), "live_query_opcode": "0x4f10",
+               "live_provider_identity_sha256": provider_identity(), "live_query_opcode": "0x4f10", "guardian_epoch_query_opcode": "0x4f11",
+               "guardian_epoch_query_bytes": 160, "guardian_epoch_HCALL": 14,
                "original_inputs": original_inputs, "adaptations_sha256": digest(out / "source-adaptations.patch"),
                "copied_sources_before": before, "compiled_sources": after,
                "generated_link_inputs": {name: digest(work / name) for name in ("SHZGOP16.lnk", "SHZGOP32.lnk")},

@@ -27,7 +27,7 @@ class Admission(unittest.TestCase):
         self.launch={'schema':'shizukuos.private-win98-launch-profile.v1','status':'PRIVATE_WIN98_LAUNCH_PROFILE_PREPARED_NOT_BOOTED',
             'source_disk':self.profile['disk'],'observed_windows_path':'C:\\WINDOWS','boot_policy':'shz.foundation=win98',
             **{n:False for n in ('public_artifact','Windows98_boot_verified','native_apps_verified','VM_executed')}}
-        self.receipt={'schema':1,'status':'HOST-BUILD-PASS','live_provider_identity_sha256':'d'*64,'live_query_opcode':'0x4f10','artifacts':{n:{'bytes':p['bytes'],'sha256':p['sha256']} for n,p in self.art.items()},
+        self.receipt={'schema':1,'status':'HOST-BUILD-PASS','live_provider_identity_sha256':'d'*64,'live_query_opcode':'0x4f10','guardian_epoch_query_opcode':'0x4f11','guardian_epoch_query_bytes':160,'guardian_epoch_HCALL':14,'artifacts':{n:{'bytes':p['bytes'],'sha256':p['sha256']} for n,p in self.art.items()},
             'original_inputs':{'SHZGOP.INF':self.art['SHZGOP.INF']['sha256']}}
     def compose(self,read=None):
         return m.compose_profile(self.launch,self.profile,self.receipt,self.art,read or (lambda p:self.raw[Path(p['path']).name]))
@@ -42,6 +42,10 @@ class Admission(unittest.TestCase):
         self.receipt.pop('live_provider_identity_sha256');self.rejects()
     def test_unrecognized_query_abi_rejected(self):
         self.receipt['live_query_opcode']='0x110b';self.rejects()
+    def test_old_or_invalid_epoch_producer_refused(self):
+        for key,value in (('guardian_epoch_query_opcode','0x4f10'),('guardian_epoch_query_bytes',159),('guardian_epoch_HCALL',9)):
+            old=self.receipt[key];self.receipt[key]=value;self.rejects();self.receipt[key]=old
+        self.receipt.pop('guardian_epoch_query_opcode');self.rejects()
     def test_wrong_source_disk(self):
         self.launch['source_disk']={'path':'/other'};self.rejects()
     def test_no_invented_boot_or_native_acceptance(self):
