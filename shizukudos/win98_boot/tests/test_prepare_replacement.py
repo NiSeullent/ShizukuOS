@@ -452,6 +452,39 @@ class ReplacementPrepare(ReplacementInventory):
         self.assertEqual(after['KERNEL.SYS']['sha256'],self.pin(self.kernel)['sha256'])
         with self.assertRaises(FileExistsError): self.prepare(out)
 
+    def gop_cohort(self):
+        for name in sorted(prep.GOP_ROOT - {'KERNEL.SYS','COMMAND.COM'}):
+            path = self.root/name;path.write_bytes(name.encode())
+            self.profile['payloads'].append({'guest':name,'file':self.pin(path)})
+        target = next(p['file'] for p in self.profile['payloads'] if p['guest']=='SHZGOP.VXD')
+        for name in sorted(prep.GOP_NESTED):
+            if name == 'SHZGOP/SHZGOP.VXD':pin = target
+            else:
+                path = self.root/('nested-'+Path(name).name)
+                path.write_bytes(b'N'*32 if name.endswith('GPEPOCH.NON') else name.encode());pin = self.pin(path)
+            self.profile['payloads'].append({'guest':name,'file':pin})
+
+    def test_real_nested_gop_clone_readback_preserves_all_original_bytes(self):
+        self.gop_cohort();original = self.disk.read_bytes();out = self.root/'nested'
+        result = self.prepare(out);after = self.inventory(out/'replacement.img')
+        self.assertEqual(self.disk.read_bytes(),original)
+        self.assertTrue(after['SHZGOP']['directory'])
+        for member in self.profile['payloads']:
+            self.assertEqual(after[member['guest']]['sha256'],member['file']['sha256'])
+        self.assertEqual(after['WIN.COM'],self.inventory(self.disk)['WIN.COM'])
+        self.assertFalse(result['VM_executed'])
+
+    def test_real_nested_existing_nonce_backup_and_unrelated_file_preserved(self):
+        self.gop_cohort();self.original.write_bytes(b'old nonce32B'+b'X'*21)
+        subprocess.run(['mmd','-i',str(self.disk)+'@@16384','::SHZGOP'],check=True,capture_output=True)
+        subprocess.run(['mcopy','-i',str(self.disk)+'@@16384',str(self.original),'::SHZGOP/GPEPOCH.NON'],check=True,capture_output=True)
+        subprocess.run(['mcopy','-i',str(self.disk)+'@@16384',str(self.original),'::SHZGOP/KEEP.TXT'],check=True,capture_output=True)
+        self.profile['disk'] = self.pin(self.disk);before = self.inventory(self.disk);out = self.root/'existing-nested'
+        self.prepare(out);after = self.inventory(out/'replacement.img')
+        self.assertEqual(after['SHZGOP/KEEP.TXT'],before['SHZGOP/KEEP.TXT'])
+        self.assertEqual((out/'original-files/SHZGOP/GPEPOCH.NON').read_bytes(),self.original.read_bytes())
+        self.assertEqual(self.pin(self.disk),self.profile['disk'])
+
     def test_actual_payload_tool_append_refuses_final_extent_and_prepared_receipt(self):
         out = self.root/'appended-output'; calls = []
         original = prep.run_tool

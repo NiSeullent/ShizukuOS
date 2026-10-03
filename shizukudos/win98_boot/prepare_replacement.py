@@ -151,6 +151,52 @@ def leased_inputs(rows):
         signal.signal(signal.SIGIO, previous)
 
 
+GOP_ROOT = frozenset(('KERNEL.SYS','COMMAND.COM','HIMEMX.EXE','CONFIG.SYS','AUTOEXEC.BAT',
+                      'SHZGOP.DRV','SHZGOP.VXD','SHZGOP.INF','GOPINST.EXE','GPREQ.INI'))
+GOP_NESTED = frozenset(('SHZGOP/SHZGUARD.VXD','SHZGOP/SHZGOP.VXD',
+                        'SHZGOP/GOPLOAD.EXE','SHZGOP/GPEPOCH.NON'))
+
+
+def payload_names(payloads):
+    """Only the complete14-file GOP cohort can opt into one fixed subdirectory."""
+    need(type(payloads) is list and 2 <= len(payloads) <= 32, 'bounded explicit payloads required')
+    names, pins = set(), {}
+    for member in payloads:
+        need(type(member) is dict and set(member) == {'guest','file'}, 'exact pinned payload fields required')
+        name = member['guest']
+        need(type(name) is str and name not in names and (name in GOP_NESTED or
+             re.fullmatch(r'[A-Z0-9_-]{1,8}(\.[A-Z0-9_-]{1,3})?',name) is not None) and
+             name not in {'IO.SYS','MSDOS.SYS','WIN.COM','SYSTEM.DAT','USER.DAT','SYSTEM.INI','WIN.INI'},
+             'unique safe DOS payload; Windows overwrite refused')
+        pin_fields(member['file']);pins[name] = member['file'];names.add(name)
+        need(member['file']['bytes'] <= (128 << 10 if name == 'KERNEL.SYS' else 2 << 20),
+             'boot payload exceeds supported bound')
+    need({'KERNEL.SYS','COMMAND.COM'} <= names,'source-built kernel and FreeCOM payloads required')
+    if names & GOP_NESTED:
+        need(names == GOP_ROOT | GOP_NESTED, 'complete exact14 GOP cohort required for nested staging')
+        need(pins['SHZGOP/GPEPOCH.NON']['bytes'] == 32, 'exact current nonce32B required')
+        need(pins['SHZGOP/SHZGOP.VXD'] == pins['SHZGOP.VXD'], 'firstload target differs from actual display provider')
+    return names
+
+
+def verify_payload_inventory(before, after, payloads):
+    names = payload_names(payloads)
+    nested = bool(names & GOP_NESTED)
+    if nested:
+        need('SHZGOP' not in before or before['SHZGOP'].get('directory') is True,
+             'fixed GOP directory collides with an original file')
+        need(after.get('SHZGOP',{}).get('directory') is True, 'fixed GOP directory absent after staging')
+    for name,row in before.items():
+        if name in names or (nested and name == 'SHZGOP'):continue
+        need(after.get(name) == row,'unrelated Windows/private member changed: '+name)
+    need(set(after) - set(before) <= names | ({'SHZGOP'} if nested else set()),
+         'unexpected file or directory created during payload staging')
+    for member in payloads:
+        actual = after.get(member['guest'],{})
+        need(actual.get('directory') is not True and actual.get('bytes') == member['file']['bytes'] and
+             actual.get('sha256') == member['file']['sha256'], 'installed payload readback differs')
+
+
 def u16(data, at): return struct.unpack_from('<H', data, at)[0]
 def u32(data, at): return struct.unpack_from('<I', data, at)[0]
 
@@ -451,18 +497,8 @@ def prepare(profile_path, profile_sha, out, mode, copy_budget, capture_budget, *
         output_scope = large_output_scope(out,disk_pin['bytes'],large_output_root)
         root = safe_path(profile['build_source_root']); upstream = safe_path(profile['freedos_source'])
         need(root.is_dir() and upstream.is_dir(), 'actual build/upstream source roots required')
-        payloads, names = profile['payloads'], set()
-        need(isinstance(payloads,list) and 2 <= len(payloads) <= 32, 'bounded explicit root payloads required')
-        rows = [first,disk_pin,receipt_pin,boot_pin]
-        for member in payloads:
-            need(isinstance(member,dict) and set(member) == {'guest','file'}, 'exact pinned payload fields required')
-            name = member['guest']
-            need(isinstance(name,str) and re.fullmatch(r'[A-Z0-9_-]{1,8}(\.[A-Z0-9_-]{1,3})?',name) and name not in names and
-                 name not in {'IO.SYS','MSDOS.SYS','WIN.COM','SYSTEM.DAT','USER.DAT','SYSTEM.INI','WIN.INI'}, 'unique DOS root payloads; Windows binary overwrite refused')
-            names.add(name); pin_fields(member['file'])
-            need(member['file']['bytes'] <= (128 << 10 if name == 'KERNEL.SYS' else 2 << 20), 'boot payload exceeds supported bound')
-            rows.append(member['file'])
-        need({'KERNEL.SYS','COMMAND.COM'} <= names, 'source-built kernel and FreeCOM payloads required')
+        payloads = profile['payloads'];names = payload_names(payloads)
+        rows = [first,disk_pin,receipt_pin,boot_pin,*[m['file'] for m in payloads]]
         source_file = 'boot32lb.asm' if kind == 'fat32lba' else 'boot.asm'
         rows += [local_pin(upstream/'sys/sys.c', SYS_SHA),
                  local_pin(upstream/'boot'/source_file, BOOT_SOURCE_SHA[source_file]),
@@ -506,6 +542,9 @@ def prepare(profile_path, profile_sha, out, mode, copy_budget, capture_budget, *
         before = inventory(disk['fd'],geometry,check)
         need(all(before[name]['bytes'] <= 2 << 20 for name in names & before.keys() if not before[name].get('directory')),
              'overwritten original root member exceeds private backup budget')
+        if names & GOP_NESTED:
+            need('SHZGOP' not in before or before['SHZGOP'].get('directory') is True,
+                 'fixed GOP directory collides with an original file')
         check()
         result = {'schema':'shizukuos.private-replacement-preparation.v1','status':'INPUTS_VALIDATED_REPLACEMENT_NOT_PREPARED',
                   'private_source_disk':True,'public_artifact':False,'Windows98_boot_verified':False,
@@ -535,6 +574,11 @@ def prepare(profile_path, profile_sha, out, mode, copy_budget, capture_budget, *
                 (out/'original-backup-vbr.bin').write_bytes(os.pread(disk['fd'],512,(start+backup)*512))
             originals = out/'original-files'; originals.mkdir(mode=0o700)
             stage = out/'payloads'; stage.mkdir(mode=0o700)
+            if names & GOP_NESTED:
+                (originals/'SHZGOP').mkdir(mode=0o700);(stage/'SHZGOP').mkdir(mode=0o700)
+                if 'SHZGOP' not in before:
+                    run_tool('mmd',['-i',str(target)+'@@'+str(start*512),'::SHZGOP'],commands)
+                    check();capacity(out,0,capture_budget)
             for member in payloads:
                 name = member['guest']
                 if name in before:
@@ -559,11 +603,7 @@ def prepare(profile_path, profile_sha, out, mode, copy_budget, capture_budget, *
                 for lba in (start,start+backup) if backup is not None else (start,):
                     need(os.pread(handle.fileno(),512,lba*512) == boot,'boot-sector readback differs')
                 after = inventory(handle.fileno(),geometry)
-                for name, row in before.items():
-                    if name not in names: need(after.get(name) == row,'unrelated Windows/private member changed: '+name)
-                for member in payloads:
-                    actual = after.get(member['guest'],{})
-                    need(actual.get('bytes') == member['file']['bytes'] and actual.get('sha256') == member['file']['sha256'],'installed payload readback differs')
+                verify_payload_inventory(before,after,payloads)
                 destination_identity = identity(os.fstat(handle.fileno()))
                 need(destination_identity[2] == disk_pin['bytes'], 'replacement disk final extent differs')
                 def destination_checkpoint():

@@ -252,6 +252,8 @@ class Attempt:
         self.sources = tuple(x for x in (vga, rom, storage) if x is not None)
         need(all(type(x) is PinnedFD for x in self.sources), 'held input descriptors required')
         self.expected = Expectations(vga.check() if vga else None, rom.check() if rom else None, storage.check() if storage else None, raw_bars)
+        self.origin_pid = os.getpid(); self.origin_thread = threading.get_ident()
+        self.staging_claim = None
         self.original_deadline_ns = self._deadline = deadline_ns
         self.last_now = time.monotonic_ns(); need(self.last_now < deadline_ns, 'original host deadline expired')
         self.nonce = os.getrandom(32); self.policy = self.expected.policy(self.nonce, deadline_ns)
@@ -267,6 +269,8 @@ class Attempt:
             raise
 
     def check(self):
+        need(self.origin_pid == os.getpid() and self.origin_thread == threading.get_ident(),
+             'same minting process/thread must retain the live Attempt')
         now = time.monotonic_ns()
         need(self.original_deadline_ns == self._deadline and self.last_now <= now < self._deadline, 'original immutable deadline/progress required')
         self.last_now = now
@@ -274,6 +278,15 @@ class Attempt:
             need(self.exchange_stop_ns == self.original_exchange_stop_ns and now < self.exchange_stop_ns, 'additional immutable exchange bound expired')
         for source in self.sources: source.check()
         need(self.expected.policy(self.nonce, self._deadline) == self.policy and self.policy_fd is not None and identity(os.fstat(self.policy_fd)) == self.policy_identity and os.pread(self.policy_fd, 257, 0) == self.policy and fcntl.fcntl(self.policy_fd, fcntl.F_GET_SEALS) == SEALS, 'immutable sealed policy/source binding differs')
+
+    def reserve_staging(self):
+        """Reserve one pre-exec clone; its nonce is prospective, never a grant."""
+        self.check()
+        need(self.owner is None and not self.consumed and self.staging_claim is None,
+             'one clone staging before actual child binding required')
+        need(any(d.role == 1 for d in self.expected.devices), 'actual source-bound VGA selection required')
+        self.staging_claim = object()
+        return self.staging_claim
 
     def close(self):
         if self.owner is not None: self.owner.assert_reaped()
