@@ -164,6 +164,7 @@ pre_record:
  cmp bx,256
  jae .skip
  mov al,[cs:handles+bx]
+ xor ah,ah
  or al,al
  jz .skip
  mov [cs:selected_class],ax
