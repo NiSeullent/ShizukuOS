@@ -5,6 +5,7 @@
  */
 #include "proc_internal.h"
 #include "auth_policy.h"
+#include "setup_native_sys.h"
 #include "../kcommon/nt_sched_policy.h"
 
 extern void enter_user(uint64_t rip, uint64_t rsp, uint64_t arg, uint64_t arg2);
@@ -22,6 +23,7 @@ static unsigned char reserved_slots[MAX_PROCS + 1];
 void __attribute__((weak)) ipc_thread_exit(thread_t *t) { (void)t; }               /* cancel its I/O, drop its APCs */
 void __attribute__((weak)) ipc_process_terminating(process_t *p) { (void)p; }      /* wake its blocked threads */
 void __attribute__((weak)) ipc_process_teardown(process_t *p) { (void)p; }         /* IRPs, views, job accounting */
+void __attribute__((weak)) setup_native_process_teardown(process_t *p) { (void)p; } /* no native service when not linked */
 static uint64_t next_cid = 4;       /* process and thread ids share one namespace (NT's client-id table): unique ids */
 static uint64_t alloc_client_id(void)
 {
@@ -282,6 +284,7 @@ void process_teardown(process_t *p)
     p->teardown = 1;
     irq_restore(f);
     ipc_process_teardown(p);
+    setup_native_process_teardown(p);
     handles_close_all(p);
     if (p->token) {                             /* the primary token (sysk32_sec.c) */
         kobject_t *tok = p->token;

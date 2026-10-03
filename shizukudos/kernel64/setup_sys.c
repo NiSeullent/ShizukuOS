@@ -6,6 +6,7 @@
 #include "fs.h"
 #include "blk_compat.h"
 #include "setup_abi.h"
+#include "setup_native_sys.h"
 
 extern int32_t ldr_create_process(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
                                   process_t **out_proc, thread_t **out_thread);
@@ -91,6 +92,7 @@ int32_t sys_ext_setup(process_t *cur, struct regs *r, uint32_t num, uint64_t a1,
 {
     (void)r;
     switch (num) {
+    case 0xb5: return setup_native_syscall(cur,a1,a2);
     case SYS_NtShzSetupBlkQuery: return blk_query(cur, a1, a2, a3);
     case SYS_NtShzSetupBlkRead: return blk_io(cur, 0, a1, a2, a3, a4);
     case SYS_NtShzSetupBlkWrite: return blk_io(cur, 1, a1, a2, a3, a4);
