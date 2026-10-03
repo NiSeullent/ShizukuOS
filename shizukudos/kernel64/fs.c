@@ -227,6 +227,7 @@ static int reserve(fsnode_t *n, uint64_t need)
     uint64_t cap;
     if (n->readonly) return -1;
     if (need <= n->cap) return 0;
+    if (need > (64ull << 20)) return -2;            /* before growth: doubling toward a need above 2^63 wraps to 0 */
     cap = n->cap ? n->cap : 256;
     while (cap < need) cap *= 2;
     if (cap > (64ull << 20)) return -2;

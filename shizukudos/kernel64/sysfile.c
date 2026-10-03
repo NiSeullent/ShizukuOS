@@ -54,6 +54,15 @@ static uint64_t ft_of_ticks(uint64_t ticks)
 /* A node is write-protected if it lives in the read-only initrd or carries FILE_ATTRIBUTE_READONLY. */
 static int node_ro(const fsnode_t *n) { return n->readonly || (n->attrs & FILE_ATTRIBUTE_READONLY); }
 
+/* fs_write / fs_truncate failure (fs.h: -2 volume full; -1 I/O error, refused or read-only). */
+static int32_t fs_change_status(int rc) { return rc == -2 ? STATUS_DISK_FULL : STATUS_ACCESS_DENIED; }
+
+/* FILE_DELETE_ON_CLOSE on a disk volume that cannot delete. */
+static int delete_unsupported(const fsnode_t *n, uint32_t options)
+{
+    return (options & FILE_DELETE_ON_CLOSE) && n->backing == FSB_DISK && !(n->vol && n->vol->remove);
+}
+
 /* Times explicitly set with FileBasicInformation win; otherwise a disk node reports its directory entry's times (FAT has no
  * separate access time: the write time is reported) and a RAM node the ticks of its creation / last change. */
 static uint64_t node_time(const fsnode_t *n, int which)              /* 0 creation, 1 last access, 2 last write */
@@ -251,14 +260,21 @@ static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64
         if ((options & FILE_DIRECTORY_FILE) && !n->is_dir) return STATUS_NOT_A_DIRECTORY;
         if ((options & FILE_NON_DIRECTORY_FILE) && n->is_dir) return STATUS_FILE_IS_A_DIRECTORY;
         if (!n->is_dir && (disposition == FILE_OVERWRITE || disposition == FILE_OVERWRITE_IF || disposition == FILE_SUPERSEDE)) {
+            int rc;
             if (node_ro(n)) return STATUS_ACCESS_DENIED;
-            fs_truncate(n, 0);
+            if (delete_unsupported(n, options)) return STATUS_NOT_SUPPORTED;               /* refuse before discarding data */
+            rc = fs_truncate(n, 0);
+            if (rc) {                                    /* no handle to a file whose overwrite did not happen */
+                st = fs_change_status(rc);
+                set_iosb(p, a4, st, 0);
+                return st;
+            }
             info = disposition == FILE_SUPERSEDE ? IO_SUPERSEDED : IO_OVERWRITTEN;
         }
     }
     if ((a2 & (GENERIC_WRITE | FILE_WRITE_DATA | FILE_APPEND_DATA | DELETE_ACCESS)) && node_ro(n) && !created)
         return STATUS_ACCESS_DENIED;
-    if ((options & FILE_DELETE_ON_CLOSE) && n->backing == FSB_DISK && !(n->vol && n->vol->remove))
+    if (delete_unsupported(n, options))
         return STATUS_NOT_SUPPORTED;                                                        /* volume cannot delete */
     if (n->is_dir && (a2 & (GENERIC_WRITE | FILE_WRITE_DATA))) return STATUS_FILE_IS_A_DIRECTORY;
     f = kzalloc(sizeof *f);
@@ -373,12 +389,18 @@ static int32_t sys_rw_file(process_t *p, struct regs *r, uint64_t handle, int wr
                 int rc;
                 if (copy_from_user(p, tmp, at, chunk)) { kfree(tmp); return STATUS_ACCESS_VIOLATION; }
                 rc = fs_write(f->node, off + done, tmp, chunk);
-                if (rc) { kfree(tmp); set_iosb(p, iosb, rc == -2 ? STATUS_DISK_FULL : STATUS_ACCESS_DENIED, done);
-                          return rc == -2 ? STATUS_DISK_FULL : STATUS_ACCESS_DENIED; }
+                if (rc) { kfree(tmp); set_iosb(p, iosb, fs_change_status(rc), done); return fs_change_status(rc); }
                 done += chunk;
             } else {
                 uint64_t got = 0;
-                fs_read(f->node, off + done, tmp, chunk, &got);
+                const int rc = fs_read(f->node, off + done, tmp, chunk, &got);
+                /* A failed (or overlong) chunk delivers nothing, whatever it reports in got; earlier chunks were
+                 * copied out and are counted, like a failed write. The file pointer stays, as for a failed write. */
+                if (rc || got > chunk) {
+                    kfree(tmp);
+                    set_iosb(p, iosb, STATUS_UNSUCCESSFUL, done);
+                    return STATUS_UNSUCCESSFUL;
+                }
                 if (got && copy_to_user(p, at, tmp, got)) { kfree(tmp); return STATUS_ACCESS_VIOLATION; }
                 done += got;
                 if (got < chunk) break;

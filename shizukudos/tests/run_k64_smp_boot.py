@@ -134,7 +134,7 @@ def main():
         captured.write_bytes(data)
     (out / "captured-source-inputs.json").write_text(json.dumps({"sources_sha256": before}, indent=2) + "\n")
     extra = [SHZ / "win64/pe_parse.c", kbuild.STUB_DIR / "standalone64.c",
-             REPO / "drivers/ahci_native/ahci.c", SHZ / "tests/k64_smp_boot_probe.c",
+             REPO / "drivers/ahci_native/ahci.c", REPO / "drivers/xhci_native/xhci.c", SHZ / "tests/k64_smp_boot_probe.c",
              *sorted((REPO / "shizukufs/v1/libsfs").glob("*.c")), *kbuild.dead_screen_sources()]
     with (out / "build.log").open("w") as log:
         previous = kbuild.run
