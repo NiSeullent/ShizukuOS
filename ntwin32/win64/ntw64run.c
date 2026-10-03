@@ -12,8 +12,8 @@
  *
  * The Win64 command line is the text from <image> to the end of this program's command line. stdout and
  * stderr of the Win64 process arrive merged on this program's stdout. The exit code is the Win64 process's
- * exit code; 255 means NTW64RUN itself failed (usage, bridge unavailable, creation failed) and a message on
- * stderr names the Win32 error. */
+ * exit code; 255 means NTW64RUN itself failed (usage, bridge unavailable, creation, relay or cleanup failed)
+ * and a message on stderr names the Win32 error when that stream is writable. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include "ntw64.h"
@@ -23,11 +23,34 @@
 #define PATH_CAP 261
 
 static HANDLE out_h, err_h;
+static int io_failed;
+static DWORD io_error;
 static WCHAR wpath[PATH_CAP], wcmd[CMD_CHARS + 1], wdir[PATH_CAP];
 static char io[4096];
 
 static DWORD slen(const char *s) { DWORD n = 0; while (s[n]) ++n; return n; }
-static void put(HANDLE h, const char *s, DWORD n) { DWORD w = 0; if (n) WriteFile(h, s, n, &w, NULL); }
+/* A successful short write consumes only its reported prefix. Never replay a
+ * failed write, and refuse zero progress or an impossible reported length. */
+static BOOL put(HANDLE h, const char *s, DWORD n)
+{
+    while (n) {
+        DWORD w = 0;
+        if (!WriteFile(h, s, n, &w, NULL)) {
+            if (!io_failed) io_error = GetLastError();
+            io_failed = 1;
+            return FALSE;
+        }
+        if (!w || w > n) {
+            SetLastError(ERROR_WRITE_FAULT);
+            if (!io_failed) io_error = ERROR_WRITE_FAULT;
+            io_failed = 1;
+            return FALSE;
+        }
+        s += w;
+        n -= w;
+    }
+    return TRUE;
+}
 static void puts_to(HANDLE h, const char *s) { put(h, s, slen(s)); }
 static void put_num(HANDLE h, DWORD v, int hex)
 {
@@ -113,6 +136,7 @@ static DWORD query(void)
     puts_to(out_h, " generation "); put_num(out_h, info.generation, 0); puts_to(out_h, " (VxD: ");
     put_num(out_h, info.vxd_sent, 0); puts_to(out_h, " sent, "); put_num(out_h, info.vxd_received, 0);
     puts_to(out_h, " received, "); put_num(out_h, info.vxd_proto_errors, 0); puts_to(out_h, " malformed)\r\n");
+    if (io_failed) { SetLastError(io_error); return failed("WriteFile"); }
     return 0;
 }
 
@@ -121,8 +145,11 @@ static DWORD run(void)
     const char *s = skip_blank(token_end(skip_blank(GetCommandLineA())));      /* skip argv[0] */
     const char *dir = NULL, *dir_end = NULL, *image_end;
     int forward_input = 0;
+    int frontend_failed = 0, terminate = 0;
     HANDLE process = NULL;
     DWORD got = 0, code = 0;
+    io_failed = 0;
+    io_error = 0;
     out_h = GetStdHandle(STD_OUTPUT_HANDLE);
     err_h = GetStdHandle(STD_ERROR_HANDLE);
     while (*s == '/' || *s == '-') {
@@ -151,26 +178,78 @@ static DWORD run(void)
     if (forward_input) {
         const HANDLE in_h = GetStdHandle(STD_INPUT_HANDLE);
         DWORD n = 0, written = 0;
-        while (ReadFile(in_h, io, sizeof io, &n, NULL) && n) {
+        for (;;) {
+            if (!ReadFile(in_h, io, sizeof io, &n, NULL)) {
+                /* A pipe whose writer closed supplies EOF on classic Win32. */
+                if (GetLastError() != ERROR_BROKEN_PIPE) {
+                    frontend_failed = 1;
+                    (void)failed("ReadFile");
+                }
+                break;
+            }
+            if (!n) break;
+            if (n > sizeof io) {
+                SetLastError(ERROR_INVALID_DATA);
+                frontend_failed = 1;
+                (void)failed("ReadFile length");
+                break;
+            }
             if (!NtwWriteConsole64(process, io, n, &written)) {
                 if (GetLastError() == ERROR_BROKEN_PIPE) break;        /* the process ended first */
+                frontend_failed = 1;
                 (void)failed("NtwWriteConsole64");
+                break;
+            }
+            if (written != n) {
+                SetLastError(ERROR_WRITE_FAULT);
+                frontend_failed = 1;
+                (void)failed("NtwWriteConsole64 length");
                 break;
             }
         }
     }
-    if (!NtwCloseConsole64(process) && GetLastError() != ERROR_BROKEN_PIPE)
+    if (!NtwCloseConsole64(process) && GetLastError() != ERROR_BROKEN_PIPE) {
+        frontend_failed = 1;
         (void)failed("NtwCloseConsole64");
-    while (NtwReadConsole64(process, io, sizeof io, &got))
-        put(out_h, io, got);
-    if (GetLastError() != NTW64_ERROR_HANDLE_EOF) {
-        code = failed("NtwReadConsole64");
-        (void)NtwKillProcess64(process, RUN_FAILED);
     }
-    if (!NtwWaitProcess64(process, INFINITE, &code))
-        code = failed("NtwWaitProcess64");
-    (void)NtwCloseProcess64(process);
-    return code;
+    for (;;) {
+        if (!NtwReadConsole64(process, io, sizeof io, &got)) {
+            if (GetLastError() != NTW64_ERROR_HANDLE_EOF) {
+                frontend_failed = 1;
+                terminate = 1;
+                (void)failed("NtwReadConsole64");
+            }
+            break;
+        }
+        if (!got || got > sizeof io) {
+            SetLastError(ERROR_INVALID_DATA);
+            frontend_failed = 1;
+            terminate = 1;
+            (void)failed("NtwReadConsole64 length");
+            break;
+        }
+        if (!put(out_h, io, got)) {
+            SetLastError(io_error);
+            frontend_failed = 1;
+            terminate = 1;
+            (void)failed("WriteFile");
+            break;
+        }
+    }
+    if (terminate && !NtwKillProcess64(process, RUN_FAILED)) {
+        frontend_failed = 1;
+        (void)failed("NtwKillProcess64");
+    }
+    if (!NtwWaitProcess64(process, INFINITE, &code)) {
+        frontend_failed = 1;
+        (void)failed("NtwWaitProcess64");
+    }
+    if (!NtwCloseProcess64(process)) {
+        frontend_failed = 1;
+        (void)failed("NtwCloseProcess64");
+    }
+    /* A real remote exit never clears an earlier frontend failure. */
+    return frontend_failed || io_failed ? RUN_FAILED : code;
 }
 
 void mainCRTStartup(void)
