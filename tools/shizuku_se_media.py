@@ -369,7 +369,7 @@ def efi_readme(loader: Input, csm: Input, mode: str, menu_timeout: int = MENU_TI
     ).encode("ascii")
 
 
-def efi_members(loader: Input, csm: Input, shzdos: dict[str, Input], mode: str,
+def efi_members(loader: Input, csm: Input | None, shzdos: dict[str, Input], mode: str,
                 setup_files: dict[str, bytes] | None = None,
                 menu_timeout: int = MENU_TIMEOUT, private_native_profile=None) -> dict[str, bytes]:
     """The UEFI file set: the El Torito EFI image of the ISO, and the raw disk's FAT volume root."""
@@ -386,13 +386,20 @@ def efi_members(loader: Input, csm: Input, shzdos: dict[str, Input], mode: str,
         marker=private_native_profile.marker()
         if loader.data.count(marker)!=1:
             raise ValueError("loader does not carry the exact measured private compiler profile")
+    if csm is None and private_native_profile is None:
+        raise ValueError("CSM omission belongs only to typed private direct UEFI installation")
     members = {
         "EFI/BOOT/BOOTX64.EFI": loader.data,
-        "EFI/SHIZUKU/CSMWRAP.EFI": csm.data,
-        "EFI/SHIZUKU/CSMWRAP.INI": csmwrap_ini(),
         "EFI/SHIZUKU/BOOT.INI": boot_ini(mode, menu_timeout),
-        "EFI/SHIZUKU/README.TXT": efi_readme(loader, csm, mode, menu_timeout),
     }
+    if csm is not None:
+        members.update({"EFI/SHIZUKU/CSMWRAP.EFI": csm.data,
+                        "EFI/SHIZUKU/CSMWRAP.INI": csmwrap_ini(),
+                        "EFI/SHIZUKU/README.TXT": efi_readme(loader, csm, mode, menu_timeout)})
+    else:
+        members["EFI/SHIZUKU/README.TXT"] = (
+            "Private direct native installer; UEFI only. No CSM fallback.\r\n"
+            "Source/device authority and firmware memory checks remain mandatory.\r\n").encode("ascii")
     for name, item in shzdos.items():
         members[f"SHZDOS/{name}"] = item.data
     installer = f"{SETUP_ISO_DIR}/{SETUP_MAIN}"

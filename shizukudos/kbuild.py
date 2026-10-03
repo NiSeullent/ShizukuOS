@@ -60,17 +60,17 @@ def sources(directory, suffix):
 
 
 def source_hashes():
-    directories = [SHZ / name for name in ("kernel32", "kernel64", "accounts", "kcommon", "abi", "pma_bridge", "win64/include", "dead_screen", "boot_profile", "supervisor/loader", "supervisor/src", "uefi", "csmwrap/video")]
+    directories = [SHZ / name for name in ("kernel32", "kernel64", "accounts", "kcommon", "abi", "pma_bridge", "win64/include", "dead_screen", "boot_profile", "supervisor/loader", "supervisor/src", "supervisor/guest", "supervisor/native_win98", "uefi", "csmwrap/video")]
     directories += [REPO / "shizukufs/v1/libsfs", REPO / "drivers/ahci_native"]
     paths = {p for directory in directories for p in directory.rglob("*")
              if p.is_file() and p.suffix in (".c", ".h", ".asm", ".ld")}
     paths.update(SHZ / "install" / name for name in
-                 ("native_release_admission.py", "native_release_policy.py", "native_payload_ingest.py", "private_installer_package.py", "native_capacity_profile.py"))
+                 ("native_release_admission.py", "native_release_policy.py", "native_payload_ingest.py", "private_installer_package.py", "native_capacity_profile.py", "private_installer_iso.py"))
     paths.update([Path(__file__).resolve(), SHZ / "tools/shzlib.py", SHZ / "win64/pe_parse.c",
                   SHZ / "win64/pe_parse.h",
                   SHZ / "supervisor/src/font8x8_basic.h", SHZ / "supervisor/build.py",
                   REPO / "tools/shizuku_se_media.py", REPO / "tools/shizuku_image_io.py",
-                  REPO / "tools/shizuku_se_drivers.py"])
+                  REPO / "tools/shizuku_se_drivers.py", REPO / "tools/build_shizuku_se_iso.py"])
     return {str(p.relative_to(REPO)): sha256_file(p) for p in sorted(paths)}
 
 
@@ -146,6 +146,12 @@ def build_all(args, stack, private_finalize=None):
     # Only the explicit private packaging lane needs the actual EFI compiler.
     # Its children participate in the same held source/tool union and receipt.
     if args.native_release_manifest is not None:
+        for name in ("xorriso", "mkfs.vfat", "mcopy", "mmd", "mdir", "fsck.vfat", "zstd", "git", "readelf"):
+            selected = shutil.which(name)
+            if selected is None:
+                raise RuntimeError("private media tool absent: " + name)
+            actual = Path(selected).resolve()
+            tools["private-media-" + name] = {"path": str(actual), "sha256": sha256_file(actual)}
         compiler = shutil.which("x86_64-w64-mingw32-gcc")
         if compiler is None:
             raise RuntimeError("private installer requires actual MinGW EFI compiler")
