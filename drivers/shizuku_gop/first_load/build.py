@@ -11,7 +11,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--out',type=Path,required=True);p.add_argument('--gop-build',type=Path,required=True);a=p.parse_args()
     out=a.out.resolve();gop=a.gop_build.resolve()
     if out.exists() or not out.is_relative_to((ROOT/'build').resolve()):p.error('fresh component --out under this workspace build required')
-    names=['drivers/shizuku_gop/first_load/'+n for n in ('build.py','control.asm','contract.h','guard.c','loader.c','link.ld')]+['drivers/shizuku_gop/gop_contract.h','ntwrapper/vxd/le.py','shizukudos/abi/shz_abi.h']
+    names=['drivers/shizuku_gop/first_load/'+n for n in ('build.py','control.asm','contract.h','guard.c','loader.c','link.ld')]+['drivers/shizuku_gop/gop_contract.h','ntwrapper/vxd/le.py','shizukudos/abi/shz_abi.h','shizukudos/boot_profile/storage/provenance.h']
     inputs={n:(ROOT/n).read_bytes() for n in names};receipt_raw=(gop/'build-result.json').read_bytes();r=json.loads(receipt_raw)
     if r['status']!='HOST-BUILD-PASS' or r['runtime_validation']!='pending: native install/load/GDI rendering requires guest evidence':raise ValueError('actual GOP producer receipt required')
     for n,pin in r['original_inputs'].items():
