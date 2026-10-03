@@ -5,7 +5,7 @@ This module trusts independently reviewed root code selecting the decision pin.
 It does not sandbox root Python. A literal decision is configured provenance;
 only its retained FD/leases AND the fixed live Windows service can admit source.
 """
-import ast, copy, fcntl, hashlib, json, os, select, stat, threading, time
+import ast, copy, fcntl, hashlib, json, os, stat, threading, time
 from pathlib import Path
 import importlib.util
 
@@ -66,6 +66,7 @@ class RootLineageOwner:
         self._active=True;self._cancelled=False;self._deadline=time.monotonic()+5400
         self._union=held_union;self._entries=[code];self._client=None
         try:
+            self._pidfd_identity=provider.control.pidfd_identity(self._pidfd)
             decision_entry=self._add(decision_pin)
             raw=os.pread(decision_entry['fd'],decision_pin['bytes']+1,0)
             need(len(raw)==decision_pin['bytes'] and hashlib.sha256(raw).hexdigest()==decision_pin['sha256'],
@@ -106,7 +107,7 @@ class RootLineageOwner:
             need(fact[field] is False,'configured lineage exceeds original-DOS-only scope')
     def check(self):
         need(self._active and not self._cancelled and os.getpid()==self._pid and threading.get_ident()==self._thread
-             and time.monotonic()<self._deadline and not select.select([self._pidfd],[],[],0)[0],
+             and time.monotonic()<self._deadline and not provider.control.pidfd_ready(self._pidfd,self._pidfd_identity),
              'live root lineage owner cancelled/dead/stale')
         need(not self._union.broken,'private input lease break observed')
         # No Union.check here: this method may itself be a Union guard.

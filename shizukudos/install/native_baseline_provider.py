@@ -6,7 +6,7 @@ The source-only route is a real Linux control. The Windows route invokes only
 fixed source-built control/observer and retains its live original/clone leases.
 Neither route can issue Windows grade without independent private lineage auth.
 """
-import fcntl, hashlib, importlib.util, json, os, re, select, signal, socket, stat, struct, subprocess, sys, threading, time
+import fcntl, hashlib, importlib.util, json, os, re, select, selectors, signal, socket, stat, struct, subprocess, sys, threading, time
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[2]
@@ -30,12 +30,18 @@ def send(peer,row):
     data=encode(row);need(peer.send(data)==len(data),'complete custody packet required')
 
 def receive(peer,deadline,guard=lambda:None):
-    while True:
-        guard();need(time.monotonic()<deadline,'custody transport deadline expired')
-        if select.select([peer],[],[],min(.1,deadline-time.monotonic()))[0]:
-            data,_,flags,_=peer.recvmsg(MAX_PACKET)
-            need(data and not flags&socket.MSG_TRUNC,'complete bounded custody packet required')
-            return json.loads(data,object_pairs_hook=control.unique)
+    with selectors.PollSelector() as pending:
+        pending.register(peer,selectors.EVENT_READ)
+        while True:
+            guard();remaining=deadline-time.monotonic()
+            need(remaining>0,'custody transport deadline expired')
+            ready=pending.select(min(.1,remaining))
+            guard();need(time.monotonic()<deadline,'custody transport deadline expired')
+            if ready:
+                data,_,flags,_=peer.recvmsg(MAX_PACKET)
+                need(data and not flags&socket.MSG_TRUNC,'complete bounded custody packet required')
+                guard();need(time.monotonic()<deadline,'custody transport deadline expired')
+                return json.loads(data,object_pairs_hook=control.unique)
 
 def peer_pid(peer):
     pid,uid,gid=struct.unpack('3i',peer.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12))
@@ -69,16 +75,16 @@ class OwnedKeeperGroup:
         need(len(members)<=128,'owned keeper process census exceeds bound');return members
     def signal_members(self,number,exclude):
         for pid in self.members()-set(exclude):
-            fd=None
+            fd=original=None
             try:
-                fd=os.pidfd_open(pid);group=actual_group(pid)
+                fd=os.pidfd_open(pid);original=control.pidfd_identity(fd);group=actual_group(pid)
                 need(group==self.path or self.path in group.parents,'cleanup PID left owned descendant group')
                 signal.pidfd_send_signal(fd,number)
             except ProcessLookupError:pass
             except FileNotFoundError:
                 # /proc can disappear after pidfd_open; only actual kernel death
                 # permits skipping this member, never a live/moved process.
-                need(fd is not None and bool(select.select([fd],[],[],0)[0]),
+                need(fd is not None and control.pidfd_ready(fd,original),
                      "live owned cleanup member path disappeared")
             finally:
                 if fd is not None:os.close(fd)
@@ -199,7 +205,7 @@ class Client:
         for entry in self.held.values():entry['checkpoint']()
     def owner_check(self):
         self._owner_inputs_check()
-        if self.child is not None:need(self.child.poll() is None and not select.select([self.pidfd],[],[],0)[0],'actual owned service exited')
+        if self.child is not None:need(self.child.poll() is None and not control.pidfd_ready(self.pidfd,self.pidfd_identity),'actual owned service exited')
     def _finish_check(self):
         # The authenticated FINISH reply can remain queued after normal exit.
         # Owner/input custody still holds; finish() must separately require the
@@ -241,6 +247,7 @@ class Client:
                 self.log=(self.output/'service.stderr').open('xb')
                 self.child=subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=self.log,cwd=self.output,preexec_fn=self.group.enter_child if self.group is not None else None)
                 self.pidfd=os.pidfd_open(self.child.pid)
+                self.pidfd_identity=control.pidfd_identity(self.pidfd)
                 self.peer,_=self.listener.accept();need(peer_pid(self.peer)==self.child.pid,'actual postexec owned service PID differs')
                 exe=Path('/proc/%d/exe'%self.child.pid).stat();original=os.fstat(self.held[executable]['fd']);need((exe.st_dev,exe.st_ino)==(original.st_dev,original.st_ino),'actual service interpreter inode differs')
                 actual=Path('/proc/%d/cmdline'%self.child.pid).read_bytes();need(actual.rstrip(b'\0').split(b'\0')==[p.encode() for p in argv],'actual owned service argv differs')
@@ -273,7 +280,7 @@ class Client:
         self.query();return True
     def finish(self):
         self.query('FINISH');self.child.wait(timeout=30)
-        need(self.child.returncode==0 and select.select([self.pidfd],[],[],0)[0],'actual service final cleanup/reap failed')
+        need(self.child.returncode==0 and control.pidfd_ready(self.pidfd,self.pidfd_identity),'actual service final cleanup/reap failed')
         for entry in self.held.values():need(replacement.hash_fd(entry['fd'],entry['pin']['bytes'],entry['checkpoint'])==entry['pin']['sha256'],'launcher retained input final SHA differs')
         self.active=False
     def close(self):
