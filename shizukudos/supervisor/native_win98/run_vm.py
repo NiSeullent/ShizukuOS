@@ -185,6 +185,7 @@ def main():
     parser.add_argument('--runtime-source-pins-json',help=argparse.SUPPRESS)
     parser.add_argument('--pci-preparation-json',help=argparse.SUPPRESS)
     args=parser.parse_args()
+    if not timeout_valid(args.timeout):parser.error('timeout must be 20..900 seconds')
     custody=get_custody(args.custody_fd)
     leases=ExitStack()
     try:return run_plan(args,parser,custody,leases)
