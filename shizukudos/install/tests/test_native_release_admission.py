@@ -148,11 +148,12 @@ class AdmissionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir='/var/tmp', prefix='shz-release-build-') as temp:
             base = Path(temp); selected = {}; closed = []
             @contextmanager
-            def modeled_admission(manifest, out, pins):
+            def modeled_admission(manifest, out, pins, *, build_tool_pins):
                 # Explicit host-only model of the independent producer. The real
                 # kbuild selector/flags/source and receipt ordering run unchanged.
                 self.assertTrue(any(row['path'].endswith('kbuild.py') for row in pins))
-                self.assertTrue(any('cc1' in row['path'] for row in pins))
+                self.assertTrue(any('cc1' in row['path'] for row in build_tool_pins.values()))
+                self.assertFalse(any('cc1' in row['path'] for row in pins))
                 out.mkdir(); source = out/'native_release_admitted.c'; source.write_text('/* model only */')
                 yield {'source': source, 'private': True, 'public_artifact': False}
                 closed.append(True)
