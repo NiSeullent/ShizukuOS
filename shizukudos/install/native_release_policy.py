@@ -33,6 +33,35 @@ NATIVE_SYSTEM_BIOS_SOURCE = {
     'source_map_sha256': 'ff41cd97810efc0c509159d7c16e5d431b5f57e9168839569258c4dc96fc83fc',
     'tool_map_sha256': '0b246662b8a6e1cc76841f80d71f96dfb21e8706d5ce4a197ee20be5efe092ba',
 }
+# Exact public compiler roles with independently read-back canonical bytes.
+# All source/media/payload inputs retain their one-link boundary.
+NATIVE_COMPILER_TOOLS = {
+    'gcc': {
+        'path': '/usr/bin/gcc',
+        'bytes': 1375448,
+        'sha256': '14fb376b605118106271d574705c16d6a75cf38ffecefd667db290555670bf53',
+        'nlink': 3,
+    },
+    'private-efi-gcc': {
+        'path': '/usr/bin/x86_64-w64-mingw32-gcc',
+        'bytes': 1982488,
+        'sha256': 'af56f5f5d9cda276727d6e075b697a02e6567855406d3e3d0e2f795c971356f2',
+        'nlink': 2,
+    },
+    'private-efi-as': {
+        'path': '/usr/x86_64-w64-mingw32/bin/as',
+        'bytes': 1739320,
+        'sha256': '860d892a873cef572f116b6cbee19ac277a1f19ad8ff4031cdb718a0caea11bf',
+        'nlink': 2,
+    },
+    'private-efi-ld': {
+        'path': '/usr/x86_64-w64-mingw32/bin/ld',
+        'bytes': 1768784,
+        'sha256': '9611e4ac757eec9fc5a4e595390e577eda45ef3841cad552d8bbbb2383fbb321',
+        'nlink': 4,
+    },
+}
+
 # Real completed-control checkpoint authority is independently owned and private.
 GENUINE_BASELINE = None
 
