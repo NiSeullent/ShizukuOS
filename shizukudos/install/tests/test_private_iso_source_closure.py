@@ -43,7 +43,7 @@ class SourceClosure(unittest.TestCase):
    root=Path(tmp);stack,held,custody,_,_=PackagingTests().model(root)
    path=root/'committed-metadata';path.write_bytes(b'')
    with stack:
-    metadata=iso._CommittedMetadataLeases(custody)
+    metadata=iso._SourceOnlyLeases(custody)
     with self.assertRaisesRegex(RuntimeError,'cancel'):
      with metadata:
       metadata.add(path,hashlib.sha256(b'').hexdigest())
@@ -60,10 +60,10 @@ class SourceClosure(unittest.TestCase):
   with tempfile.TemporaryDirectory(dir='/var/tmp') as tmp:
    root=Path(tmp);stack,_,custody,_,_=PackagingTests().model(root)
    path=root/'nonempty';path.write_bytes(b'not metadata')
-   with stack,iso._CommittedMetadataLeases(custody) as metadata:
+   with stack,iso._SourceOnlyLeases(custody) as metadata:
     with self.assertRaisesRegex(ValueError,'exact empty'):
      metadata.add(path,hashlib.sha256(path.read_bytes()).hexdigest())
-    with self.assertRaisesRegex(ValueError,'independent empty'):
+    with self.assertRaisesRegex(ValueError,'source-only regular'):
      metadata.add(path,hashlib.sha256(b'').hexdigest())
     self.assertEqual(metadata.entries,[])
  def test_all_metadata_descriptors_close_when_cleanup_one_unlock_fails(self):
@@ -71,7 +71,7 @@ class SourceClosure(unittest.TestCase):
   with tempfile.TemporaryDirectory(dir='/var/tmp') as tmp:
    root=Path(tmp);stack,_,custody,_,_=PackagingTests().model(root)
    with stack:
-    metadata=iso._CommittedMetadataLeases(custody)
+    metadata=iso._SourceOnlyLeases(custody)
     for name in ('a','b'):
      path=root/name;path.write_bytes(b'');metadata.add(path,hashlib.sha256(b'').hexdigest())
     fds=[e['fd'] for e in metadata.entries];original=iso.fcntl.fcntl
@@ -84,4 +84,64 @@ class SourceClosure(unittest.TestCase):
     self.assertTrue(metadata.closed)
     for fd in fds:
      with self.assertRaises(OSError):os.fstat(fd)
+ def tool_model(self,root):
+  from test_private_installer_package import PackagingTests
+  stack,held,custody,_,_=PackagingTests().model(root)
+  path=root/'compiler';path.write_bytes(b'host compiler bytes');os.link(path,root/'compiler-alias')
+  receipt=root/'actual-producer-model.json';receipt.write_bytes(b'host modeled exact producer')
+  row=iso._row(custody,receipt)
+  tools={'gcc':{'path':str(path),'sha256':hashlib.sha256(path.read_bytes()).hexdigest()}}
+  anchor={'receipt':(row['bytes'],row['sha256']),'tool_map_sha256':iso.admission.digest(iso.admission.canonical(tools))}
+  return stack,held,custody,path,row,tools,anchor
+ def test_exact_anchored_hardlinked_tool_retains_original_not_native_role(self):
+  with tempfile.TemporaryDirectory(dir='/var/tmp') as tmp:
+   stack,held,custody,path,row,tools,anchor=self.tool_model(Path(tmp))
+   with stack,patch.object(iso.admission.policy,'NATIVE_SYSTEM_BIOS_SOURCE',anchor),iso._SourceOnlyLeases(custody) as sources:
+    sources.add_bios_tool(row,tools,'gcc');fd=sources.entries[0]['fd']
+    self.assertEqual(os.fstat(fd).st_ino,path.stat().st_ino)
+    self.assertEqual(os.fstat(fd).st_nlink,2)
+    self.assertNotIn(path,held.entries)
+    custody.finish()
+   with self.assertRaises(OSError):os.fstat(fd)
+ def test_hardlink_count_and_rename_changes_refuse_and_close(self):
+  for mutation in ('link','rename'):
+   with self.subTest(mutation=mutation),tempfile.TemporaryDirectory(dir='/var/tmp') as tmp:
+    root=Path(tmp);stack,_,custody,path,row,tools,anchor=self.tool_model(root)
+    sources=iso._SourceOnlyLeases(custody)
+    try:
+     with patch.object(iso.admission.policy,'NATIVE_SYSTEM_BIOS_SOURCE',anchor):
+      sources.add_bios_tool(row,tools,'gcc');fd=sources.entries[0]['fd']
+     if mutation=='link':os.link(path,root/'third-alias')
+     else:
+      path.rename(root/'moved');path.write_bytes(b'host compiler bytes')
+     with self.assertRaises(ValueError):sources.check()
+     with self.assertRaises(ValueError):sources.__exit__(None,None,None)
+     with self.assertRaises(OSError):os.fstat(fd)
+    finally:
+     try:stack.close()
+     except ValueError:pass # Expected changed source guard; all FDs close.
+ def test_same_byte_alias_cannot_replace_anchored_tool_path(self):
+  with tempfile.TemporaryDirectory(dir='/var/tmp') as tmp:
+   root=Path(tmp);stack,_,custody,path,row,tools,anchor=self.tool_model(root)
+   with stack,patch.object(iso.admission.policy,'NATIVE_SYSTEM_BIOS_SOURCE',anchor),iso._SourceOnlyLeases(custody) as sources:
+    tools['gcc']['path']=str(root/'compiler-alias')
+    with self.assertRaisesRegex(ValueError,'anchored BIOS reproducibility tool map'):
+     sources.add_bios_tool(row,tools,'gcc')
+    self.assertEqual(sources.entries,[])
+ def test_writer_attempt_breaks_shared_guard_and_cleanup_closes(self):
+  import subprocess,time
+  with tempfile.TemporaryDirectory(dir='/var/tmp') as tmp:
+   stack,_,custody,path,row,tools,anchor=self.tool_model(Path(tmp));sources=iso._SourceOnlyLeases(custody)
+   try:
+    with patch.object(iso.admission.policy,'NATIVE_SYSTEM_BIOS_SOURCE',anchor):sources.add_bios_tool(row,tools,'gcc')
+    fd=sources.entries[0]['fd']
+    result=subprocess.run([sys.executable,'-c','import os,sys;os.open(sys.argv[1],os.O_WRONLY|os.O_NONBLOCK)',str(path)],capture_output=True,timeout=5)
+    self.assertNotEqual(result.returncode,0)
+    with self.assertRaises(ValueError):custody.check()
+    try:sources.__exit__(None,None,None)
+    except ValueError:pass
+    with self.assertRaises(OSError):os.fstat(fd)
+   finally:
+    try:stack.close()
+    except ValueError:pass
 if __name__=='__main__':unittest.main(verbosity=2)

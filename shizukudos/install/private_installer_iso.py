@@ -162,7 +162,7 @@ def _syslinux(custody,cache,spec):
     return files,payload
 
 
-def _bios_sources(custody,receipt_path,manifest):
+def _bios_sources(custody,receipt_path,manifest,source_only=None):
     anchor=getattr(admission.policy,'NATIVE_SYSTEM_BIOS_SOURCE',None)
     need(type(anchor) is dict and receipt_path is not None,
          'independent source-built native system BIOS closure absent')
@@ -193,7 +193,12 @@ def _bios_sources(custody,receipt_path,manifest):
         source=Path(path)
         need('..' not in source.parts,'canonical BIOS source pin required')
         _row(custody,source if source.is_absolute() else source_root/source,sha)
-    for item in tools.values():_row(custody,item['path'],item['sha256'])
+    for name,item in tools.items():
+        if Path(item['path']).stat().st_nlink==1:
+            _row(custody,item['path'],item['sha256'])
+        else:
+            need(type(source_only) is _SourceOnlyLeases,'scoped actual BIOS reproducibility tool lease required')
+            source_only.add_bios_tool(row,tools,name)
     archive=receipt.get('source_archive')
     admission.anchored(archive,anchor.get('source_archive'),'native BIOS corresponding source archive')
     _row(custody,archive['path'],archive['sha256'])
@@ -241,8 +246,8 @@ def _fd_budget():
         if changed:resource.setrlimit(resource.RLIMIT_NOFILE,previous)
 
 
-class _CommittedMetadataLeases:
-    """Source-only empty Git blobs; never native import roles/capabilities."""
+class _SourceOnlyLeases:
+    """Committed metadata and anchored BIOS tools; never native input roles."""
     def __init__(self,custody):
         self.custody=custody;self.entries=[];self.closed=False
         custody.guard(self.check)
@@ -251,31 +256,60 @@ class _CommittedMetadataLeases:
         for entry in self.entries:
             path=self.custody._ingest.path(str(entry['path']))
             state=path.stat()
-            need(stat.S_ISREG(state.st_mode) and state.st_nlink==1 and state.st_size==0 and
+            need(stat.S_ISREG(state.st_mode) and state.st_nlink==entry['nlink'] and
                  self.custody._ingest.identity(state)==entry['identity'],
-                 'committed empty metadata identity changed')
+                 'source-only original path/inode/link identity changed')
             if entry['fd'] is not None:
-                need(self.custody._ingest.identity(os.fstat(entry['fd']))==entry['identity'] and
-                     fcntl.fcntl(entry['fd'],fcntl.F_GETLEASE)==fcntl.F_RDLCK and
-                     os.pread(entry['fd'],1,0)==b'',
-                     'committed empty metadata original read lease changed')
-    def add(self,path,expected):
-        need(not self.closed and expected==hashlib.sha256(b'').hexdigest(),
-             'exact empty committed metadata role required')
+                held=os.fstat(entry['fd'])
+                need(held.st_nlink==entry['nlink'] and
+                     self.custody._ingest.identity(held)==entry['identity'] and
+                     fcntl.fcntl(entry['fd'],fcntl.F_GETLEASE)==fcntl.F_RDLCK,
+                     'source-only original read lease changed')
+    def _retain(self,path,size,sha,role):
         self.custody.check();path=self.custody._ingest.path(str(path))
         fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
         try:
             state=os.fstat(fd)
-            need(stat.S_ISREG(state.st_mode) and state.st_nlink==1 and state.st_size==0,
-                 'independent empty committed regular metadata required')
+            need(stat.S_ISREG(state.st_mode) and state.st_size==size and
+                 ((role=='committed-empty-metadata' and size==0 and state.st_nlink==1) or
+                  (role=='anchored-BIOS-reproducibility-tool' and 0<size<=64*MIB and state.st_nlink>=1)),
+                 'independent source-only regular role extent required')
             fcntl.fcntl(fd,fcntl.F_SETOWN,os.getpid());fcntl.fcntl(fd,fcntl.F_SETLEASE,fcntl.F_RDLCK)
-            self.entries.append({'path':path,'fd':fd,'identity':self.custody._ingest.identity(state)})
+            need(self._sha(fd,size)==sha,'source-only original SHA differs')
+            self.entries.append({'path':path,'fd':fd,'identity':self.custody._ingest.identity(state),
+                                 'nlink':state.st_nlink,'sha256':sha,'role':role})
             fd=None;self.check()
         finally:
             if fd is not None:os.close(fd)
+    @staticmethod
+    def _sha(fd,size):
+        sha=hashlib.sha256()
+        for offset in range(0,size,MIB):
+            raw=os.pread(fd,min(MIB,size-offset),offset)
+            need(len(raw)==min(MIB,size-offset),'complete original source-only read required')
+            sha.update(raw)
+        return sha.hexdigest()
+    def add_bios_tool(self,receipt_row,tools,name):
+        need(not self.closed,'source-only custody closed')
+        anchor=getattr(admission.policy,'NATIVE_SYSTEM_BIOS_SOURCE',None)
+        need(type(anchor) is dict,'independent actual BIOS producer absent')
+        admission.anchored(receipt_row,anchor.get('receipt'),'exact actual BIOS tool producer receipt')
+        need(type(tools) is dict and admission.digest(admission.canonical(tools))==anchor.get('tool_map_sha256') and
+             name in tools,'exact independently anchored BIOS reproducibility tool map required')
+        item=tools[name];path=self.custody._ingest.path(item['path'])
+        self._retain(path,path.stat().st_size,item['sha256'],'anchored-BIOS-reproducibility-tool')
+    def add(self,path,expected):
+        need(not self.closed and expected==hashlib.sha256(b'').hexdigest(),
+             'exact empty committed metadata role required')
+        self._retain(path,0,expected,'committed-empty-metadata')
     def __exit__(self,*exc):
         errors=[]
-        try:self.check()
+        try:
+            self.check()
+            for entry in self.entries:
+                need(self._sha(entry['fd'],entry['identity'][2])==entry['sha256'],
+                     'final source-only original SHA differs')
+            self.check()
         except BaseException as error:errors.append(error)
         for entry in reversed(self.entries):
             fd=entry['fd']
@@ -311,7 +345,7 @@ def _project_sources(custody,gitlink_cache=None,empty_metadata=None):
             archived.add(name)
             data=tar.extractfile(member).read();sha=hashlib.sha256(data).hexdigest()
             if not data:
-                need(type(empty_metadata) is _CommittedMetadataLeases,'scoped committed metadata read lease required')
+                need(type(empty_metadata) is _SourceOnlyLeases,'scoped committed metadata read lease required')
                 empty_metadata.add(ROOT/name,sha)
             else:_row(custody,ROOT/name,sha)
     need(archived==set(blobs),'complete committed regular project archive required')
@@ -352,7 +386,7 @@ def _project_sources(custody,gitlink_cache=None,empty_metadata=None):
                 data=tar.extractfile(member).read();child_archived[path]=data
                 sha=hashlib.sha256(data).hexdigest()
                 if not data:
-                    need(type(empty_metadata) is _CommittedMetadataLeases,'scoped committed metadata read lease required')
+                    need(type(empty_metadata) is _SourceOnlyLeases,'scoped committed metadata read lease required')
                     empty_metadata.add(tree/path,sha);empty_names.append(path)
                 else:_row(custody,tree/path,sha)
         need(set(child_archived)==set(child_blobs),'complete pinned project gitlink source archive required')
@@ -373,7 +407,7 @@ def _project_sources(custody,gitlink_cache=None,empty_metadata=None):
 def _compliance(custody,cache,bios_receipt,gitlink_cache=None,empty_metadata=None):
     manifest_row=_row(custody,ROOT/'shizukudos/upstream/manifest.json')
     manifest=json.loads(_read(custody,manifest_row,4*MIB))
-    payload=_bios_sources(custody,bios_receipt,manifest)
+    payload=_bios_sources(custody,bios_receipt,manifest,empty_metadata)
     files,sys_payload=_syslinux(custody,cache,manifest['upstreams']['syslinux'])
     payload.update(sys_payload)
     payload.update(_project_sources(custody,gitlink_cache,empty_metadata))
@@ -496,7 +530,7 @@ def _finalizer(cache,bios_receipt,gitlink_cache=None):
         need(type(release) is dict and type(release.get('custody')) is admission.BuildCustody and
              type(release.get('profile')) is capacity.CapacityProfile,'actual live private release required')
         custody=release['custody'];profile=release['profile'];profile.check()
-        with _CommittedMetadataLeases(custody) as empty_metadata:
+        with _SourceOnlyLeases(custody) as empty_metadata:
             packaged=package.finalize(release,build,results)
             syslinux,compliance=_compliance(custody,cache,bios_receipt,gitlink_cache,empty_metadata)
             supervisor=_load('private_iso_supervisor',ROOT/'shizukudos/supervisor/build.py')

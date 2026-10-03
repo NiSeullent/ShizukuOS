@@ -93,3 +93,12 @@ cancellation and individual cleanup failure. This scoped mechanism never grants
 native source import or Windows approval and leaves the native Union's nonempty
 file guard unchanged. KernelEx's two committed `.timestamp` blobs are included
 in the complete 544-blob tree; archive omissions are refused.
+
+The independently approved source-built BIOS receipt can pin a host compiler
+with several filesystem hard links. Only that receipt's exact anchored tool-map
+entries may use a scoped source/tool read lease: original canonical path, inode,
+link count, size and timestamps must remain unchanged, with a held read lease
+and full SHA checked at admission and final cleanup. A same-byte alias or link
+count change refuses. These tools support corresponding-source reproducibility;
+they never become native source input roles or disk-write authority. All ordinary
+native input rules, including the single-link requirement, remain unchanged.
