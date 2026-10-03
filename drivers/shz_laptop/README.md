@@ -53,6 +53,26 @@ return `SHZ_NOT_FOUND`, distinct from an unsupported evaluator. Raw HID sensor
 values retain their usage identifiers; this component does not invent physical
 units from unknown descriptors.
 
+`firmware.h` supplies `shz_laptop_firmware_probe(read, context, rsdp_pa, out)`
+for a trusted native firmware owner. It resolves revision0 RSDT or revision2+
+XSDT/RSDT, validates the complete directory and calls the actual FADT/ECDT
+parsers on retained, checksummed snapshots. Revision1 is unsupported. FADT is
+required; absent ECDT succeeds with `has_ecdt=0`. Duplicate addresses and
+duplicate FADT/ECDT signatures, malformed checksums/lengths and overflowing
+physical ranges fail without changing any byte of `out`. A nonzero invalid
+XSDT never falls back to RSDT. Other valid table signatures may repeat.
+
+Discovery is bounded to128 root entries,4096-byte RSDP and FADT/ECDT snapshots,
+and1MiB per unrelated table. Unrelated tables and RSDP extensions use128-byte
+checksum chunks, so ordinary SSDTs larger than4096 bytes are supported. The4MiB
+aggregate read budget counts every byte requested from the reader, including
+header rereads and failed callbacks; an over-budget request is refused before
+the callback. Negative `SHZ_*` reader errors propagate; positive failures map
+to `SHZ_IO`. Exact-length zero-return reads must validate real ownership and
+mapping before and after copying, remain synchronous and bounded, and retain
+one stable firmware snapshot throughout discovery. This API does not acquire
+hardware resources, enumerate AML devices, route interrupts or enable power.
+
 Verification uses the actual production C, an asynchronous EC/I2C hardware
 model, the existing complete native AHCI/xHCI models, ownership revocation,
 timeout/recovery and malformed input cases:
@@ -67,6 +87,25 @@ binding must budget its worker stack from those frames plus its callback chain;
 it must not assume a small legacy IRQ stack can host descriptor parsing.
 Host checks do not establish actual Win98 installation, real hardware DMA,
 sensor accuracy, power state transitions or security isolation.
+
+`pointer_adapter.c` is the shared descriptor-derived HID class consumer. It
+converts calibrated relative or single-contact absolute frames to atomic
+movement/button publications, keeps fractional motion and reestablishes the
+baseline after contact changes/lift. Extra buttons and multiple contacts remain
+unsupported. Application class is retained per Report ID, so unrelated keyboard
+or sensor reports cannot clear a touchpad contact or button state. Mixed
+application reports and mismatched absolute/relative axes fail before input
+publication. The Windows98 native Supervisor binds this same adapter through
+`shizukudos/supervisor/native_win98/pointer_bridge.c` to its i8042 auxiliary
+endpoint. NTDRV/class owners can use the same sink interface; no separate HID
+decoder or unverified NT binary ABI is introduced. Driver success is named
+`SHZ_DRIVER_OK` (still zero), separate from Supervisor IPC's `SHZ_OK` so both
+public interfaces may be included in an actual native binding.
+
+The native binding is explicit after `shz_hidi2c_open` succeeds with verified
+I2C/GPIO resources. No discovered OEM/I2C resource provider currently calls it
+on live hardware; actual Win98 mouse-driver/USER input and hardware tests are
+still required. See the native bridge's `POINTER_BRIDGE.md` for that gate.
 
 Protocol references used for this independently authored implementation:
 

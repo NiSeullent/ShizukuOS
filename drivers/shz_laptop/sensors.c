@@ -6,16 +6,16 @@ static int evaluate(const struct shz_acpi_provider *p,uint64_t node,const char m
     if(!p || !p->evaluate) return SHZ_UNSUPPORTED;
     if(!p->validate || !p->owner || !p->generation || !node || !p->timeout_us ||
        p->timeout_us>30000000u) return SHZ_INVALID;
-    if(p->validate(p->context,p->owner,p->generation,node)!=SHZ_OK) return SHZ_REVOKED;
+    if(p->validate(p->context,p->owner,p->generation,node)!=SHZ_DRIVER_OK) return SHZ_REVOKED;
     for(i=0;i<expected;i++){values[i].integer=0;values[i].kind=UINT32_MAX;}
     r=p->evaluate(p->context,node,method,values,expected,&count,p->timeout_us);if(r) return r;
-    if(p->validate(p->context,p->owner,p->generation,node)!=SHZ_OK) return SHZ_REVOKED;
+    if(p->validate(p->context,p->owner,p->generation,node)!=SHZ_DRIVER_OK) return SHZ_REVOKED;
     if(count!=expected) return SHZ_MALFORMED;
-    return SHZ_OK;
+    return SHZ_DRIVER_OK;
 }
 static int integer32(const struct shz_acpi_value *v,uint32_t *out) {
     if(v->kind!=SHZ_ACPI_INTEGER || v->integer>UINT32_MAX) return SHZ_MALFORMED;
-    *out=(uint32_t)v->integer;return SHZ_OK;
+    *out=(uint32_t)v->integer;return SHZ_DRIVER_OK;
 }
 int shz_acpi_battery(const struct shz_acpi_provider *p,uint64_t node,struct shz_battery *out) {
     struct shz_acpi_value values[13];struct shz_battery b;
@@ -25,7 +25,7 @@ int shz_acpi_battery(const struct shz_acpi_provider *p,uint64_t node,struct shz_
     r=evaluate(p,node,"_STA",values,1);if(r) return r;
     r=integer32(values,&sta);if(r) return r;
     if(sta&~31u) return SHZ_MALFORMED;
-    if(!(sta&16u)) { *out=b;return SHZ_OK; }
+    if(!(sta&16u)) { *out=b;return SHZ_DRIVER_OK; }
     if(!(sta&1u)) return SHZ_MALFORMED;
     b.present=1;
     r=evaluate(p,node,"_BIF",values,13);if(r) return r;
@@ -55,7 +55,7 @@ int shz_acpi_battery(const struct shz_acpi_provider *p,uint64_t node,struct shz_
             }
         }
     }
-    *out=b;return SHZ_OK;
+    *out=b;return SHZ_DRIVER_OK;
 }
 int shz_acpi_temperature(const struct shz_acpi_provider *p,uint64_t node,int32_t *out) {
     struct shz_acpi_value value;uint32_t t;int r;
@@ -71,7 +71,7 @@ int shz_acpi_temperature(const struct shz_acpi_provider *p,uint64_t node,int32_t
     r=evaluate(p,node,"_TMP",&value,1);if(r) return r;
     r=integer32(&value,&t);if(r) return r;
     if(t>65535u) return SHZ_MALFORMED;
-    *out=(int32_t)t*100-273150;return SHZ_OK;
+    *out=(int32_t)t*100-273150;return SHZ_DRIVER_OK;
 }
 static int boolean(const struct shz_acpi_provider *p,uint64_t node,const char method[5],int *out) {
     struct shz_acpi_value v;uint32_t b;int r;
@@ -79,7 +79,7 @@ static int boolean(const struct shz_acpi_provider *p,uint64_t node,const char me
     r=evaluate(p,node,method,&v,1);if(r) return r;
     r=integer32(&v,&b);if(r) return r;
     if(b>1) return SHZ_MALFORMED;
-    *out=(int)b;return SHZ_OK;
+    *out=(int)b;return SHZ_DRIVER_OK;
 }
 int shz_acpi_lid(const struct shz_acpi_provider *p,uint64_t node,int *out) {
     return boolean(p,node,"_LID",out);
@@ -94,5 +94,5 @@ int shz_ec_sensor_read(struct shz_ec *e,const struct shz_ec_sensor *s,int32_t *o
     value=(int64_t)raw*s->scale_milli+s->offset_milli;
     if(value<s->minimum || value>s->maximum || value<INT32_MIN || value>INT32_MAX)
         return SHZ_MALFORMED;
-    *out=(int32_t)value;return SHZ_OK;
+    *out=(int32_t)value;return SHZ_DRIVER_OK;
 }

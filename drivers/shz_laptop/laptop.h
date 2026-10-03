@@ -68,11 +68,13 @@ struct shz_hid_field {
     uint16_t bit,page,usage; uint8_t size,report,group,flags;
     int32_t minimum,maximum;
 };
-struct shz_hid_report { uint16_t bits; uint8_t id; };
+/* Class mask is scoped to each Report ID:1 mouse,2 touchpad,4 unrelated
+ * application. Shared/mixed application reports need a richer class consumer. */
+struct shz_hid_report { uint16_t bits; uint8_t id,pointer_class; };
 struct shz_hid_layout {
     struct shz_hid_field fields[SHZ_HID_FIELDS];
     struct shz_hid_report reports[SHZ_HID_REPORTS];
-    uint16_t count; uint8_t report_count,numbered,touchpad;
+    uint16_t count; uint8_t report_count,numbered,touchpad,pointer;
 };
 struct shz_hid_value { uint16_t page,usage; uint8_t group,flags; int32_t value; };
 struct shz_contact { int32_t x,y; uint16_t id; uint8_t active,has_x,has_y; };
@@ -87,6 +89,31 @@ int shz_hid_decode(const struct shz_hid_layout *,const uint8_t *,size_t,
                     struct shz_hid_value *,size_t,size_t *count);
 int shz_hid_pointer(const struct shz_hid_layout *,const uint8_t *,size_t,
                     struct shz_pointer *);
+/* Shared HID class adapter for Win98 input sinks and native NTDRV consumers.
+ * Caller serializes PnP/input and supplies verified descriptor calibration.
+ * Absolute single-contact frames establish a baseline on contact changes;
+ * multitouch/extra buttons are rejected rather than guessed as gestures.
+ * emit is atomic: on failure it must publish no movement/buttons. */
+struct shz_pointer_sink {
+    void *context;
+    int (*validate)(void *,uint64_t owner,uint64_t generation);
+    int (*emit)(void *,int32_t x,int32_t y,uint8_t buttons);
+};
+struct shz_pointer_adapter {
+    struct shz_pointer_sink sink;
+    uint64_t owner,generation;
+    uint32_t units_x,units_y;
+    int32_t previous_x,previous_y;
+    int64_t remainder_x,remainder_y;
+    uint16_t contact;
+    uint8_t bound,tracking;
+};
+int shz_pointer_adapter_bind(struct shz_pointer_adapter *,const struct shz_pointer_sink *,
+                            uint64_t owner,uint64_t generation,uint32_t units_x,uint32_t units_y);
+int shz_pointer_adapter_input(struct shz_pointer_adapter *,const struct shz_pointer *);
+int shz_pointer_adapter_report(struct shz_pointer_adapter *,const struct shz_hid_layout *,
+                              const uint8_t *,size_t);
+int shz_pointer_adapter_close(struct shz_pointer_adapter *);
 struct shz_i2c_ops {
     void *context;
     int (*validate)(void *,uint64_t owner,uint64_t generation,uint16_t address);
