@@ -20,7 +20,7 @@ class BackendAuthority(unittest.TestCase):
    bodies=fs[fs.index('int fs_mount('):fs.index('/* NT device names')]
    namespace=Path(tmp)/'namespace.c'
    namespace.write_text('#include "'+str(K/'fs.h')+'"\nstatic fsnode_t *mounts[26];\nstatic uint64_t next_node_id=2;\nstatic char fold(char c){return c>=\'a\'&&c<=\'z\'?c-32:c;}\n'+bodies)
-   cmd=[compiler,*flags,'-include',str(K/'host/blk_authority_host_shim.h'),str(K/'host/test_blk_authority.c'),str(K/'blk.c'),str(K/'blk_authority.c'),str(K/'blk_part.c'),str(K/'vfs_mounts.c'),str(namespace),'-o',str(binary)]
+   cmd=[compiler,*flags,'-include',str(K/'host/blk_authority_host_shim.h'),str(K/'host/test_blk_authority.c'),str(K/'blk.c'),str(K/'blk_authority.c'),str(K/'boot_storage.c'),str(K/'blk_part.c'),str(K/'vfs_mounts.c'),str(namespace),'-o',str(binary)]
    compiled=subprocess.run(cmd,capture_output=True,text=True,timeout=30)
    self.assertEqual(compiled.returncode,0,compiled.stderr)
    for mode in ('write','read','flush'):

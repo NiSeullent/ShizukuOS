@@ -8,6 +8,7 @@
 #define K64_PROC_INTERNAL_H
 #include <stddef.h>
 #include <stdint.h>
+#include "../../abi/shz_abi.h"
 #include <string.h>
 #include <stdlib.h>
 #include <pthread.h>

@@ -914,6 +914,11 @@ static void add_namespace(nvme_ctrl_t *c, uint32_t nsid)
     ns->dev.discard = (c->oncs & 4) ? nv_discard : 0;
     ns->dev.control = nv_control;
     ns->dev.priv = ns;
+    ns->dev.storage.version=SHZ_STORAGE_VERSION;ns->dev.storage.size=sizeof ns->dev.storage;
+    ns->dev.storage.transport=SHZ_STORAGE_NVME;ns->dev.storage.bus=c->pci.bus;
+    ns->dev.storage.device=c->pci.dev;ns->dev.storage.function=c->pci.fn;
+    ns->dev.storage.unit=nsid;ns->dev.storage.sectors=nsze;ns->dev.storage.block_size=1u<<lbads;
+    memcpy(ns->dev.storage.namespace_eui,id+120,8);
     ns->dev.driver = "nvme";
     ns->dev.irq_mode = mode_names[c->mode];
     memcpy(ns->dev.model, c->model, sizeof ns->dev.model);

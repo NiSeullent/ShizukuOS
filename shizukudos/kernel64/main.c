@@ -8,6 +8,7 @@
 #include "gfx_address.h"
 #include "../boot_profile/win98_foundation.h"
 #include "cpu_bringup.h"
+#include "boot_storage.h"
 
 static shz_bootinfo_t bootinfo;
 int initrd_files = -1;                          /* -1: none or rejected; read by the Win64 self-test */
@@ -308,6 +309,8 @@ void kmain(uint64_t bootinfo_pa)
         initrd_files = files;
     }
     { extern void disk_init(void); disk_init(); }   /* standalone profile: AHCI disk -> FAT32 volume as D:\ (disk.c) */
+    if(k64_boot_storage_bind(&bootinfo,initrd_files>=0))
+        kprintf("K64 install authority: boot/archive physical mapping unavailable; native claim refused\n");
     sched_init();
     KASSERT(shz_timer_set(VEC_TIMER, TICK_US) == 0);
 #ifdef SHZ_STANDALONE

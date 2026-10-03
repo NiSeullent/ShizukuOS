@@ -22,6 +22,7 @@
 #ifndef SHZ_ABI_H
 #define SHZ_ABI_H
 #include <stdint.h>
+#include "../boot_profile/storage/provenance.h"
 
 #define SHZ_ABI_MAJOR 1
 #define SHZ_ABI_MINOR 1                 /* 1.1: WIN64 subsystem messages; boot info framebuffer + cmdline tail */
@@ -133,6 +134,9 @@ typedef struct {
     uint32_t fb_bpp;                /* bits per pixel (32 for both formats above; 0 = none) */
     uint32_t cmdline_size;          /* bytes before the NUL, < SHZ_CMDLINE_MAX */
     char cmdline[SHZ_CMDLINE_MAX];  /* NUL-terminated printable ASCII */
+    /* Independently versioned additive loader-only tail. Old 472-byte writers
+     * leave provenance absent; IPC version remains unchanged. */
+    shz_storage_provenance_t storage;
 } shz_bootinfo_t;
 
 /* True when the writer's boot info is long enough to contain `field`. */
@@ -206,6 +210,7 @@ _Static_assert(sizeof(shz_ring_hdr_t) == 192, "ring header layout");
 _Static_assert(sizeof(shz_channel_hdr_t) == 128, "channel header layout");
 _Static_assert(__builtin_offsetof(shz_bootinfo_t, fb_base) == 176, "ABI 1.0 boot info prefix is 176 bytes");
 _Static_assert(__builtin_offsetof(shz_bootinfo_t, cmdline) == 216, "boot info 1.1 tail layout");
-_Static_assert(sizeof(shz_bootinfo_t) == 472, "boot info layout");
+_Static_assert(__builtin_offsetof(shz_bootinfo_t, storage) == 472, "old boot info prefix unchanged");
+_Static_assert(sizeof(shz_bootinfo_t) == 616, "boot info layout");
 _Static_assert(SHZ_MSG_MAX_INLINE == 192, "inline capacity");
 #endif

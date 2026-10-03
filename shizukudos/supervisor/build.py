@@ -186,6 +186,7 @@ def main():
     # second font implementation. Include their complete closure in the receipt.
     sources += [SHZ / "csmwrap/video" / name for name in ("cp437.c", "cp437.h", "font8x8_basic.h")]
     sources.append(SHZ / "boot_profile/win98_foundation.h")
+    sources.append(SHZ / "boot_profile/storage/provenance.h")
     receipt = {
         "profile": "uefi-supervisor-vmx",
         "built_utc": shzlib.utc_now(),

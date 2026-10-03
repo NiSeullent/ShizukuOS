@@ -79,12 +79,13 @@ Freestanding compilation validates the real kernel headers and mount hook.
 
 Remaining concrete integration gates:
 
-1. Loader bootinfo does not currently transfer a physical boot-device identity
-   tied to the kernel registry (UEFI loaded-image/device path→PCI/storage
-   transport/whole device or equivalent BIOS proof). Kernel source initrd is
-   copied RAM; its original physical backing identity is absent. Add a bounded
-   source-bound handoff and independently verify it against actual driver
-   observations before calling bind_boot_roles. Unknown is not 'no device'.
+1. UEFI now carries actual bounded LoadedImage/BlockIO/PCI hardware origin and
+   the accepted archive's physical source in a versioned handoff. The actual
+   kernel binder uniquely matches driver observations before binding roles.
+   BIOS remains unknown. ISO ATAPI is not registered by the ATA-only AHCI driver:
+   the current registry-only binder refuses it. See boot_profile/storage/README.md
+   for the external readonly backing/archive capability route; never fabricate a
+   registered boot device or a 'RAM has no backing' exemption.
 2. Resolve current-system/runtime image backing and source file nodes using
    actual mount/handle provenance, retain source custody/hash/producer admission,
    and expose only independently minted kernel capabilities. RAM-source roles

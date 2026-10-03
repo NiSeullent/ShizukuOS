@@ -44,6 +44,7 @@ static int observed(struct blk_authority_claim *e)
       d->priv==s->priv && d->read==s->read && d->write==s->write && d->flush==s->flush &&
       d->read_async==s->read_async && d->write_async==s->write_async &&
       d->discard==s->discard && d->control==s->control &&
+      !memcmp(&d->storage,&s->storage,sizeof d->storage) &&
       ((d->flags^s->flags)&~BLK_F_MOUNTED)==0;
 }
 static int equal(const blk_authority_identity_t *a,const blk_authority_identity_t *b)

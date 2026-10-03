@@ -2,6 +2,7 @@
 #include "blk_authority_host_shim.h"
 #include "../blk_authority.h"
 #include "../vfs_mounts.h"
+#include "../boot_storage.h"
 #include <stdio.h>
 #include <time.h>
 static unsigned checks,failures,reads,writes,flushes,controls,random_seq;
@@ -39,6 +40,8 @@ static void device(blk_dev_t *d,const char *name)
 {
  memset(d,0,sizeof *d);strcpy(d->name,name);d->sector_size=512;d->sectors=64;d->flags=BLK_F_FLUSH;
  d->read=read_driver;d->write=write_driver;d->flush=flush_driver;d->discard=discard_driver;d->control=control_driver;
+ d->storage.version=SHZ_STORAGE_VERSION;d->storage.size=sizeof d->storage;d->storage.transport=SHZ_STORAGE_SATA;
+ d->storage.multiplier=0xffff;d->storage.unit=blk_count();d->storage.sectors=d->sectors;d->storage.block_size=d->sector_size;
  CHECK(blk_register(d)==0);
 }
 static void *owner=(void *)(uintptr_t)1;
@@ -80,7 +83,19 @@ int main(int argc,char **argv)
  sources[1]=sources[0];
  CHECK(blk_authority_review(&target,sources,&review)!=0); /* missing actual roles */
  CHECK(blk_authority_bind_boot_roles(0,&boot)!=0);
- CHECK(blk_authority_bind_boot_roles(&boot,&boot)==0); /* explicit kernel-observation model */
+ {shz_bootinfo_t bi={0};
+ bi.magic=SHZ_BOOTINFO_MAGIC;bi.abi_major=SHZ_ABI_MAJOR;bi.size=sizeof bi;bi.domain_id=SHZ_DOM_KERNEL64;
+ bi.flags=SHZ_BIF_UEFI_DIRECT;bi.initrd_gpa=0x2000000;bi.initrd_size=16;
+ bi.storage.magic=SHZ_STORAGE_MAGIC;bi.storage.version=SHZ_STORAGE_VERSION;bi.storage.size=sizeof bi.storage;
+ bi.storage.flags=SHZ_STORAGE_ARCHIVE_READ;bi.storage.boot=boot.storage;bi.storage.archive=boot.storage;
+ bi.storage.archive_gpa=bi.initrd_gpa;bi.storage.archive_size=bi.initrd_size;
+ CHECK(k64_boot_storage_bind(&bi,0)!=0);bi.size=472;CHECK(k64_boot_storage_bind(&bi,1)!=0);bi.size=sizeof bi;
+ bi.storage.version++;CHECK(k64_boot_storage_bind(&bi,1)!=0);bi.storage.version--;
+ bi.flags=0;CHECK(k64_boot_storage_bind(&bi,1)!=0);bi.flags=SHZ_BIF_UEFI_DIRECT;
+ bi.storage.archive_gpa++;CHECK(k64_boot_storage_bind(&bi,1)!=0);bi.storage.archive_gpa--;
+ bi.storage.boot.unit=31;CHECK(k64_boot_storage_bind(&bi,1)!=0);bi.storage.boot=boot.storage;
+ CHECK(k64_boot_storage_bind(&bi,1)==0); /* actual binder; loader/driver observations modeled */
+ }
  CHECK(blk_authority_review(&boot,sources,&review)!=0);
  CHECK(blk_authority_review(&source,sources,&review)!=0);
  CHECK(blk_authority_review(&partition,sources,&review)!=0);

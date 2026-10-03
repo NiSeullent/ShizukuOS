@@ -29,6 +29,7 @@
  * entry at 0xFFFFFFFF80100000 with RDI = 0x7000 after ExitBootServices.
  */
 #include "efi_ext.h"
+#include "storage_observe.h"
 #include "bootini.h"
 #include "../../uefi/boot.h"
 #include "../../abi/shz_abi.h"
@@ -60,6 +61,9 @@ static SD_HANDOFF g_handoff;
 static shz_blob_t g_blobs[SHZ_MAX_BLOBS];
 static bootini_policy_t g_policy;
 static uint64_t g_k32_ram, g_k64_ram, g_ipc;
+static EFI_HANDLE g_storage_volume;
+static shz_efi_storage_observation_t g_storage_observation;
+static int g_storage_known;
 
 static void say(const char *text)
 {
@@ -769,9 +773,17 @@ static EFI_STATUS k64_prepare(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
     if (read_cr4() & (1ull << 12))
         return k64_refuse("the firmware runs with 5-level paging (CR4.LA57); Kernel64 uses 4-level paging and "
                           "LA57 cannot be cleared in Long Mode", EFI_UNSUPPORTED);
-    status = open_boot_root(image, bs, 0, &root);
+    EFI_LOADED_IMAGE_PROTOCOL *storage_li=0;
+    shz_efi_storage_observation_t storage_before={0},storage_after={0};
+    g_storage_known=0;g_storage_volume=0;
+    status = open_boot_root(image, bs, &storage_li, &root);
     if (EFI_ERROR(status))
         return k64_refuse("cannot open the boot volume", status);
+
+    /* This exact root supplies both executable and RAM archive. Missing physical
+     * provenance limits install authority, never ordinary desktop boot. */
+    g_storage_volume=storage_li->device_handle;
+    const int storage_observed=!shz_efi_storage_observe(bs,g_storage_volume,&storage_before);
 
     /* Kernel image, initial RAM image, command line. */
     status = open_regular_file(root, kpath, &kfile, &g_k64.ksize);
@@ -940,6 +952,11 @@ static EFI_STATUS k64_prepare(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
     if (EFI_ERROR(status))
         return k64_refuse(installer ? "reading KERNEL64S.BIN or \\SHZ\\SETUP\\INSTALL.IMG failed"
                                    : "reading KERNEL64S.BIN or \\SHZDOS\\WIN64.IMG failed", status);
+    if(storage_observed&&g_k64.isize&&
+       !shz_efi_storage_observe(bs,g_storage_volume,&storage_after)&&
+       shz_efi_storage_same(&storage_before,&storage_after)) {
+        g_storage_observation=storage_after;g_storage_known=1;
+    }
     /* A Supervisor-profile KERNEL64.BIN would issue VMCALL (#UD without VMX) on its first line of output. Only the
      * -DSHZ_STANDALONE build carries the in-kernel COM1 exit path (kcommon/standalone_dev.h). */
     if (!bytes_contain((const uint8_t *)(uintptr_t)K64_KERNEL_PA, g_k64.ksize, "SHZ-EXIT:"))
@@ -989,6 +1006,12 @@ static EFI_STATUS k64_prepare(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
         bi->cmdline[i] = g_k64.cmdline[i];
     bi->cmdline[i] = 0;
     bi->cmdline_size = (uint32_t)i;
+    if(g_storage_known) {
+        bi->storage.magic=SHZ_STORAGE_MAGIC;bi->storage.version=SHZ_STORAGE_VERSION;
+        bi->storage.size=sizeof bi->storage;bi->storage.flags=SHZ_STORAGE_ARCHIVE_READ;
+        bi->storage.boot=g_storage_observation.whole;bi->storage.archive=g_storage_observation.whole;
+        bi->storage.archive_gpa=bi->initrd_gpa;bi->storage.archive_size=bi->initrd_size;
+    }
     if (!EFI_ERROR(bs->locate_protocol(&gop_guid, 0, (void **)&gop)) && gop) {
         status = sd_gop_select(bs, gop, &fb, &gop_selection);
         if (EFI_ERROR(status)) {
@@ -1070,6 +1093,10 @@ static EFI_STATUS k64_launch(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
     EFI_STATUS status;
 
     say("Kernel64 direct boot: ExitBootServices, then Long Mode entry at 0xffffffff80100000 with RDI=0x7000.\n");
+    shz_efi_storage_observation_t final_storage={0};
+    if(!g_storage_known||shz_efi_storage_observe(bs,g_storage_volume,&final_storage)||
+       !shz_efi_storage_same(&g_storage_observation,&final_storage))
+        zero(&bi->storage,sizeof bi->storage);
     status = sd_exit_boot_services(bs, image, &g_handoff);
     if (EFI_ERROR(status) && !g_handoff.exit_attempted) {
         say("REFUSED: ExitBootServices preparation failed");
