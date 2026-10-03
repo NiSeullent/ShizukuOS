@@ -63,7 +63,111 @@ def unverified(row,names):
     need(all(row.get(name) is False for name in names),'every runtime/publication assertion must be exactly false')
 
 
-def admit(raw,pins,selected_disk,expected_producers):
+BASE_PAYLOADS = frozenset(('KERNEL.SYS','COMMAND.COM','HIMEMX.EXE','CONFIG.SYS','AUTOEXEC.BAT'))
+GOP_PAYLOADS = BASE_PAYLOADS | frozenset(('SHZGOP.DRV','SHZGOP.VXD','SHZGOP.INF'))
+CALLER_PAYLOADS = GOP_PAYLOADS | frozenset(('GOPINST.EXE','GPREQ.INI'))
+NONCE_PAYLOADS = CALLER_PAYLOADS | frozenset(('SHZGOP/SHZGUARD.VXD','SHZGOP/SHZGOP.VXD',
+                                           'SHZGOP/GOPLOAD.EXE','SHZGOP/GPEPOCH.NON'))
+COHORT_RECORDS = frozenset(('baseline_profile','gop_stage','gop_profile','caller_stage','caller_profile',
+                           'nonce_stage','firstload_build'))
+
+
+def cohort_payloads(profile, expected):
+    need(type(profile) is dict and profile.get('schema') == 'shizukuos.private-replacement-profile.v1',
+         'source-linked cohort constructor schema required')
+    rows = profile.get('payloads');need(type(rows) is list and len(rows) == len(expected), 'exact cohort extent required')
+    result = {}
+    for row in rows:
+        need(type(row) is dict and set(row) == {'guest','file'} and type(row['guest']) is str and
+             row['guest'] in expected and row['guest'] not in result, 'exact unique cohort payload required')
+        result[row['guest']] = pin(row['file'],2<<20)
+    need(set(result) == expected, 'incomplete exact GOP cohort')
+    return result
+
+
+def derived_profile(before, after, old_names, new_names):
+    need(set(before) == set(after) and {k:v for k,v in before.items() if k != 'payloads'} ==
+         {k:v for k,v in after.items() if k != 'payloads'}, 'GOP staging changed original launch/source fields')
+    original = cohort_payloads(before,old_names);new = cohort_payloads(after,new_names)
+    need(all(new[n] == p for n,p in original.items()), 'GOP staging changed a preserved startup/driver payload')
+    return new
+
+
+def admit_cohort(context, final_profile, final_pin, launch_pin):
+    """Strict5→8→10→14 metadata chain; current policy comes from live owner.
+
+    This remains pure metadata. The caller must hold every descriptor/source
+    and derive live_policy directly from its retained same-process Attempt.
+    """
+    need(type(context) is dict and set(context) == {'records','producer_pins','live_policy'}, 'exact explicit GOP cohort context')
+    records = context['records'];need(type(records) is dict and set(records) == COHORT_RECORDS, 'complete7-record GOP lineage')
+    loaded = {}
+    for name,row in records.items():
+        need(type(row) is dict and set(row) == {'raw','pin'}, 'original cohort snapshot/pin pair required')
+        loaded[name] = snapshot(row['raw'],row['pin'],4<<20)
+    need(len({p['path'] for _,p in loaded.values()} | {final_pin['path'],launch_pin['path']}) == 9,
+         'distinct original cohort receipts/profiles required')
+    (base,basepin),(gop,goppin),(gp,gppin),(caller,callerpin),(cp,cppin),(nonce,noncep),(first,firstpin) = (
+        loaded[n] for n in ('baseline_profile','gop_stage','gop_profile','caller_stage','caller_profile','nonce_stage','firstload_build'))
+    gp_payloads = derived_profile(base,gp,BASE_PAYLOADS,GOP_PAYLOADS)
+    cp_payloads = derived_profile(gp,cp,GOP_PAYLOADS,CALLER_PAYLOADS)
+    final = derived_profile(cp,final_profile,CALLER_PAYLOADS,NONCE_PAYLOADS)
+    producer = context['producer_pins']
+    need(type(producer) is dict and set(producer) == {'gop_stage','caller_stage','nonce_stage'}, 'exact3 independent staging producer closures')
+    expected_names = {
+        'gop_stage':('gop_preinstall_profile.py','win98_source_profile.py','prepare_replacement.py'),
+        'caller_stage':('prepare.py','gop_preinstall_profile.py','win98_source_profile.py','prepare_replacement.py','build.py'),
+        'nonce_stage':('gop_nonce_staging.py','native_epoch_host.py','prepare_replacement.py')}
+    for name,row in (('gop_stage',gop),('caller_stage',caller),('nonce_stage',nonce)):
+        pins = producer[name];need(type(pins) is list and len(pins) == len(expected_names[name]), 'exact reviewed producer closure extent')
+        for p in pins:pin(p,1<<20)
+        need(tuple(PurePosixPath(p['path']).name for p in pins) == expected_names[name] and row.get('producer_inputs') == pins,
+             'staging producer differs from independently held source closure')
+    need(gop.get('schema') == 'shizukuos.private-gop-preinstall-profile.v1' and
+         gop.get('status') == 'PRIVATE_GOP_PAYLOADS_PREPARED_NOT_INSTALLED' and
+         gop.get('constructor_profile') == gppin and gop.get('launch_profile') == launch_pin and
+         gop.get('staged_payloads') == {n:gp_payloads[n] for n in ('SHZGOP.DRV','SHZGOP.VXD','SHZGOP.INF')},
+         'exact source-bound8 GOP staging crosslinks required')
+    need(caller.get('schema') == 'shizukuos.private-live-gop-stage.v1' and
+         caller.get('status') == 'PRIVATE_CALLER_REQUEST_STAGED_NOT_EXECUTED' and caller.get('source_gop_profile') == goppin and
+         caller.get('constructor_profile') == cppin and type(caller.get('utility_payloads')) is list and
+         len(caller['utility_payloads']) == 2 and
+         {p['guest']:p['file'] for p in caller['utility_payloads']} == {n:cp_payloads[n] for n in ('GOPINST.EXE','GPREQ.INI')},
+         'exact source-bound10 caller staging crosslinks required')
+    for row in (gop,caller):
+        unverified(row,('public_artifact','VM_executed','default_GOP_registered','Windows98_boot_verified','Supervisor_epoch_verified'))
+        need((row.get('guardian_epoch_query_opcode'),row.get('guardian_epoch_query_bytes'),row.get('guardian_epoch_HCALL')) ==
+             ('0x4f11',160,14), 'actual HC14 epoch160B source cohort required')
+    provider = sha(gop.get('live_provider_identity_sha256'))
+    need(caller.get('live_provider_identity_sha256') == provider and first.get('gop_provider_identity_sha256') == provider and
+         first.get('gop_vxd_sha256') == final['SHZGOP.VXD']['sha256'] and
+         first.get('gop_receipt_sha256') == gop.get('gop_receipt',{}).get('sha256'), 'firstload/caller/display provider cohort differs')
+    need(first.get('status') == 'PASS_SOURCE_BUILD_NOT_EXECUTED', 'readonly firstload build producer required')
+    unverified(first,('guest_executed','default_changed','mode_changed','gpu_active_verified'))
+    need(nonce.get('schema') == 'shizukuos.private-gop-nonce-stage.v1' and
+         nonce.get('status') == 'PROSPECTIVE_CURRENT_ATTEMPT_STAGED_NOT_GRANTED' and nonce.get('same_process_staging') is True and
+         nonce.get('source_live_stage') == callerpin and nonce.get('source_firstload_build') == firstpin and
+         nonce.get('source_constructor_profile') == cppin and nonce.get('constructor_profile') == final_pin and
+         nonce.get('nonce_payload') == final['SHZGOP/GPEPOCH.NON'] and final['SHZGOP/GPEPOCH.NON']['bytes'] == 32 and
+         final['SHZGOP/SHZGOP.VXD'] == final['SHZGOP.VXD'], 'same prospective nonce14 profile crosslinks required')
+    for name in ('SHZGUARD.VXD','GOPLOAD.EXE'):
+        actual = final['SHZGOP/'+name]
+        need(nonce.get('staged_firstload_payloads',{}).get(name) == actual and first.get('artifacts',{}).get(name) ==
+             {'bytes':actual['bytes'],'sha256':actual['sha256']}, 'staged firstload artifact differs from exact source producer')
+    unverified(nonce,('public_artifact','VM_executed','default_GOP_registered','Windows98_boot_verified','HostGrant_transmitted'))
+    policy = context['live_policy']
+    need(type(policy) is dict and set(policy) == {'policy_sha256','nonce_sha256','original_host_deadline_ns'}, 'actual retained owner policy binding required')
+    sha(policy['policy_sha256']);sha(policy['nonce_sha256'])
+    need(type(policy['original_host_deadline_ns']) is int and 0 < policy['original_host_deadline_ns'] < 1<<64 and
+         all(nonce.get(k) == v for k,v in policy.items()) and policy['nonce_sha256'] == final['SHZGOP/GPEPOCH.NON']['sha256'],
+         'staged disk belongs to another owner policy/nonce/deadline')
+    return base,basepin,{'schema':'shizukuos.private-native-gop-cohort-lineage.v1',
+        'record_pins':{n:p for n,(_,p) in loaded.items()},'producer_pins':copy.deepcopy(producer),
+        'current_policy_binding':copy.deepcopy(policy),'HostGrant_transmitted':False,'Windows98_boot_verified':False,
+        'default_GOP_registered':False,'scope':'Prospective preparation binding only; no runtime authority.'}
+
+
+def admit(raw,pins,selected_disk,expected_producers,*,gop_cohort=None):
     """Admit three explicitly pinned snapshots, returning preparation metadata.
 
     Order: generated constructor profile, source-profile receipt, constructor
@@ -83,7 +187,9 @@ def admit(raw,pins,selected_disk,expected_producers):
     need(original['bytes']==DISK_BYTES and original['path']!=disk['path'] and original['sha256']!=disk['sha256'],
          'replacement disk must differ from its original source identity and bytes')
     dos=pin(profile['build_receipt'],1<<20)
-    payloads=profile['payloads']
+    baseline,baseline_pin,cohort_proof = (profile,profile_pin,None)
+    if gop_cohort is not None:baseline,baseline_pin,cohort_proof = admit_cohort(gop_cohort,profile,profile_pin,launch_pin)
+    payloads=baseline['payloads']
     need(isinstance(payloads,list) and len(payloads)==5,'five unique launch payloads required')
     names=set()
     for member in payloads:
@@ -101,7 +207,7 @@ def admit(raw,pins,selected_disk,expected_producers):
          'source-generated launch receipt required')
     unverified(launch,(*RUNTIME_FLAGS,'public_artifact','installed_Windows98_version_verified',
                        'drive_mapping_verified','native_bootability_verified'))
-    need(launch.get('constructor_profile')==profile_pin and launch.get('source_disk')==original,
+    need(launch.get('constructor_profile')==baseline_pin and launch.get('source_disk')==original,
          'launch receipt must bind this exact generated profile and original disk')
     need(launch.get('boot_policy')=='shz.foundation=win98','explicit native Windows foundation policy required')
     windows=launch.get('observed_windows_path')
@@ -149,7 +255,7 @@ def admit(raw,pins,selected_disk,expected_producers):
     count,unchanged=prepared.get('existing_members'),prepared.get('unchanged_original_members')
     need(type(count) is int and count>0 and type(unchanged) is int and 0<=unchanged<=count,
          'bounded original-member preservation counts required')
-    return {'schema':'shizukuos.private-native-disk-lineage.v1',
+    return {**({'gop_cohort':cohort_proof} if cohort_proof is not None else {}),'schema':'shizukuos.private-native-disk-lineage.v1',
             'disk_origin':'source-built-private-replacement-prepared-not-booted',
             'constructor_profile':profile_pin,'launch_receipt':launch_pin,'preparation_receipt':prepared_pin,
             'source_disk':original,'replacement_disk':disk,'producer_source_pins':producers,

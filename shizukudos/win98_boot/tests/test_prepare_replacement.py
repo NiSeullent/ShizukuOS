@@ -464,6 +464,29 @@ class ReplacementPrepare(ReplacementInventory):
                 path.write_bytes(b'N'*32 if name.endswith('GPEPOCH.NON') else name.encode());pin = self.pin(path)
             self.profile['payloads'].append({'guest':name,'file':pin})
 
+    def test_real_borrowed_guardian_union_keeps_original_leases_and_handler(self):
+        import fcntl, signal
+        tool = Path(__file__).resolve().parents[2]/'supervisor/native_win98/task_custody.py'
+        definition=importlib.util.spec_from_file_location('borrowed_constructor_custody',tool)
+        custody=importlib.util.module_from_spec(definition);definition.loader.exec_module(custody)
+        union=custody.LeaseUnion();handler=signal.getsignal(signal.SIGIO)
+        entries=prep.LeaseRegistry()
+        def add(rows):
+            for row in rows:entries[row['path']]={**union.add(row),'checkpoint':union.check}
+        entries.add_inputs=add
+        try:
+            self.gop_cohort();self.profile_path.write_text(json.dumps(self.profile))
+            profile_pin=self.pin(self.profile_path);add([profile_pin,self.profile['disk']]);original_fd=entries[str(self.disk)]['fd']
+            with patch.object(prep,'available_bytes',return_value=1<<40):
+                result=prep.prepare(self.profile_path,profile_pin['sha256'],self.root/'borrowed',
+                      'full',self.disk.stat().st_size,1<<20,borrowed_inputs=entries)
+            self.assertEqual(result['status'],'PREPARED_PRIVATE_REPLACEMENT_NOT_BOOTED')
+            self.assertEqual(entries[str(self.disk)]['fd'],original_fd)
+            self.assertEqual(fcntl.fcntl(original_fd,fcntl.F_GETLEASE),fcntl.F_RDLCK)
+            self.assertEqual(signal.getsignal(signal.SIGIO),handler)
+            union.check();self.assertFalse(union.closed)
+        finally:union.close()
+
     def test_real_nested_gop_clone_readback_preserves_all_original_bytes(self):
         self.gop_cohort();original = self.disk.read_bytes();out = self.root/'nested'
         result = self.prepare(out);after = self.inventory(out/'replacement.img')

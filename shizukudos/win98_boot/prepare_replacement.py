@@ -151,6 +151,34 @@ def leased_inputs(rows):
         signal.signal(signal.SIGIO, previous)
 
 
+@contextlib.contextmanager
+def input_scope(rows, borrowed=None):
+    """An explicit live guardian registry may borrow its already held FDs.
+
+    Ownership never transfers: this scope installs no SIGIO handler and neither
+    unlocks nor closes the guardian's original descriptors.
+    """
+    if borrowed is None:
+        with leased_inputs(rows) as entries:yield entries
+        return
+    need(type(borrowed) is LeaseRegistry and callable(getattr(borrowed,'add_inputs',None)),
+         'actual source-admitted borrowed registry required')
+    borrowed.add_inputs(rows)
+    for row in rows:
+        path = pin_fields(row);entry = borrowed[str(path)]
+        need(entry['pin'] == row and callable(entry.get('checkpoint')), 'exact borrowed source descriptor/checkpoint required')
+        entry['checkpoint']();fd = entry['fd'];info = os.fstat(fd)
+        need(stat.S_ISREG(info.st_mode) and info.st_size == row['bytes'] and
+             identity(info) == identity(path.stat()) and
+             fcntl.fcntl(fd,fcntl.F_GETFL)&os.O_ACCMODE == os.O_RDONLY and
+             fcntl.fcntl(fd,fcntl.F_GETLEASE) == fcntl.F_RDLCK and
+             fcntl.fcntl(fd,fcntl.F_GETOWN) == os.getpid(), 'actual current-process borrowed read lease required')
+        need(hash_fd(fd,row['bytes'],entry['checkpoint']) == row['sha256'], 'borrowed descriptor full SHA mismatch')
+    try:yield borrowed
+    finally:
+        for entry in borrowed.values():entry['checkpoint']()
+
+
 GOP_ROOT = frozenset(('KERNEL.SYS','COMMAND.COM','HIMEMX.EXE','CONFIG.SYS','AUTOEXEC.BAT',
                       'SHZGOP.DRV','SHZGOP.VXD','SHZGOP.INF','GOPINST.EXE','GPREQ.INI'))
 GOP_NESTED = frozenset(('SHZGOP/SHZGUARD.VXD','SHZGOP/SHZGOP.VXD',
@@ -472,7 +500,7 @@ def verify_template(upstream, kind, template, commands):
         need(target.stat().st_size == 512 and target.read_bytes() == template, 'boot template differs from actual pinned source assembly')
 
 
-def prepare(profile_path, profile_sha, out, mode, copy_budget, capture_budget, *, validate_only=False, large_output_root=None):
+def prepare(profile_path, profile_sha, out, mode, copy_budget, capture_budget, *, validate_only=False, large_output_root=None, borrowed_inputs=None):
     profile_path, out = safe_path(profile_path), safe_path(out)
     private_output(out)
     if out.exists() or out.is_symlink(): raise FileExistsError(out)
@@ -482,7 +510,7 @@ def prepare(profile_path, profile_sha, out, mode, copy_budget, capture_budget, *
          'approved literal nonzero profile SHA256 required')
     first = local_pin(profile_path, profile_sha)
     commands = []
-    with leased_inputs([first]) as original:
+    with input_scope([first],borrowed_inputs) as original:
         profile = bounded_json(original[str(profile_path)])
         need(isinstance(profile, dict) and set(profile) == {'schema','disk','boot_template','freedos_source','build_receipt','build_source_root','payloads'} and
              profile['schema'] == 'shizukuos.private-replacement-profile.v1', 'exact private replacement profile required')
@@ -505,7 +533,7 @@ def prepare(profile_path, profile_sha, out, mode, copy_budget, capture_budget, *
                  local_pin(upstream/'boot/magic.mac', BOOT_SOURCE_SHA['magic.mac'])]
         original[str(profile_path)]['checkpoint']()
     # The profile is re-pinned together with every input. No nested SIGIO handlers.
-    with leased_inputs(rows) as sources:
+    with input_scope(rows,borrowed_inputs) as sources:
         receipt = bounded_json(sources[receipt_pin['path']])
         need(isinstance(receipt,dict) and receipt.get('profile') == 'dos16-freedos', 'actual dos16 build receipt required; generic PASS refused')
         for name, commit in (('freedos-kernel',KERNEL_COMMIT),('freedos-freecom',FREECOM_COMMIT)):

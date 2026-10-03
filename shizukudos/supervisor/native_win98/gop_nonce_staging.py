@@ -37,6 +37,22 @@ def metadata(held,pin,replacement):
     return json.loads(read(held,pin,replacement),object_pairs_hook=replacement.json_pairs)
 
 
+def borrowed_registry(union, replacement, guard):
+    """Adapt one source-admitted guardian union; never reopen or close inputs."""
+    need(callable(guard), 'actual task guard required')
+    entries = replacement.LeaseRegistry()
+    def add(rows):
+        guard()
+        for pin in rows:
+            source = union.add(pin)
+            need(source['pin'] == pin and source.get('full_SHA_admitted') is True,
+                 'original guardian full-SHA admission required')
+            entries[pin['path']] = {**source,'checkpoint':guard}
+        guard()
+    entries.add_inputs = add
+    return entries
+
+
 def compose(profile, live, firstload, artifacts, nonce_pin, replacement):
     """Pure shape/binding checks only; this does not admit a saved nonce."""
     profile = copy.deepcopy(profile)

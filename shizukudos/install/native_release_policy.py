@@ -4,7 +4,7 @@
 Missing native anchors deliberately refuse issuance. Updates require independent
 actual build readback; neither a runtime request nor a receipt can extend these.
 """
-INGEST_SHA = 'b07ddd9673e1e99c192e41971780d04ab5e6b9d9d3e026f4ef831715e0c0f655'
+INGEST_SHA = 'dc6e399fd93cb1c0a3b1f7eea3eb95a45e472c4ba7a003ce263fea99b249a168'
 DOS_RECEIPT = (16995, 'dee0c06ae35bae41efd8db0d53dc391a767cf5d4abe289872bb1dc9c78696b0c')
 DOS_ARTIFACTS = {
     'KERNEL.SYS': (72751, 'a9be199f1ac10f0b6e73abb0b27e6a272f7e786ee1561e47e178b92553d1687d'),
