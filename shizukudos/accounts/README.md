@@ -40,6 +40,11 @@ internal names cannot be pre-seeded. Activated raw-device, driver, registry
 mutation, file/profile and file-backed section operations have admission
 checks. Shared named pipes and clipboard currently fail closed after account
 activation. These limits may prevent applications that depend on those APIs.
+File operations enforce each referenced handle's concrete rights, including
+handles duplicated with fewer rights. Read, write, append, attributes, rename,
+delete and overwrite checks run before mutation. Append-only handles write at
+EOF. The asynchronous file router retains the same object and grant through
+request preparation; refusal does not reset an event or allocate an IRP.
 Fresh sandbox policy also applies before first enrollment: writes, privileged
 devices, mutable registry, shared pipes/clipboard and all network operations
 are denied. Its named objects use a separate namespace and no handles are
@@ -64,6 +69,7 @@ state their scope; none prove Windows98 guest execution.
 python3 -B shizukudos/tests/run_accounts_host.py --out build/accounts-check
 python3 -B shizukudos/tests/test_auth_admission.py --label accounts-check
 python3 -B shizukudos/tests/test_auth_creation.py --help
+python3 -B shizukudos/tests/test_file_rights_host.py --label accounts-check --reuse-control
 python3 -B shizukudos/tests/test_token_rights.py --label accounts-check
 python3 -B shizukudos/tests/test_token_identity.py --help
 python3 -B shizukudos/tests/test_kdf_reference.py --out build/kdf-check

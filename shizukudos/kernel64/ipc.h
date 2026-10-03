@@ -231,4 +231,7 @@ extern int64_t stack_arg(process_t *p, struct regs *r, unsigned n);
 extern int32_t user_exception_continue(process_t *p, struct regs *r, uint64_t context_va, uint64_t record_va, int is_raise);
 extern int32_t sysfile_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3,
                                 uint64_t a4, int *handled);
+/* Caller retains the captured OB_FILE reference and its matching handle grant. */
+extern int32_t sysfile_rw_captured(process_t *p, struct regs *r, uint32_t num, uint64_t handle, kobject_t *held, uint32_t access);
+extern void file_object_closed(kobject_t *o);
 #endif
