@@ -1065,19 +1065,31 @@ int32_t k32_get_context_thread(process_t *p, uint64_t handle, uint64_t context_v
     uint8_t ctx[CTX_SIZE];
     struct regs frame;
     uint8_t fx[512] __attribute__((aligned(16)));
-    thread_t *t = 0;
+    thread_t *t;
+    process_t *owner;
     kobject_t *o = 0;
     uint32_t flags;
     uint64_t f;
     int have_frame;
-    if (handle == CURRENT_THREAD_HANDLE) t = thread_current();
-    else if (!(o = handle_lookup(p, handle, OB_THREAD))) return STATUS_INVALID_HANDLE;
-    if (copy_from_user(p, ctx, context_va, sizeof ctx)) return STATUS_ACCESS_VIOLATION;
+    /* Use the common typed handle policy and validate pseudo-current identity
+     * before any caller memory access. Retain the object through both copies;
+     * a user-copy fault may schedule handle close and TCB reclamation. */
+    int32_t st = ref_settings_object(p, handle, OB_THREAD, 0x0008u /* THREAD_GET_CONTEXT */, &o);
+    if (st) return st;
+    if (copy_from_user(p, ctx, context_va, sizeof ctx)) { st = STATUS_ACCESS_VIOLATION; goto done; }
     flags = *(uint32_t *)(ctx + 0x30);
-    if ((flags & CTX_AMD64) != CTX_AMD64) return STATUS_INVALID_PARAMETER;
+    if ((flags & CTX_AMD64) != CTX_AMD64) { st = STATUS_INVALID_PARAMETER; goto done; }
     f = irq_save();
-    if (o) t = o->u.thr.t;
-    if (!t || t->state == TS_ZOMBIE || !t->teb) { irq_restore(f); return STATUS_THREAD_IS_TERMINATING; }
+    t = o->u.thr.t;
+    owner = t ? t->proc : 0;
+    if (!t) st = STATUS_THREAD_IS_TERMINATING;
+    else if (t->object != o || t->state == TS_FREE || !owner || !owner->used || !owner->object ||
+             owner->object->type != OB_PROCESS || owner->object->u.proc.p != owner ||
+             o->u.thr.pid != (uint64_t)owner->pid || o->u.thr.tid != t->tid)
+        st = STATUS_INVALID_HANDLE;
+    else if (t->state == TS_ZOMBIE || !t->teb || owner->teardown || thread_must_die(t))
+        st = STATUS_THREAD_IS_TERMINATING;
+    if (st) { irq_restore(f); goto done; }
     /* A thread that has run is inside the kernel whenever it is not running (a system call or an interrupt from ring 3), and its
      * user-mode register frame sits at the top of its kernel stack; the current thread is in this very system call. A thread that
      * never ran has no frame yet: its context is the initial one the kernel will enter user mode with. */
@@ -1110,5 +1122,8 @@ int32_t k32_get_context_thread(process_t *p, uint64_t handle, uint64_t context_v
     }
     if ((flags & (CTX_AMD64 | 0x10)) == (CTX_AMD64 | 0x10))       /* CONTEXT_DEBUG_REGISTERS: none are ever armed */
         memset(ctx + 0x48, 0, 6 * 8);
-    return copy_to_user(p, context_va, ctx, sizeof ctx) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
+    st = copy_to_user(p, context_va, ctx, sizeof ctx) ? STATUS_ACCESS_VIOLATION : STATUS_SUCCESS;
+done:
+    ob_deref(o);
+    return st;
 }
