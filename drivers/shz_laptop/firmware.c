@@ -27,14 +27,14 @@ static int table_header(struct firmware_reader *r,uint64_t pa,uint8_t *header,
     if(error)return error;
     n=shz_le32(header+4);
     if(n<SDT_HEADER || pa>UINT64_MAX-(n-1u))return SHZ_MALFORMED;
-    *bytes=n;return SHZ_OK;
+    *bytes=n;return SHZ_DRIVER_OK;
 }
 static int snapshot(struct firmware_reader *r,uint64_t pa,const uint8_t *header,
                     uint8_t *buffer,size_t bytes) {
     int error=read_bytes(r,pa,buffer,bytes);
     if(error)return error;
     if(!same(header,buffer,SDT_HEADER))return SHZ_STALE;
-    return add_bytes(0,buffer,bytes) ? SHZ_MALFORMED:SHZ_OK;
+    return add_bytes(0,buffer,bytes) ? SHZ_MALFORMED:SHZ_DRIVER_OK;
 }
 /* Unknown tables are checksum-validated without interpreting their payload.
  * Retain and compare the actual header on the first streamed read, so a changed
@@ -50,7 +50,7 @@ static int stream_table(struct firmware_reader *r,uint64_t pa,const uint8_t *hea
         if(!offset && !same(header,buffer,SDT_HEADER))return SHZ_STALE;
         sum=add_bytes(sum,buffer,count);offset+=count;
     }
-    return sum ? SHZ_MALFORMED:SHZ_OK;
+    return sum ? SHZ_MALFORMED:SHZ_DRIVER_OK;
 }
 static int root_address(struct firmware_reader *r,uint64_t pa,uint64_t *root,
                         uint8_t *revision,uint8_t *xsdt) {
@@ -61,7 +61,7 @@ static int root_address(struct firmware_reader *r,uint64_t pa,uint64_t *root,
         return SHZ_MALFORMED;
     *revision=first[15];*xsdt=0;*root=shz_le32(first+16);
     if(*revision==1)return SHZ_UNSUPPORTED;
-    if(!*revision)return *root ? SHZ_OK:SHZ_NOT_FOUND;
+    if(!*revision)return *root ? SHZ_DRIVER_OK:SHZ_NOT_FOUND;
     error=read_bytes(r,pa,header,sizeof(header));if(error)return error;
     if(!same(first,header,sizeof(first)))return SHZ_STALE;
     bytes=shz_le32(header+20);
@@ -76,7 +76,7 @@ static int root_address(struct firmware_reader *r,uint64_t pa,uint64_t *root,
     }
     if(sum)return SHZ_MALFORMED;
     if(shz_le64(header+24)) {*root=shz_le64(header+24);*xsdt=1;}
-    return *root ? SHZ_OK:SHZ_NOT_FOUND;
+    return *root ? SHZ_DRIVER_OK:SHZ_NOT_FOUND;
 }
 int shz_laptop_firmware_probe(shz_firmware_read_fn read,void *context,
                              uint64_t rsdp_pa,struct shz_laptop_firmware *out) {
@@ -131,5 +131,5 @@ int shz_laptop_firmware_probe(shz_firmware_read_fn read,void *context,
         }
     }
     if(!found.fadt_pa)return SHZ_NOT_FOUND;
-    shz_copy(out,&found,sizeof(found));return SHZ_OK;
+    shz_copy(out,&found,sizeof(found));return SHZ_DRIVER_OK;
 }

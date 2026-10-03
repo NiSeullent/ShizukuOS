@@ -46,7 +46,7 @@ static int read_firmware(void *context,uint64_t pa,void *out,size_t bytes) {
         }
         memcpy(out,r->data+(size_t)offset,bytes);
         if(f->calls==f->change_call && bytes>=36)((uint8_t *)out)[10]^=1u;
-        return SHZ_OK;
+        return SHZ_DRIVER_OK;
     }
     return SHZ_IO;
 }
@@ -93,7 +93,7 @@ static void valid(void) {
     struct fixture f;struct shz_laptop_firmware out;int mode;unsigned i;
     for(mode=0;mode<2;mode++) {
         setup(&f,mode);memset(&out,0xa5,sizeof(out));
-        C(shz_laptop_firmware_probe(read_firmware,&f,f.rsdp_pa,&out)==SHZ_OK);
+        C(shz_laptop_firmware_probe(read_firmware,&f,f.rsdp_pa,&out)==SHZ_DRIVER_OK);
         C(out.rsdp_pa==f.rsdp_pa && out.root_pa==f.root_pa);
         C(out.fadt_pa==f.fadt_pa && out.ecdt_pa==f.ecdt_pa);
         C(out.rsdp_revision==(mode ? 2:0) && out.uses_xsdt==mode);
@@ -103,11 +103,11 @@ static void valid(void) {
         C(f.bytes==(mode ? 623u:575u));
     }
     setup(&f,0);rsdp_sum(2,36);
-    C(shz_laptop_firmware_probe(read_firmware,&f,f.rsdp_pa,&out)==SHZ_OK && !out.uses_xsdt);
+    C(shz_laptop_firmware_probe(read_firmware,&f,f.rsdp_pa,&out)==SHZ_DRIVER_OK && !out.uses_xsdt);
     setup(&f,1);rsdp_sum(3,36);
-    C(shz_laptop_firmware_probe(read_firmware,&f,f.rsdp_pa,&out)==SHZ_OK && out.rsdp_revision==3);
+    C(shz_laptop_firmware_probe(read_firmware,&f,f.rsdp_pa,&out)==SHZ_DRIVER_OK && out.rsdp_revision==3);
     setup(&f,1);root_entries(&f,1,1);f.regions[1].bytes=44;
-    C(shz_laptop_firmware_probe(read_firmware,&f,f.rsdp_pa,&out)==SHZ_OK);
+    C(shz_laptop_firmware_probe(read_firmware,&f,f.rsdp_pa,&out)==SHZ_DRIVER_OK);
     C(!out.has_ecdt && !out.ecdt_pa && !out.ec.control.address);
     setup(&f,1);root_entries(&f,SHZ_FIRMWARE_ROOT_ENTRIES,1);
     f.regions[1].bytes=36u+SHZ_FIRMWARE_ROOT_ENTRIES*8u;
@@ -116,20 +116,20 @@ static void valid(void) {
         put64(root+36u+i*8u,pa);f.regions[f.count++]=(struct region){pa,other,36};
     }
     checksum(root,f.regions[1].bytes,9);
-    C(shz_laptop_firmware_probe(read_firmware,&f,f.rsdp_pa,&out)==SHZ_OK);
+    C(shz_laptop_firmware_probe(read_firmware,&f,f.rsdp_pa,&out)==SHZ_DRIVER_OK);
     C(out.entry_count==SHZ_FIRMWARE_ROOT_ENTRIES && f.overflow==0);
     setup(&f,1);f.root_pa=UINT64_MAX-59u;f.regions[1].pa=f.root_pa;
     put64(rsdp+24,f.root_pa);rsdp_sum(2,36);
-    C(shz_laptop_firmware_probe(read_firmware,&f,f.rsdp_pa,&out)==SHZ_OK);
+    C(shz_laptop_firmware_probe(read_firmware,&f,f.rsdp_pa,&out)==SHZ_DRIVER_OK);
     setup(&f,1);f.fadt_pa=UINT64_MAX-243u;f.regions[2].pa=f.fadt_pa;
     put64(root+36,f.fadt_pa);checksum(root,60,9);
-    C(shz_laptop_firmware_probe(read_firmware,&f,f.rsdp_pa,&out)==SHZ_OK);
+    C(shz_laptop_firmware_probe(read_firmware,&f,f.rsdp_pa,&out)==SHZ_DRIVER_OK);
     setup(&f,1);table(other,8192,"SSDT");checksum(other,8192,9);f.regions[4].bytes=8192;
-    C(shz_laptop_firmware_probe(read_firmware,&f,f.rsdp_pa,&out)==SHZ_OK);
+    C(shz_laptop_firmware_probe(read_firmware,&f,f.rsdp_pa,&out)==SHZ_DRIVER_OK);
     C(f.max_read<=SHZ_TABLE_MAX);
     setup(&f,1);put32(rsdp+20,SHZ_FIRMWARE_RSDP_MAX);rsdp[4095]=7;
     rsdp_sum(2,SHZ_FIRMWARE_RSDP_MAX);f.regions[0].bytes=SHZ_FIRMWARE_RSDP_MAX;
-    C(shz_laptop_firmware_probe(read_firmware,&f,f.rsdp_pa,&out)==SHZ_OK);
+    C(shz_laptop_firmware_probe(read_firmware,&f,f.rsdp_pa,&out)==SHZ_DRIVER_OK);
 }
 static void malformed(void) {
     struct fixture f;
