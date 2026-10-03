@@ -15,8 +15,13 @@ DOS_ARTIFACTS = {
 WATCOM_SHA = '4fdc24c04a02e31ffedae1690fc2c6d53fcb01464f92692adf6b17a7e890af3f'
 # Exact native producer source-map canonical digest and artifact extents/digests
 # must come from the separately reviewed actual producer, not this generator.
-NATIVE_SOURCE_MAP_SHA = None
-NATIVE_ARTIFACTS = None
+NATIVE_SOURCE_MAP_SHA = 'f63fcfa40cbe0fb4b6c0e3290071b1ca20bd35776c411d046320797ab73a372f'
+NATIVE_ARTIFACTS = {
+    'KERNEL32.BIN': (52796, '87efaee8b0d51493520d5ed51595a5dd7ae0c087984d4dc1c9ed61c7a0f9c882'),
+    'KERNEL64.BIN': (857424, '0a0be153b005c51b91975d93d0f21088956f2e8e50a7009d6c2c16bb97509640'),
+    'BOOTX64.EFI': (243200, '4ddaa2cd3c208ad02032a0a83c00af0dfd9cecdd1ed08b9d70c84c7d71ab4ab5'),
+    'WIN64.IMG': (23413535, 'de87d66af6444fde1de0b51c479e12a8afaf6e36743baa54d81f0afc87fe763d'),
+}
 # Actual source-built public BIOS, independently checked against the producer's
 # complete source archive, generated inputs, original tools and closed unit.
 # Native ESP production must use these exact bytes; old packaged BIOS refuses.
