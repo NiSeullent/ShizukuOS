@@ -41,3 +41,13 @@ retained, the proof's scope and the next native acceptance gate. Historical
 resource thresholds belong to their recorded experiment. New work follows the
 current owner's explicit capacity admission without retroactively weakening
 old evidence or changing another session's running inputs.
+
+The user also requires periodic DOS development commits in the independent
+[ShizukuDOS repository](https://github.com/NiSeullent/ShizukuDOS). Treat that
+repository as the standalone DOS shell / ShizukuOS Core, preserving its offline
+default, native ABI, shell and independent source history. Share reviewed DOS
+source changes on tested source epochs, with exact commit/path/hash provenance
+and corresponding licenses. Check dependencies and target-specific behavior;
+three-way source-only classification alone does not prove compatibility. Keep
+Windows startup/frontend/installer changes and private media in their existing
+product lanes. Each repository retains its own build and runtime acceptance.

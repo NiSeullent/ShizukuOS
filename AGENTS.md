@@ -13,6 +13,14 @@ Completion requires actual Windows 98 running on ShizukuDOS, with the requested
 drivers, acceleration and applications. A boot through original Microsoft DOS
 is a control result, not evidence that ShizukuDOS has replaced it.
 
+Periodically commit reviewed shared DOS development to
+https://github.com/NiSeullent/ShizukuDOS as well. That repository has its own
+independent DOS shell / ShizukuOS Core scope and offline build defaults. Preserve
+its separate ABI, shell and local development; inspect dependencies and both
+histories before moving exact source changes. Windows integration, installation
+media and product-specific frontend changes stay in this repository. Source
+sync commits require their own relevant tests and do not inherit VM acceptance.
+
 Keep this contract in delegated tasks and handoffs. The current implementation
 and remaining DOS-to-VMM and service connections are described in
 `docs/SHIZUKUDOS_WINDOWS98_ARCHITECTURE.md` and
