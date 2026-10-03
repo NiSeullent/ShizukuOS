@@ -40,6 +40,10 @@ static struct proc *current_proc(void)
 static void proc_thread(void *arg)
 {
     struct proc *p = arg;
+    /* The thread trampoline enables IRQs. Keep CPU identity and CR3/TSS
+     * publication indivisible through enter_user's GS change; IRETD restores
+     * user IF from its 0x202 frame after the privilege transition. */
+    cli();
     write_cr3(p->pd);
     tss_set_kernel_stack(thread_current()->stack_base + 16384);
     enter_user(p->entry, USER_STACK_TOP - 16);

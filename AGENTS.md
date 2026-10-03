@@ -34,7 +34,7 @@ ReactOS의 커널·executive·Win32 계약과 Wine의 API·로더·객체 수명
 
 현재 기준은 `docs/INTEGRATED_ARCHITECTURE.md`와
 `docs/SHIZUKU_HYBRID_TRANSITION.md`에 있다. 위임·인계에도 이 기준을 전달한다.
-이전 계약 원문은 `docs/merge-history/20261003/kernel-transition/`에 보존한다.
+이전 계약 원문은 [d612d9f의 AGENTS.md](https://github.com/NiSeullent/Win98-Modern/blob/d612d9f36854c9c6bd2a2a8bd895e99e762fbca7/AGENTS.md)에 보존한다.
 기존 감사·실패·부팅·앱 증거의 범위를 바꾸지 않는다. 호스트 시험, 독립 커널
 시험, 원본 Microsoft DOS 제어군과 실제 혼합 OS 통합 시험을 구별한다.
 기존 15개 기능·앱·보안·설치 요구는 `docs/SHIZUKUOS_FULL_GOAL_ACCEPTANCE.md`를
@@ -55,7 +55,8 @@ Prioritize actual 64-bit boot, installation and recognized working drivers;
 Chromium, Legcord, latest open-source Office and Steam remain required in parallel.
 Use Sonnet 5.5 or Opus 5.5 and an appropriate effort level for the task. Code
 first, then inexpensive affected-source checks; coordinate actual VM acceptance
-after integration. Preserve failed evidence and distinguish component checks
+after integration. Installation/boot/driver qualification also retains all mandatory
+application, account and security release gates. Preserve failed evidence and distinguish component checks
 from guest installation and useful application operation.
 
 For long tasks maintain a short private `.codex/task-state.md` with changed
