@@ -58,6 +58,35 @@ def private_output(path):
         return
 
 
+def large_output_scope(out, disk_bytes, explicit_root=None):
+    """Select a private work area without weakening copy/lease/capacity rules."""
+    if explicit_root is not None:
+        root = safe_path(explicit_root)
+        private_output(root/'output-policy-probe')
+        st = root.stat()
+        need(stat.S_ISDIR(st.st_mode) and st.st_uid == os.geteuid() and
+             stat.S_IMODE(st.st_mode) == 0o700,
+             'explicit large-output root must be an existing owned mode-0700 directory')
+        need(out != root and out.is_relative_to(root),
+             'fresh output must be strictly below the explicit private root')
+        return {'kind':'explicit-owned-private-root','path':str(root),
+                'device':st.st_dev,'inode':st.st_ino}
+    need(disk_bytes <= 64 << 20 or out.is_relative_to(LANE),
+         'large private copies require the reserved NAS lane or an explicit owned private root')
+    return {'kind':'small-control' if disk_bytes <= 64 << 20 else 'reserved-NAS-lane',
+            'path':None if disk_bytes <= 64 << 20 else str(LANE)}
+
+
+def check_output_scope(scope):
+    if scope['kind'] != 'explicit-owned-private-root':
+        return
+    root = safe_path(scope['path']); st = root.stat()
+    need(stat.S_ISDIR(st.st_mode) and st.st_uid == os.geteuid() and
+         stat.S_IMODE(st.st_mode) == 0o700 and
+         (st.st_dev,st.st_ino) == (scope['device'],scope['inode']),
+         'explicit private output root identity/permissions changed')
+
+
 def pin_fields(row):
     need(isinstance(row, dict) and set(row) == {'path', 'bytes', 'sha256'}, 'exact file pin required')
     path = safe_path(row['path'])
@@ -397,7 +426,7 @@ def verify_template(upstream, kind, template, commands):
         need(target.stat().st_size == 512 and target.read_bytes() == template, 'boot template differs from actual pinned source assembly')
 
 
-def prepare(profile_path, profile_sha, out, mode, copy_budget, capture_budget, *, validate_only=False):
+def prepare(profile_path, profile_sha, out, mode, copy_budget, capture_budget, *, validate_only=False, large_output_root=None):
     profile_path, out = safe_path(profile_path), safe_path(out)
     private_output(out)
     if out.exists() or out.is_symlink(): raise FileExistsError(out)
@@ -419,7 +448,7 @@ def prepare(profile_path, profile_sha, out, mode, copy_budget, capture_budget, *
         need(disk_pin['bytes'] % 512 == 0 and boot_pin['bytes'] == 512 and receipt_pin['bytes'] <= 1 << 20, 'disk/template/receipt extent invalid')
         need(mode != 'full' or copy_budget >= disk_pin['bytes'], 'explicit full-copy logical-byte budget too small')
         need(type(capture_budget) is int and 1 << 20 <= capture_budget <= 1 << 30, 'explicit bounded capture budget required')
-        need(disk_pin['bytes'] <= 64 << 20 or out.is_relative_to(LANE), 'large private copies require the reserved NAS replacement lane')
+        output_scope = large_output_scope(out,disk_pin['bytes'],large_output_root)
         root = safe_path(profile['build_source_root']); upstream = safe_path(profile['freedos_source'])
         need(root.is_dir() and upstream.is_dir(), 'actual build/upstream source roots required')
         payloads, names = profile['payloads'], set()
@@ -458,7 +487,11 @@ def prepare(profile_path, profile_sha, out, mode, copy_budget, capture_budget, *
             need(isinstance(row,dict) and set(row) == {'patch','sha256'}, 'exact recorded patch identity required')
             source_rows.append(recorded_pin(source_name(row['patch'],root), row['sha256']))
         sources.add_inputs(source_rows)
-        disk = sources[disk_pin['path']]; check = disk['checkpoint']
+        disk = dict(sources[disk_pin['path']]); source_check = disk['checkpoint']
+        def check():
+            check_output_scope(output_scope)
+            source_check()
+        disk['checkpoint'] = check
         mbr = os.pread(disk['fd'],512,0)
         need(len(mbr) == 512, 'short source MBR')
         active = [mbr[446+n*16:462+n*16] for n in range(4) if mbr[446+n*16] == 0x80]
@@ -481,14 +514,17 @@ def prepare(profile_path, profile_sha, out, mode, copy_budget, capture_budget, *
                   'template':{'kind':kind,'sha256':boot_pin['sha256'],'sys_source_sha256':SYS_SHA,
                               'kernel_name':'KERNEL.SYS','load_segment':96,'actual_BIOS_DL_capture':True},
                   'build_receipt_sha256':receipt_pin['sha256'],'build_source_pins':source_rows,
+                  'output_scope':output_scope,
                   'upstream_commits':{'freedos-kernel':KERNEL_COMMIT,'freedos-freecom':FREECOM_COMMIT},
                   'commands':commands,'source_unchanged':True,'existing_members':len(before)}
         if validate_only:
             for row in source_rows: need(local_pin(row['path']) == row, 'late build source drift')
+            check_output_scope(output_scope)
             return result
         payload_budget = sum(member['file']['bytes'] for member in payloads)
         backup_budget = sum(before[name]['bytes'] for name in names & before.keys() if not before[name].get('directory'))
         capacity(out.parent, (disk_pin['bytes'] if mode == 'full' else 16 << 20)+payload_budget+backup_budget+(256<<20),capture_budget)
+        check_output_scope(output_scope)
         out.mkdir(mode=0o700)
         try:
             target = out/'replacement.img'
@@ -556,12 +592,14 @@ def prepare(profile_path, profile_sha, out, mode, copy_budget, capture_budget, *
     raw = (json.dumps(result,indent=2,ensure_ascii=False)+'\n').encode()
     need(len(raw) <= 128 << 20,'private receipt exceeds declared metadata budget')
     capacity(out,len(raw)+(1<<20),capture_budget)
+    check_output_scope(output_scope)
     temporary = out/'.preparation.json.part'
     try:
         with temporary.open('xb') as handle:
             need(handle.write(raw) == len(raw),'short private receipt write')
             handle.flush(); os.fsync(handle.fileno())
         need(temporary.read_bytes() == raw,'private receipt readback differs')
+        check_output_scope(output_scope)
         os.link(temporary,out/'preparation.json')
     finally:
         temporary.unlink(missing_ok=True)
@@ -574,8 +612,10 @@ def main():
     ap.add_argument('--out',type=Path,required=True); ap.add_argument('--copy-mode',choices=('reflink','full'),required=True)
     ap.add_argument('--copy-budget-bytes',type=int,required=True); ap.add_argument('--capture-budget-bytes',type=int,required=True)
     ap.add_argument('--validate-only',action='store_true')
+    ap.add_argument('--large-private-output-root',type=Path,
+                    help='explicit existing owned mode-0700 work area; retains all copy/lease/space checks')
     args = ap.parse_args()
-    result = prepare(args.profile,args.profile_sha256,args.out,args.copy_mode,args.copy_budget_bytes,args.capture_budget_bytes,validate_only=args.validate_only)
+    result = prepare(args.profile,args.profile_sha256,args.out,args.copy_mode,args.copy_budget_bytes,args.capture_budget_bytes,validate_only=args.validate_only,large_output_root=args.large_private_output_root)
     print(json.dumps(result,indent=2,ensure_ascii=False)); return 0
 
 

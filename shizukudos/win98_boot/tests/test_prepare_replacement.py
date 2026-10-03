@@ -296,6 +296,48 @@ class ReplacementSparseCopy(unittest.TestCase):
         self.assertFalse((out/'replacement.img').exists())
 
 
+class PrivateOutputPlacement(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix='shz-private-output-',dir='/var/tmp')
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.out = self.root/'new-output'
+
+    def test_large_output_requires_explicit_private_scope_outside_default_lane(self):
+        with self.assertRaises(ValueError): prep.large_output_scope(self.out,2 << 30)
+        scope = prep.large_output_scope(self.out,2 << 30,self.root)
+        self.assertEqual(scope['kind'],'explicit-owned-private-root')
+        prep.check_output_scope(scope)
+        self.assertFalse(self.out.exists())
+
+    def test_public_permissions_symlink_and_outside_root_are_refused(self):
+        self.root.chmod(0o755)
+        with self.assertRaises(ValueError): prep.large_output_scope(self.out,2 << 30,self.root)
+        self.root.chmod(0o700)
+        for out in (self.root,self.root.parent/'outside'):
+            with self.assertRaises(ValueError): prep.large_output_scope(out,2 << 30,self.root)
+        alias = self.root/'alias'; alias.symlink_to(self.root,target_is_directory=True)
+        with self.assertRaises(ValueError): prep.large_output_scope(self.out,2 << 30,alias)
+        with self.assertRaises(ValueError): prep.large_output_scope(self.out,2 << 30,Path('/srv/m98'))
+
+    def test_root_replacement_and_permission_drift_invalidate_observation(self):
+        scope = prep.large_output_scope(self.out,2 << 30,self.root)
+        self.root.chmod(0o710)
+        with self.assertRaises(ValueError): prep.check_output_scope(scope)
+        self.root.chmod(0o700)
+        saved=self.root/'saved'; owned=self.root/'owned'; owned.mkdir(mode=0o700)
+        scope=prep.large_output_scope(owned/'new',2 << 30,owned)
+        owned.rename(saved); owned.mkdir(mode=0o700)
+        with self.assertRaises(ValueError): prep.check_output_scope(scope)
+
+    def test_private_scope_does_not_bypass_real_capacity_guard(self):
+        prep.large_output_scope(self.out,2 << 30,self.root)
+        with patch.object(prep,'available_bytes',return_value=prep.FLOOR):
+            with self.assertRaises(RuntimeError): prep.capacity(self.root,16 << 20,128 << 20)
+        with patch.object(prep.os,'geteuid',return_value=os.geteuid()+1):
+            with self.assertRaises(ValueError): prep.large_output_scope(self.out,2 << 30,self.root)
+
+
 class ReplacementInventory(unittest.TestCase):
     def setUp(self):
         self.assertIsNotNone(prep)

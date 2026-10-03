@@ -222,7 +222,7 @@ class IngestionAPI(unittest.TestCase):
     @classmethod
     def setUpClass(cls):cls.m=load(PATH,'native_ingestion_controls')
     def setUp(self):
-        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.temp=tempfile.TemporaryDirectory(dir="/var/tmp");self.addCleanup(self.temp.cleanup)
         self.p=Path(self.temp.name);self.fixture=Fixture(self.p,self.m)
     def refuse(self, message=None):
         with self.assertRaises((ValueError,OSError),msg=message):self.fixture.run()
@@ -230,9 +230,17 @@ class IngestionAPI(unittest.TestCase):
     def test_actual_missing_ingestion_seam_is_not_silently_accepted(self):
         self.assertTrue(PATH.is_file());self.assertTrue(callable(self.m.ingest))
         with self.assertRaises(ValueError):self.m.pin({'path':'relative','bytes':1,'sha256':'1'*64})
-    def test_unmodified_production_capacity_refuses_fixture_filesystem(self):
-        self.assertLess(self.m.shutil.disk_usage(self.p).free,self.m.FLOOR)
-        with self.assertRaises(ValueError):self.m.capacity(self.p,5<<20)
+    def test_production_capacity_enforces_exact_floor_and_pending_budget(self):
+        pending=5<<20
+        usage=self.m.shutil.disk_usage(self.p)
+        for free,accepted in ((self.m.FLOOR-1,False),
+                              (self.m.FLOOR+pending-1,False),
+                              (self.m.FLOOR+pending,True)):
+            controlled=type(usage)(usage.total,usage.total-free,free)
+            with self.subTest(free=free),mock.patch.object(self.m.shutil,'disk_usage',return_value=controlled):
+                if accepted:self.m.capacity(self.p,pending)
+                else:
+                    with self.assertRaises(ValueError):self.m.capacity(self.p,pending)
     def test_real_fat_export_preserves_originals_and_retains_false_runtime_claims(self):
         before=[observed(Path(row['path'])) for row in (self.fixture.original,self.fixture.replaced,self.fixture.esp)]
         result=self.fixture.run();out=self.p/'private-output'
@@ -335,7 +343,7 @@ class ExportIOOptimization(unittest.TestCase):
     @classmethod
     def setUpClass(cls):cls.m=load(PATH,'native_export_io_controls')
     def setUp(self):
-        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.temp=tempfile.TemporaryDirectory(dir="/var/tmp");self.addCleanup(self.temp.cleanup)
         self.p=Path(self.temp.name);self.target=self.p/'ESP.SIM'
     def source(self,size=2<<20):return save(self.p/'source.img',b'S'*size)
     def export(self,entry,held,target=None):
@@ -465,7 +473,7 @@ class CustodyRegression(unittest.TestCase):
     @classmethod
     def setUpClass(cls):cls.m=load(PATH,'native_custody_regression')
     def setUp(self):
-        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.temp=tempfile.TemporaryDirectory(dir="/var/tmp");self.addCleanup(self.temp.cleanup)
         self.p=Path(self.temp.name);self.row=save(self.p/'inputs/source.img',b'original sparse fixture'.ljust(16384,b'\0'))
         self.request=jsave(self.p/'request.json',{'modeled_prior_lineage':True})
         self.parent=self.p/'output-parent';self.parent.mkdir(mode=0o700);self.out=self.parent/'private'
