@@ -46,7 +46,7 @@ class BuildToolLeases:
         path = self.ingest.pin(row)
         # Ordinary tools retain the unchanged payload boundary. The special
         # lane is never selected by a caller pin's nlink or approval field.
-        if path.stat().st_nlink == 1:
+        if role not in ROLES and path.stat().st_nlink == 1:
             return self.held.add(row)
         approved = getattr(policy, 'NATIVE_COMPILER_TOOLS', None)
         self.ingest.need(type(approved) is dict and set(approved) == set(ROLES) and

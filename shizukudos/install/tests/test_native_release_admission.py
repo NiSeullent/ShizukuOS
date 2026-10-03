@@ -80,6 +80,13 @@ class AdmissionTests(unittest.TestCase):
                          'members': {'EFI/BOOT/BOOTX64.EFI': component}})
             request = obj('request', {'dos_build_receipt': dos, 'constructor_profile': profile,
                                       'native_build_receipt': native})
+            tool_rows = {}
+            for role, count in release.native_build_tool_custody.ROLES.items():
+                tool_rows[role] = put('host-tool-' + role, ('modeled compiler: ' + role).encode())
+                for number in range(1, count):
+                    os.link(tool_rows[role]['path'], base / ('host-tool-' + role + '-alias-' + str(number)))
+            tool_anchors = {role: {**row, 'nlink': release.native_build_tool_custody.ROLES[role]}
+                            for role, row in tool_rows.items()}
             lineage = {'model_only_not_Windows': True}
             manifest = obj('manifest', release.manifest_expected(ingest, request, lineage, sim))
             def modeled_lineage(req, held):
@@ -95,6 +102,17 @@ class AdmissionTests(unittest.TestCase):
                 finally:
                     self.assertEqual(fcntl.fcntl(entry['fd'], fcntl.F_GETLEASE),
                                      fcntl.F_RDLCK)
+                    for row in tool_rows.values():
+                        inode = Path(row['path']).stat().st_ino
+                        found = []
+                        for name in os.listdir('/proc/self/fd'):
+                            try:
+                                fd = int(name)
+                                if os.fstat(fd).st_ino == inode:
+                                    found.append(fcntl.fcntl(fd, fcntl.F_GETLEASE))
+                            except OSError:
+                                pass
+                        self.assertIn(fcntl.F_RDLCK, found)
                     closed_with_original_lease.append(True)
             ap = (component['bytes'], component['sha256'])
             with patch.object(release, 'load_ingester', return_value=ingest), \
@@ -103,8 +121,9 @@ class AdmissionTests(unittest.TestCase):
                  patch.object(release.policy, 'DOS_RECEIPT', (dos['bytes'], dos['sha256'])), \
                  patch.object(release.policy, 'DOS_ARTIFACTS', {n: (payload['bytes'], payload['sha256']) for n in release.policy.DOS_ARTIFACTS}), \
                  patch.object(release.policy, 'NATIVE_SOURCE_MAP_SHA', release.digest(release.canonical(mapping))), \
+                 patch.object(release.policy, 'NATIVE_COMPILER_TOOLS', tool_anchors, create=True), \
                  patch.object(release.policy, 'NATIVE_ARTIFACTS', {n: ap for n in ('KERNEL32.BIN','KERNEL64.BIN','BOOTX64.EFI')}):
-                with release.admit_for_build(manifest['path'], base/'generated') as result:
+                with release.admit_for_build(manifest['path'], base/'generated', build_tool_pins=tool_rows) as result:
                     generated = result['source']
                     self.assertEqual(generated.stat().st_mode & 0o777, 0o600)
                     self.assertEqual(generated.parent.stat().st_mode & 0o777, 0o700)
@@ -122,24 +141,24 @@ class AdmissionTests(unittest.TestCase):
                     self.assertEqual(fcntl.fcntl(stream.fileno(), fcntl.F_GETLEASE), fcntl.F_UNLCK)
                 self.assertEqual(closed_with_original_lease, [True])
                 with self.assertRaisesRegex(RuntimeError, 'host compiler failure'):
-                    with release.admit_for_build(manifest['path'], base/'compiler-failure'):
+                    with release.admit_for_build(manifest['path'], base/'compiler-failure', build_tool_pins=tool_rows):
                         raise RuntimeError('host compiler failure')
                 self.assertEqual(closed_with_original_lease, [True, True])
                 changed = release.manifest_expected(ingest, request, lineage, sim)
                 changed['Windows98_boot_verified'] = True
                 bad = obj('forged-manifest', changed)
                 with self.assertRaisesRegex(ValueError, 'reconstructed'):
-                    with release.admit_for_build(bad['path'], base/'refused'):
+                    with release.admit_for_build(bad['path'], base/'refused', build_tool_pins=tool_rows):
                         self.fail('forged attestation accepted')
                 self.assertFalse((base/'refused').exists())
                 corrupt = bytearray(sim_raw); corrupt[-1] ^= 1
                 forged_sim = put('forged-sim', bytes(corrupt))
                 bad = obj('forged-sim-manifest', release.manifest_expected(ingest, request, lineage, forged_sim))
                 with self.assertRaisesRegex(ValueError, 'expanded ESP SHA'):
-                    with release.admit_for_build(bad['path'], base/'refused-sim'):
+                    with release.admit_for_build(bad['path'], base/'refused-sim', build_tool_pins=tool_rows):
                         self.fail('corrupt expansion accepted')
                 with self.assertRaisesRegex(ValueError, 'lease broken'):
-                    with release.admit_for_build(manifest['path'], base/'lease-break') as result:
+                    with release.admit_for_build(manifest['path'], base/'lease-break', build_tool_pins=tool_rows) as result:
                         with self.assertRaises(BlockingIOError):
                             os.close(os.open(result['source'], os.O_WRONLY | os.O_NONBLOCK))
 
@@ -155,6 +174,8 @@ class AdmissionTests(unittest.TestCase):
                 self.assertTrue(any(row['path'].endswith('kbuild.py') for row in pins))
                 self.assertTrue(any('cc1' in row['path'] for row in build_tool_pins.values()))
                 self.assertFalse(any('cc1' in row['path'] for row in pins))
+                self.assertIn('private-efi-collect2', build_tool_pins)
+                self.assertIn('shizukudos/install/native_build_tool_custody.py', build.source_hashes())
                 out.mkdir(); source = out/'native_release_admitted.c'; source.write_text('/* model only */')
                 yield {'source': source, 'private': True, 'public_artifact': False}
                 closed.append(True)

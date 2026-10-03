@@ -6,6 +6,7 @@ import fcntl
 import hashlib
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -95,6 +96,14 @@ class CompilerToolTests(unittest.TestCase):
                 with self.ingest.Union() as held, tools.BuildToolLeases(self.ingest, held) as owner:
                     with self.assertRaises(ValueError):
                         owner.add_build_tool('gcc', self.rows['gcc'])
+
+    def test_exact_driver_cannot_fall_back_after_links_removed(self):
+        for alias in self.aliases['gcc']:
+            alias.unlink()
+        self.assertEqual((self.base / 'gcc').stat().st_nlink, 1)
+        with self.ingest.Union() as held, tools.BuildToolLeases(self.ingest, held) as owner:
+            with self.assertRaisesRegex(ValueError, 'extent/link count'):
+                owner.add_build_tool('gcc', self.rows['gcc'])
 
     def test_nlink_drift_refuses_and_releases_on_error(self):
         fd = None
@@ -208,11 +217,15 @@ class CompilerToolTests(unittest.TestCase):
             with patch.object(tools.policy, 'NATIVE_COMPILER_TOOLS', anchors):
                 with self.ingest.Union() as held, tools.BuildToolLeases(self.ingest, held) as owner:
                     held.add(self.pin(source))
+                    tracer = Path(shutil.which('strace')).resolve()
+                    held.add(self.pin(tracer))
                     for name, child in children.items():
                         owner.add_build_tool('private-efi-' + name if role == 'private-efi-gcc' else 'gcc-' + name,
                                              self.pin(child))
                     fd = owner.add_build_tool(role, row)['fd']
-                    result = subprocess.run([str(path), *['-B' + str(child.parent) + '/' for child in children.values()],
+                    trace = self.base / ('actual-' + role + '-compile-exec.log')
+                    result = subprocess.run([str(tracer), '-f', '-e', 'trace=execve', '-s', '4096', '-o', str(trace),
+                                             str(path), *['-B' + str(child.parent) + '/' for child in children.values()],
                                              '-c', str(source), '-o', str(output)],
                                             capture_output=True, timeout=15)
                     self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
@@ -220,14 +233,22 @@ class CompilerToolTests(unittest.TestCase):
                     raw = output.read_bytes()
                     self.assertEqual(raw[:4] if role == 'gcc' else raw[:2],
                                      b'\x7fELF' if role == 'gcc' else b'\x64\x86')
+                    executed = {Path(name).resolve() for name in
+                                re.findall(r'execve\("([^"\n]+)".*\)\s+= 0', trace.read_text())}
+                    self.assertEqual(executed, {path, children['cc1'], children['as']})
                     if role == 'private-efi-gcc':
                         image = self.base / 'actual-host-EFI-fixture.exe'
-                        linked = subprocess.run([str(path), *['-B' + str(child.parent) + '/' for child in children.values()],
+                        trace = self.base / 'actual-private-efi-link-exec.log'
+                        linked = subprocess.run([str(tracer), '-f', '-e', 'trace=execve', '-s', '4096', '-o', str(trace),
+                                                 str(path), *['-B' + str(child.parent) + '/' for child in children.values()],
                                                  '-nostdlib', '-Wl,--subsystem,10', '-Wl,--entry,fixture_add',
                                                  '-Wl,--no-insert-timestamp', str(output), '-o', str(image)],
                                                 capture_output=True, timeout=15)
                         self.assertEqual(linked.returncode, 0, linked.stderr.decode(errors='replace'))
                         self.assertEqual(image.read_bytes()[:2], b'MZ')
+                        executed = {Path(name).resolve() for name in
+                                    re.findall(r'execve\("([^"\n]+)".*\)\s+= 0', trace.read_text())}
+                        self.assertEqual(executed, {path, children['collect2'], children['ld']})
                     held.finish()
 
 
