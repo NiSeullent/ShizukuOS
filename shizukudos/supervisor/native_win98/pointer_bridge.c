@@ -30,7 +30,7 @@ static int source_poll(void *context) {
     b->last_error=r;return r;
 }
 int w98_pointer_bind_i2c(struct w98_pointer_bridge *b,struct shz_hidi2c *h,uint32_t ux,uint32_t uy) {
-    int r;struct shz_pointer_adapter previous;struct shz_pointer_sink sink={b,sink_valid,sink_emit};
+    int r,classified=0;struct shz_pointer_adapter previous;struct shz_pointer_sink sink={b,sink_valid,sink_emit};
     struct dev_native_pointer_ops source={b,source_valid,source_poll};
     if(!b || !h)return SHZ_INVALID;
     if(b->active || b->adapter.bound)return SHZ_BUSY;
@@ -38,6 +38,10 @@ int w98_pointer_bind_i2c(struct w98_pointer_bridge *b,struct shz_hidi2c *h,uint3
     if(h->state!=SHZ_I2C_READY || !h->ops.validate || !h->ops.transfer || !h->ops.interrupt ||
        !h->ops.now_us)return SHZ_BUSY;
     if(!h->layout.pointer && !h->layout.touchpad)return SHZ_UNSUPPORTED;
+    if(h->layout.report_count>SHZ_HID_REPORTS)return SHZ_MALFORMED;
+    for(unsigned i=0;i<h->layout.report_count;++i)
+        if(h->layout.reports[i].pointer_class==1 || h->layout.reports[i].pointer_class==2)classified=1;
+    if(!classified)return SHZ_UNSUPPORTED;
     b->source=h;b->owner=h->owner;b->generation=h->generation;b->address=h->address;
     b->active=1;b->pending=0;b->report_bytes=0;
     r=shz_pointer_adapter_bind(&b->adapter,&sink,b->owner,b->generation,ux,uy);

@@ -72,7 +72,10 @@ sensor accuracy, power state transitions or security isolation.
 converts calibrated relative or single-contact absolute frames to atomic
 movement/button publications, keeps fractional motion and reestablishes the
 baseline after contact changes/lift. Extra buttons and multiple contacts remain
-unsupported. The Windows98 native Supervisor binds this same adapter through
+unsupported. Application class is retained per Report ID, so unrelated keyboard
+or sensor reports cannot clear a touchpad contact or button state. Mixed
+application reports and mismatched absolute/relative axes fail before input
+publication. The Windows98 native Supervisor binds this same adapter through
 `shizukudos/supervisor/native_win98/pointer_bridge.c` to its i8042 auxiliary
 endpoint. NTDRV/class owners can use the same sink interface; no separate HID
 decoder or unverified NT binary ABI is introduced. Driver success is named

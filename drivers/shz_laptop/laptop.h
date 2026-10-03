@@ -68,7 +68,9 @@ struct shz_hid_field {
     uint16_t bit,page,usage; uint8_t size,report,group,flags;
     int32_t minimum,maximum;
 };
-struct shz_hid_report { uint16_t bits; uint8_t id; };
+/* Class mask is scoped to each Report ID:1 mouse,2 touchpad,4 unrelated
+ * application. Shared/mixed application reports need a richer class consumer. */
+struct shz_hid_report { uint16_t bits; uint8_t id,pointer_class; };
 struct shz_hid_layout {
     struct shz_hid_field fields[SHZ_HID_FIELDS];
     struct shz_hid_report reports[SHZ_HID_REPORTS];

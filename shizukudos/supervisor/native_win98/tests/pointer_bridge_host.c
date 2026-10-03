@@ -93,7 +93,10 @@ int main(void){
  C(dev_native_pointer_input(&bridge,0,INT32_MIN,0)==SHZ_CAPACITY && pointer_x==0 && pointer_y==0);
  /* Revoke after queuing: queued AUX bytes discarded before guest copyout.
   * Wrapped FIFO keyboard data stays exact when AUX entries are removed. */
- packet(&bus,1,5,6);tick();out(0x60,0xee);bus.valid=0;C((in(0x64)&0x21)==1);reply(0xee,0);C(!(in(0x64)&1));out(0x64,0xa9);reply(1,0);
+ configure_pic();packet(&bus,1,5,6);tick();out(0x60,0xee);C(dev_ack_irq()==0x2c);eoi();
+ bus.valid=0;dev_poll(tsc);C(pic[0].irr&2);C(dev_ack_irq()==0x21);
+ C((in(0x64)&0x21)==1);reply(0xee,0);out(0x20,0x20);C(!dev_irq_pending());
+ C(!(in(0x64)&1));out(0x64,0xa9);reply(1,0);
  C(w98_pointer_unbind(&bridge)==SHZ_DRIVER_OK);C(shz_hidi2c_stop(&h,0)==SHZ_QUARANTINED && !bus.drains);
  bus.valid=1;C(shz_hidi2c_stop(&h,0)==SHZ_DRIVER_OK && bus.drains==2);
  /* A fresh real open/epoch can rebind the retained bridge after drain. A

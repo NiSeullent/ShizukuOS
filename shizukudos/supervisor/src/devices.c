@@ -415,7 +415,7 @@ static int pointer_valid(void)
 {
     if(!pointer_bound)return 0;
     if(pointer_ops.validate(pointer_ops.context)==SHZ_DRIVER_OK)return 1;
-    pointer_bound=0;pointer_remove_bytes();pointer_defaults();
+    pointer_bound=0;pointer_remove_bytes();pointer_defaults();native_keyboard_irq();
     return 0;
 }
 int dev_native_pointer_attach(const struct dev_native_pointer_ops *o)
