@@ -23,9 +23,9 @@ UEFI configuration-table pointer or arbitrary physical-memory read is added.
 
 The native build compiles `laptop_protocols.c`, which includes the same
 `drivers/shz_laptop/acpi.c` and `firmware.c` validated by driver host tests.
-Canonical release custody must include those imported driver/common sources
-and headers in its source union; the pre-existing kbuild directory inventory
-alone does not include them.
+`kbuild.source_hashes()` now includes both driver directories, so its source
+receipt covers the imported C files and shared headers. A fresh complete native
+producer and corresponding release source union remain required after integration.
 
 ## Directory contract
 
