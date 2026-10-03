@@ -175,7 +175,7 @@ int main(void) {
  p[0].bytes=100;p[1].bytes=200;
  memset(p[0].sha256,0xaa,32);memset(p[1].sha256,0xbb,32);
 #if defined(SHZ_NATIVE_INSTALLER_RELEASE) && !defined(HOST_INVALID_RECORD)
- assert(setup_native_release_available());assert(!setup_native_release_pair(p));
+ assert(setup_native_release_available());assert(setup_native_release_state()==1);assert(!setup_native_release_pair(p));
  assert(!setup_native_release_info(0,&size,pin)&&size==100&&pin[0]==0xaa);
  assert(!setup_native_release_info(1,&size,pin)&&size==200&&pin[31]==0xbb);
  assert(!setup_native_release_source(p,0));assert(setup_native_release_source(p,1));
@@ -184,6 +184,11 @@ int main(void) {
  p[1].bytes++;assert(setup_native_release_pair(p));
 #else
  assert(!setup_native_release_available());assert(setup_native_release_pair(p));
+#ifdef HOST_INVALID_RECORD
+ assert(setup_native_release_state()==2);
+#else
+ assert(setup_native_release_state()==0);
+#endif
  assert(setup_native_release_info(0,&size,pin));
 #endif
  assert(setup_native_release_info(2,&size,pin));

@@ -28,6 +28,7 @@
  * and \SHZDOS\KERNEL64.INI command line) at 0x7000, boot page tables, then Long Mode
  * entry at 0xFFFFFFFF80100000 with RDI = 0x7000 after ExitBootServices.
  */
+#include "../../boot_profile/native_installer_capacity.h"
 #include "efi_ext.h"
 #include "storage_observe.h"
 #include "bootini.h"
@@ -530,18 +531,27 @@ static EFI_STATUS csm_boot(EFI_HANDLE image, EFI_BOOT_SERVICES *bs, const bootin
  * is written, so the firmware proves nothing live (this loader, its stack, the firmware's
  * page tables) is there. Kernel64 owns guest-physical [0, ram_size), so ram_size is the end
  * of the run of memory usable after ExitBootServices that starts at 1 MiB. */
+#ifdef SHZ_PRIVATE_NATIVE_EFI_LOAD
+#define SHZ_PROFILE_STRING_RAW(v) #v
+#define SHZ_PROFILE_STRING(v) SHZ_PROFILE_STRING_RAW(v)
+static const char g_private_native_profile[] __attribute__((used)) =
+    "SHZ-PRIVATE-NATIVE-LOAD:v1:"
+    SHZ_PROFILE_STRING(SHZ_PRIVATE_NATIVE_SOURCE_BYTES) ":"
+    SHZ_PROFILE_STRING(SHZ_PRIVATE_NATIVE_ARCHIVE_BYTES) ":"
+    SHZ_PROFILE_STRING(SHZ_PRIVATE_NATIVE_RAM_BYTES);
+#endif
 #define K64_KERNEL_PA 0x100000ull
 #define K64_KERNEL_WINDOW 0x200000ull           /* zeroed [1 MiB, 3 MiB): image + bss, as boot32.c */
 #define K64_KERNEL_MAX 0x100000ull              /* image file limit, as boot32.c */
 #define K64_INITRD_PA 0x2000000ull
-#define K64_INITRD_MAX (64ull << 20)
+#define K64_INITRD_MAX SHZ_NATIVE_ARCHIVE_DEFAULT_BYTES
 #define K64_LOW_PA 0x1000ull
 #define K64_LOW_PAGES 7                         /* [0x1000, 0x8000) */
 #define K64_TRAMP_PA 0x5000ull
 #define K64_GDT_PA 0x5800ull
 #define K64_GDTR_PA 0x5820ull
 #define K64_RAM_MIN (64ull << 20)               /* boot32.c's minimum */
-#define K64_RAM_MAX (256ull << 20)              /* Kernel64 mem.c MAX_PAGES: its page allocator limit */
+#define K64_RAM_MAX SHZ_NATIVE_RAM_DEFAULT_BYTES /* public load policy; PMM supports up to4GiB */
 #define K64_ENTRY 0xFFFFFFFF80100000ull
 
 /* Runs from its copy at K64_TRAMP_PA, which both the firmware's identity map and the boot page
@@ -806,13 +816,13 @@ static EFI_STATUS k64_prepare(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
     if (status == EFI_NOT_FOUND && !installer) {
         g_k64.isize = 0;
         say("Kernel64 direct boot: no \\SHZDOS\\WIN64.IMG; Kernel64 starts without an initial RAM image.\n");
-    } else if (EFI_ERROR(status) || !g_k64.isize || g_k64.isize > K64_INITRD_MAX) {
+    } else if (EFI_ERROR(status) || !g_k64.isize || g_k64.isize > (installer ? SHZ_NATIVE_INSTALLER_ARCHIVE_MAX : K64_INITRD_MAX)) {
         if (ifile)
             ifile->close(ifile);
         kfile->close(kfile);
         root->close(root);
         return k64_refuse(installer ? (EFI_ERROR(status) ? "cannot open \\SHZ\\SETUP\\INSTALL.IMG; this boot volume has no usable installer"
-                                                       : "\\SHZ\\SETUP\\INSTALL.IMG is empty or larger than 64 MiB")
+                                                       : "\\SHZ\\SETUP\\INSTALL.IMG is empty or exceeds the compiled installer load limit")
                                    : (EFI_ERROR(status) ? "cannot open \\SHZDOS\\WIN64.IMG"
                                                        : "\\SHZDOS\\WIN64.IMG is empty or larger than 64 MiB"),
                           EFI_ERROR(status) ? status : EFI_SUCCESS);
@@ -863,7 +873,7 @@ static EFI_STATUS k64_prepare(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
         root->close(root);
         return k64_refuse("GetMemoryMap() failed", status);
     }
-    if (!k64_plan(map, map_size, stride, K64_RAM_MAX, g_k64.isize, &g_k64.plan)) {
+    if (!k64_plan(map, map_size, stride, installer ? SHZ_NATIVE_INSTALLER_RAM_MAX : K64_RAM_MAX, g_k64.isize, &g_k64.plan)) {
         say("REFUSED: Kernel64 direct boot: ");
         say(g_k64.plan.why);
         say(" ");

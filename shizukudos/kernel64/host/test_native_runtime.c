@@ -52,6 +52,7 @@ int copy_to_user(process_t *p,uint64_t a,const void *src,uint64_t n)
 /* Explicit HOST-ONLY substitute for the absent independent producer. Not
  * compiled into production, no runtime caller can install these records. */
 int setup_native_release_available(void){return 1;}
+unsigned setup_native_release_state(void){return setup_native_release_available()?1u:2u;}
 int setup_native_release_info(unsigned role,uint64_t *bytes,uint8_t sha[32])
 {if(role>1||!bytes||!sha)return -1;*bytes=admitted[role].bytes;memcpy(sha,admitted[role].sha256,32);return 0;}
 int setup_native_release_source(const archive_source_info_t *info,unsigned role)

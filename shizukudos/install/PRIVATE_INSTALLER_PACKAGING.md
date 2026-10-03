@@ -40,22 +40,49 @@ matches every member against its original held descriptor. The completed
 archive and actual newly built standalone kernel/stub are themselves leased and
 pinned before successful receipt finalization.
 
-The guard currently preserves the production loader/media 64MiB archive limit,
-256MiB RAM limit and 256MiB per sealed source limit. It records exact archive
-layout, rounded manifest/SIM PMM snapshots, heap metadata, 12MiB fixed kernel
-heap and a conservative 32MiB OS-page allowance. This is a planning guard, not
-proof of firmware memory availability. Snapshot payload pages already use PMM;
-the heap stores only their page-pointer arrays and the bounded origin table.
+Public builds retain the 64MiB archive, 256MiB RAM and 256MiB sealed-source
+limits. A live independently admitted manifest/SIM/normal-runtime union can
+construct `native_capacity_profile.CapacityProfile`. It measures the actual
+member table and encoded byte extent, rounds source/archive budgets to MiB,
+and rounds RAM to 2MiB after including archive placement, both page-backed
+sealed snapshots and 32MiB OS headroom. Inputs exceeding the 512MiB wire ceiling
+or the actual 1GiB identity boot mapping are refused. No caller-provided profile
+object, compiler flag or metadata creates source/device authority.
 
-A real Windows source is expected to exceed the 64MiB archive guard. Expanding
-private installer capacity needs actual final native ESP/SIM and runtime member
-measurement, a separate reviewed private firmware load profile, actual mapping
-and usable-memory-map checks, and guest regression. Public defaults remain
-unchanged. This increment does not build an ISO. A private ISO adapter must
-consume the successful held-build receipt and exact pinned kernel/archive,
-place the archive at `SHZ/SETUP/INSTALL.IMG`, use the existing zero-timeout
-install BOOT.INI and direct interactive Syslinux entry, preserve observed physical
-archive provenance, and keep all private outputs outside public distribution.
+The three measured private compiler definitions apply only to the installer
+standalone kernel and its private EFI loader. Kernel receipts capture the
+profile and public source/tool bytes, including the actual MinGW compiler and
+its cc1/as/ld children in the explicit private lane. The public target kernel
+and target runtime receive no installer release or increased allocation limit.
+`setup_native_abi.h` remains version 1 and 440 bytes; CAP advertises the actual
+compiled source limit. Runtime accepts bounded negotiation and uses it for both
+release INFO and OPEN replies. Release state 0 permits existing public component
+flow; state 1 means an available compiled record; state 2 means configured but
+invalid and refuses native initialization without legacy fallback. Unknown
+states also refuse.
+
+During the same live finalizer custody, build the loader with
+`supervisor.build.build_loader(payload, private_profile=release['profile'])`
+after the actual AP trampoline build. Use a fresh canonical 0700 directory
+outside Git; generated translation-unit inputs and the resulting EFI binary
+remain held. The private loader embeds the exact computed profile marker.
+`shizuku_se_media.efi_members(..., mode='install', menu_timeout=0,
+private_native_profile=release['profile'])` verifies that marker and the full
+SHA/extent of the already retained INSTALL.IMG. The existing
+`boot_menu(..., setup=True, direct_install=True)` supplies the interactive BIOS
+entry without a menu. Media construction must finish inside this same finalizer,
+before admission closes; successful serialized receipts cannot recreate it.
+
+This provides opt-in loader/member adapters, not a finished private ISO builder.
+The final ISO orchestrator still must supply independently verified upstream
+boot components, complete license/source archives, copy every member from its
+held inputs and perform full ISO readback. The native UEFI loader must also
+verify the actual firmware usable-memory map and retain observed physical
+archive provenance. BIOS currently lacks the required independently observed
+storage backing, so native source opening refuses there; no guessed BIOS drive
+mapping or permission exemption is provided. Host capacity tests do not certify
+firmware memory availability, real Windows producer approval, installation or
+Windows 98 boot on ShizukuDOS.
 
 Host tests use explicit tiny modeled producer/firmware/PMM fixtures. They verify
 actual SHZARC01 packer byte equality, actual C parser/namespace/sealed snapshots,

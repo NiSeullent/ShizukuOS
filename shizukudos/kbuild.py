@@ -60,15 +60,17 @@ def sources(directory, suffix):
 
 
 def source_hashes():
-    directories = [SHZ / name for name in ("kernel32", "kernel64", "accounts", "kcommon", "abi", "pma_bridge", "win64/include", "dead_screen", "boot_profile")]
+    directories = [SHZ / name for name in ("kernel32", "kernel64", "accounts", "kcommon", "abi", "pma_bridge", "win64/include", "dead_screen", "boot_profile", "supervisor/loader", "supervisor/src", "uefi", "csmwrap/video")]
     directories += [REPO / "shizukufs/v1/libsfs", REPO / "drivers/ahci_native"]
     paths = {p for directory in directories for p in directory.rglob("*")
              if p.is_file() and p.suffix in (".c", ".h", ".asm", ".ld")}
     paths.update(SHZ / "install" / name for name in
-                 ("native_release_admission.py", "native_release_policy.py", "native_payload_ingest.py", "private_installer_package.py"))
+                 ("native_release_admission.py", "native_release_policy.py", "native_payload_ingest.py", "private_installer_package.py", "native_capacity_profile.py"))
     paths.update([Path(__file__).resolve(), SHZ / "tools/shzlib.py", SHZ / "win64/pe_parse.c",
                   SHZ / "win64/pe_parse.h",
-                  SHZ / "supervisor/src/font8x8_basic.h"])
+                  SHZ / "supervisor/src/font8x8_basic.h", SHZ / "supervisor/build.py",
+                  REPO / "tools/shizuku_se_media.py", REPO / "tools/shizuku_image_io.py",
+                  REPO / "tools/shizuku_se_drivers.py"])
     return {str(p.relative_to(REPO)): sha256_file(p) for p in sorted(paths)}
 
 
@@ -141,6 +143,21 @@ def build_all(args, stack, private_finalize=None):
             raise RuntimeError("cannot pin actual GCC child executable: " + program)
         actual = actual.resolve()
         tools["gcc-" + program] = {"path": str(actual), "sha256": sha256_file(actual)}
+    # Only the explicit private packaging lane needs the actual EFI compiler.
+    # Its children participate in the same held source/tool union and receipt.
+    if args.native_release_manifest is not None:
+        compiler = shutil.which("x86_64-w64-mingw32-gcc")
+        if compiler is None:
+            raise RuntimeError("private installer requires actual MinGW EFI compiler")
+        actual = Path(compiler).resolve()
+        tools["private-efi-gcc"] = {"path": str(actual), "sha256": sha256_file(actual)}
+        for program in ("cc1", "as", "ld"):
+            selected = run([compiler, "-print-prog-name=" + program], capture=True).stdout.strip()
+            actual = Path(selected) if Path(selected).is_absolute() else Path(shutil.which(selected) or "")
+            if not actual.is_file():
+                raise RuntimeError("cannot pin actual private EFI compiler child: " + program)
+            actual = actual.resolve()
+            tools["private-efi-" + program] = {"path": str(actual), "sha256": sha256_file(actual)}
     release = None
     if args.native_release_manifest is not None:
         sys.path.insert(0, str(SHZ / "install"))
@@ -152,6 +169,7 @@ def build_all(args, stack, private_finalize=None):
              for name, sha in built_sources.items()] +
             [{"path": row["path"], "bytes": Path(row["path"]).stat().st_size, "sha256": row["sha256"]}
              for row in tools.values()]))
+    private_flags = [] if release is None or release.get('profile') is None else release['profile'].flags()
     k32 = build_kernel("kernel32", "kernel32", K32_FLAGS, "elf32", "elf_i386", "KERNEL32.BIN")
     # The PE32+ parser is shared with the host tests; Kernel64 links the same source freestanding.
     # ShizukuFS v1 (ext4 format, jbd2): the portable libsfs sources are linked freestanding (kernel64/sfs_mount.c).
@@ -161,7 +179,7 @@ def build_all(args, stack, private_finalize=None):
     # Same sources with SHZ_STANDALONE: hypercalls served in-kernel over COM1/PIT/RTC so it boots under QEMU TCG.
     # The standalone profile is the only one with a disk: the original AHCI core (drivers/ahci_native) is linked
     # behind kernel64/ahci_blk.c; under the Supervisor no device is passed through and the block registry stays empty.
-    k64s = build_kernel("kernel64s", "kernel64", K64_FLAGS + ["-DSHZ_STANDALONE"] + (["-DSHZ_NATIVE_INSTALLER_RELEASE"] if release else []), "elf64", "elf_x86_64",
+    k64s = build_kernel("kernel64s", "kernel64", K64_FLAGS + ["-DSHZ_STANDALONE"] + (["-DSHZ_NATIVE_INSTALLER_RELEASE"] if release else []) + private_flags, "elf64", "elf_x86_64",
                         "KERNEL64S.BIN", extra_c=[SHZ / "win64" / "pe_parse.c", STUB_DIR / "standalone64.c",
                                                   REPO / "drivers" / "ahci_native" / "ahci.c", *libsfs, *dead_screen_sources(),
                                                   *([release["source"]] if release else [])])
@@ -190,6 +208,7 @@ def build_all(args, stack, private_finalize=None):
         raise RuntimeError("kernel sources changed during build; no verified receipt written")
     if any(sha256_file(Path(row["path"])) != row["sha256"] for row in tools.values()):
         raise RuntimeError("kernel compiler/tool bytes changed; no verified receipt written")
+    profile_record = None if release is None or release.get("profile") is None else release["profile"].record()
     # Close the admission custody before writing any successful receipt.
     stack.close()
     shzlib.write_json(BUILD / "kernels-build-result.json", {
@@ -198,8 +217,9 @@ def build_all(args, stack, private_finalize=None):
         "sources_sha256": built_sources, "tools_sha256": tools,
         "private": release is not None, "public_artifact": release is None,
         "private_installer": packaged,
+        "private_load_profile": profile_record,
         "native_release": None if release is None else
-            {k: v for k, v in release.items() if k not in ("source", "custody")}})
+            {k: v for k, v in release.items() if k not in ("source", "custody", "profile")}})
     print(json.dumps({k: {"bytes": v["bytes"], "sha256": v["sha256"]} for k, v in results.items()}, indent=2))
 
 

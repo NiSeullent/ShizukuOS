@@ -3,10 +3,12 @@
 #define SHZ_SETUP_NATIVE_ABI_H
 #include <stdint.h>
 #include <stddef.h>
+#include "../boot_profile/native_installer_capacity.h"
 #define SHZ_NATIVE_SYS_VERSION 1u
 #define SHZ_NATIVE_SYS_PATH 260u
 #define SHZ_NATIVE_SYS_IO_MAX 65536u
-#define SHZ_NATIVE_SYS_SOURCE_MAX (256ull<<20)
+#define SHZ_NATIVE_SYS_SOURCE_MAX SHZ_NATIVE_SOURCE_DEFAULT_BYTES
+#define SHZ_NATIVE_SYS_SOURCE_PROTOCOL_MAX SHZ_NATIVE_SOURCE_PROTOCOL_BYTES
 enum { SHZ_NATIVE_CAPS=0, SHZ_NATIVE_OPEN=1, SHZ_NATIVE_INFO=2, SHZ_NATIVE_READ=3,
  SHZ_NATIVE_CLOSE=4, SHZ_NATIVE_REVIEW=5, SHZ_NATIVE_CLAIM=6, SHZ_NATIVE_CHECK=7,
  SHZ_NATIVE_TARGET_READ=8, SHZ_NATIVE_TARGET_WRITE=9, SHZ_NATIVE_FLUSH=10, SHZ_NATIVE_RELEASE=11, SHZ_NATIVE_ADMIT=12, SHZ_NATIVE_RELEASE_INFO=13 };
@@ -21,7 +23,9 @@ typedef struct {
  shz_native_target_v1 target;
  shz_native_source_v1 source;
  uint64_t max_source_bytes;
- uint32_t max_io_bytes,producer_admission_available;
+ uint32_t max_io_bytes;
+ /* 0=public absence, 1=available, 2=compiled but invalid; unknown refuses. */
+ uint32_t producer_admission_available;
  char path[SHZ_NATIVE_SYS_PATH];
  uint32_t tail_reserved;
 } shz_native_call_v1;
