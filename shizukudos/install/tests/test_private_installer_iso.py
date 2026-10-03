@@ -18,8 +18,9 @@ class PrivateISO(unittest.TestCase):
  def test_production_absence_never_creates_output(self):
   with tempfile.TemporaryDirectory(dir='/var/tmp') as temp:
    out=Path(temp)/'absent'
-   with self.assertRaisesRegex(ValueError,'anchors absent'):
-    private.build_private_iso('/absent',out,'/absent')
+   with patch.object(private.admission.policy,'NATIVE_SOURCE_MAP_SHA',None):
+    with self.assertRaisesRegex(ValueError,'anchors absent'):
+     private.build_private_iso('/absent',out,'/absent')
    self.assertFalse(out.exists())
  def test_configured_native_without_source_bios_refuses_before_output(self):
   with tempfile.TemporaryDirectory(dir='/var/tmp') as temp:

@@ -170,11 +170,16 @@ class SourceGuardCheckpoints(unittest.TestCase):
                 ingest.read_exact(entry['fd'],entry['pin']['bytes'],0,lambda:held.io_check(entry))
             read.assert_not_called()
 
-    def test_exact_reviewed_ingestion_epoch_and_absent_native_authority(self):
+    def test_exact_reviewed_ingestion_epoch_and_missing_producer_refusal(self):
         self.assertEqual(admission.policy.INGEST_SHA,hashlib.sha256(Path(ingest.__file__).read_bytes()).hexdigest())
         admission.load_ingester()
-        self.assertIsNone(admission.policy.NATIVE_SOURCE_MAP_SHA)
-        self.assertIsNone(admission.policy.NATIVE_ARTIFACTS)
+        for field in ('NATIVE_SOURCE_MAP_SHA', 'NATIVE_ARTIFACTS'):
+            with self.subTest(field=field), patch.object(admission.policy, field, None):
+                with self.assertRaisesRegex(ValueError, 'anchors absent'):
+                    with admission.admit_for_build('/definitely/absent.json', '/definitely/out'):
+                        self.fail('missing producer cannot issue build custody')
+        with self.assertRaisesRegex(ValueError, 'installed-source custody absent'):
+            admission.policy.verify_private_source_custody({'approval': True}, None)
 
 
 if __name__=='__main__':unittest.main(verbosity=2)
