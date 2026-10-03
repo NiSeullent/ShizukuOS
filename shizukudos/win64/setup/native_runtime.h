@@ -5,7 +5,7 @@
 #include "native_syscall.h"
 typedef struct {
  uint64_t token;shz_native_source_v1 identity;
- unsigned live,admitted,role;char path[SHZ_NATIVE_SYS_PATH];
+ unsigned live,admitted,role,preview;char path[SHZ_NATIVE_SYS_PATH];
 } shz_native_runtime_source;
 typedef struct { uint64_t token;unsigned live;native_setup_target_v1_t target;shz_native_target_v1 wire; } shz_native_runtime_claim;
 typedef struct {
@@ -20,4 +20,8 @@ typedef struct {
  * SHA uses the existing actual accounts SHA256 core, not void/error-losing
  * legacy callbacks. Target IO never calls base raw block callbacks. */
 int shz_native_runtime_init(shz_native_runtime *,const plat_t *);
+/* GUI preview retains the SAME sealed process-owned sources for the real run.
+ * Release pins are read from compiled kernel records, never caller JSON/INI. */
+int shz_native_runtime_preview(shz_native_runtime *,const char *,const char *,uint8_t manifest_sha256[32]);
+int shz_native_runtime_preview_close(shz_native_runtime *);
 #endif

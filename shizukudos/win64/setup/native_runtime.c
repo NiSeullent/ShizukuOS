@@ -18,7 +18,12 @@ static int source_check(void *ctx,void *h)
 static int source_open(void *ctx,const char *path,void **h,uint64_t *bytes)
 {
  shz_native_runtime *v=ctx;shz_native_runtime_source *s;shz_native_call_v1 r;size_t n;
- if(!v->initialized||v->opened>=2||!h||!bytes||text(path,SHZ_NATIVE_SYS_PATH,&n))return -1;
+ if(!v->initialized||!h||!bytes||text(path,SHZ_NATIVE_SYS_PATH,&n))return -1;
+ for(unsigned i=0;i<2;i++)if(v->source[i].live&&v->source[i].preview&&!strcmp(path,v->source[i].path)){
+  s=&v->source[i];if(source_check(v,s))return -1;
+  s->preview=0;*h=s;*bytes=s->identity.bytes;return 0;
+ }
+ if(v->opened>=2)return -1;
  s=&v->source[v->opened];shz_native_call_init(&r,SHZ_NATIVE_OPEN);memcpy(r.path,path,n+1);
  if(call(&r)||!r.handle||!r.source.bytes)return -1;
  s->token=r.handle;s->identity=r.source;s->role=v->opened;s->live=1;memcpy(s->path,path,n+1);
@@ -27,8 +32,9 @@ static int source_open(void *ctx,const char *path,void **h,uint64_t *bytes)
 static int source_admit(void *ctx,void *h,const char *path,uint64_t bytes,const uint8_t digest[32])
 {
  shz_native_runtime *v=ctx;shz_native_runtime_source *s=source(v,h);shz_native_call_v1 r;size_t n;
- if(!s||s->admitted||!digest||text(path,SHZ_NATIVE_SYS_PATH,&n)||strcmp(path,s->path)||
+ if(!s||!digest||text(path,SHZ_NATIVE_SYS_PATH,&n)||strcmp(path,s->path)||
  bytes!=s->identity.bytes||memcmp(digest,s->identity.sha256,32))return -1;
+ if(s->admitted)return source_check(v,h);
  shz_native_call_init(&r,SHZ_NATIVE_ADMIT);r.handle=s->token;r.index=s->role;
  if(call(&r)||memcmp(&r.source,&s->identity,sizeof r.source))return -1;
  s->admitted=1;return source_check(v,h);
@@ -155,4 +161,29 @@ int shz_native_runtime_init(shz_native_runtime *v,const plat_t *base)
  backend.target_info=target_info;backend.target_read=target_read;backend.target_write=target_write;backend.target_flush=target_flush;
  if(shz_native_provider_init(&v->provider,&adapted,&backend)){memset(v,0,sizeof *v);return -1;}
  v->initialized=1;return 0;
+}
+
+int shz_native_runtime_preview_close(shz_native_runtime *v)
+{
+ int rc=0;if(!v||v->claim.live)return -1;
+ for(unsigned i=0;i<2;i++)if(v->source[i].live&&source_close(v,&v->source[i]))rc=-1;
+ return rc;
+}
+int shz_native_runtime_preview(shz_native_runtime *v,const char *manifest,const char *sim,uint8_t digest[32])
+{
+ const char *paths[2]={manifest,sim};shz_native_call_v1 pins[2];
+ if(!v||!v->initialized||v->opened||!digest)return -1;
+ for(unsigned i=0;i<2;i++){
+  shz_native_call_init(&pins[i],SHZ_NATIVE_RELEASE_INFO);pins[i].index=i;
+  if(call(&pins[i])||!pins[i].source.bytes||pins[i].source.bytes>SHZ_NATIVE_SYS_SOURCE_MAX)goto bad;
+ }
+ for(unsigned i=0;i<2;i++){
+  void *h=0;uint64_t bytes=0;
+  if(source_open(v,paths[i],&h,&bytes)||bytes!=pins[i].source.bytes||
+     source_admit(v,h,paths[i],bytes,pins[i].source.sha256))goto bad;
+  v->source[i].preview=1;
+ }
+ memcpy(digest,pins[0].source.sha256,32);return 0;
+bad:
+ shz_native_runtime_preview_close(v);return -1;
 }

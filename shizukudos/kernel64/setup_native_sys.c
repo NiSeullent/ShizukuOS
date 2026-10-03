@@ -70,12 +70,21 @@ int32_t setup_native_syscall(process_t *p,uint64_t user,uint64_t bytes)
  if(!p||p->teardown)return STATUS_ACCESS_DENIED;
  if(bytes!=sizeof r)return STATUS_INFO_LENGTH_MISMATCH;
  if(copy_from_user(p,&r,user,sizeof r))return STATUS_ACCESS_VIOLATION;
- if(r.version!=SHZ_NATIVE_SYS_VERSION||r.bytes!=sizeof r||r.reserved||r.tail_reserved||r.operation>SHZ_NATIVE_ADMIT)
+ if(r.version!=SHZ_NATIVE_SYS_VERSION||r.bytes!=sizeof r||r.reserved||r.tail_reserved||r.operation>SHZ_NATIVE_RELEASE_INFO)
   return STATUS_INVALID_PARAMETER;
  acquire();if(p->teardown)goto done;
  if(r.operation==SHZ_NATIVE_CAPS){
   r.max_source_bytes=SHZ_NATIVE_SYS_SOURCE_MAX;r.max_io_bytes=SHZ_NATIVE_SYS_IO_MAX;
   r.producer_admission_available=setup_native_release_available();status=STATUS_SUCCESS;goto publish;
+ }
+ if(r.operation==SHZ_NATIVE_RELEASE_INFO){
+  unsigned role=r.index;
+  if(role>1){status=STATUS_INVALID_PARAMETER;goto done;}
+  /* A readonly reply contains no caller-supplied apparent handles/authority. */
+  memset(&r,0,sizeof r);r.version=SHZ_NATIVE_SYS_VERSION;r.bytes=sizeof r;
+  r.operation=SHZ_NATIVE_RELEASE_INFO;r.index=role;
+  if(setup_native_release_info(role,&r.source.bytes,r.source.sha256))goto done;
+  status=STATUS_SUCCESS;goto publish;
  }
  o=owner_for(p,r.operation==SHZ_NATIVE_OPEN);if(!o){status=STATUS_INVALID_HANDLE;goto done;}
  switch(r.operation){

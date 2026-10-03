@@ -56,7 +56,9 @@ The record is not a process-visible registration interface.
 4. The combined installer must link within the fixed kernel image/heap boundary
    and preserve bounded, serialized transfers. Actual guest disk installation,
    cold boot and Windows-on-ShizukuDOS acceptance remain separate requirements.
-   The default installation GUI still needs the native provider connection.
+   The default installation GUI now retains admitted native sources through
+   disk review and provider invocation. Private accepted-archive packaging,
+   actual installed-source admission and guest installation remain required.
 
 Run focused host controls with
 `python3 shizukudos/install/tests/test_native_release_admission.py`.

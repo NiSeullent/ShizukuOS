@@ -11,6 +11,8 @@
 static HWND window;
 static HINSTANCE instance;
 static const plat_t *platform;
+static shz_native_gui *native_ui;
+static native_setup_target_v1_t native_reviewed;
 static unsigned choices[UI_DISKS], count, selected, top;
 static plat_disk_t reviewed;
 static char confirmation[6], last_line[280];
@@ -45,6 +47,15 @@ static unsigned visible_rows(HWND hwnd)
     return rows ? rows : 1;
 }
 
+static int eligible(unsigned index,plat_disk_t *out)
+{
+ if(native_ui){native_setup_target_v1_t t;
+  if(shz_native_gui_review(native_ui,index,&t))return -1;
+  *out=t.disk;return 0;
+ }
+ return setup_review_target(platform,index,out);
+}
+
 static void paint(HWND hwnd)
 {
     PAINTSTRUCT ps;
@@ -62,10 +73,11 @@ static void paint(HWND hwnd)
     text(dc, 28, 52, L"Install with the built-in Shizuku installer");
     if (stage == 0) {
         text(dc, 28, 88, L"Choose a disk. Nothing is changed until you confirm.");
-        if (!count) text(dc, 28, 128, L"No writable disk: need 256 MiB and 512-byte sectors.");
+        if (!count) text(dc, 28, 128, native_ui ? L"No eligible disk for the prepared Windows 98 system." :
+                                             L"No writable disk: need 256 MiB and 512-byte sectors.");
         for (i = top; i < count && i < top + visible; ++i) {
             plat_disk_t d;
-            platform->disk_info(platform->ctx, choices[i], &d);
+            if (eligible(choices[i], &d)) continue;
             snprintf(line, sizeof line, "%c %s   %llu MiB%s", i == selected ? '>' : ' ', d.name,
                      (unsigned long long)(d.sectors / 2048), d.flags & PLAT_DISK_REMOVABLE ? "   removable" : "");
             narrow_text(dc, 34, 126 + (int)(i - top) * 25, line);
@@ -78,9 +90,10 @@ static void paint(HWND hwnd)
         narrow_text(dc, 28, 100, line);
         text(dc, 28, 144, L"Installation deletes ALL partitions and files on this target.");
         text(dc, 28, 176, L"Other disks are not selected. Esc returns without installing.");
-        text(dc, 28, 220, reserve_win98 ? L"Windows 98 data partition: 512 MiB (F2 to change)" :
+        if (native_ui) text(dc, 28, 220, L"Install the prepared Windows 98 system on this disk.");
+        else text(dc, 28, 220, reserve_win98 ? L"Windows 98 data partition: 512 MiB (F2 to change)" :
                                                       L"Windows 98 data partition: none (F2 to change)");
-        text(dc, 28, 252, L"Your own Windows 98 files are separate; they are not bundled.");
+        if (!native_ui) text(dc, 28, 252, L"Your own Windows 98 files are separate; they are not bundled.");
         text(dc, 28, 302, L"Type ERASE, then press Enter to install:");
         narrow_text(dc, 28, 344, confirmation);
     } else if (stage == 2) {
@@ -99,7 +112,11 @@ static void paint(HWND hwnd)
 
 static void review(void)
 {
-    if (!count || setup_review_target(platform, choices[selected], &reviewed)) return;
+    if (!count) return;
+    if(native_ui){
+        if(shz_native_gui_review(native_ui,choices[selected],&native_reviewed))return;
+        reviewed=native_reviewed.disk;
+    }else if(setup_review_target(platform,choices[selected],&reviewed))return;
     reserve_win98 = reviewed.sectors >= 768ull * 2048;
     confirmation[0] = 0; confirmation_len = 0; stage = 1;
     printf("SHZ-SETUP UI review target=%s sectors=%llu\n", reviewed.name, (unsigned long long)reviewed.sectors);
@@ -142,14 +159,17 @@ static LRESULT CALLBACK procedure(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             else if (wp == VK_RETURN) review();
         } else if (stage == 1 && wp == VK_RETURN) {
             plat_disk_t current;
-            if (!setup_review_target(platform, choices[selected], &current) &&
+            int accepted = native_ui ? !shz_native_gui_confirm(native_ui,&native_reviewed,confirmation) :
+                !setup_review_target(platform, choices[selected], &current) &&
                 !memcmp(&current, &reviewed, sizeof current) &&
-                !setup_build_interactive_answer(&current, confirmation, reserve_win98, answer_out, answer_capacity)) {
+                !setup_build_interactive_answer(&current, confirmation, reserve_win98, answer_out, answer_capacity);
+            if (accepted) {
+                if(native_ui)current=native_reviewed.disk;
                 approved = 1; stage = 2;
                 printf("SHZ-SETUP UI confirmed target=%s\n", current.name);
                 repaint();
             }
-        } else if (stage == 1 && wp == VK_F2 && confirmation_len == 0) {
+        } else if (stage == 1 && !native_ui && wp == VK_F2 && confirmation_len == 0) {
             if (reviewed.sectors >= 768ull * 2048) reserve_win98 = !reserve_win98;
             repaint();
         } else if (stage == 3) {
@@ -198,18 +218,18 @@ static void close_ui(void)
     window = 0; UnregisterClassW(L"ShizukuSetupWindow", instance);
 }
 
-int setup_ui_choose(const plat_t *p, char *answer, size_t capacity)
+static int choose(const plat_t *p, char *answer, size_t capacity,shz_native_gui *native)
 {
     WNDCLASSEXW wc;
     unsigned i;
     int rc, width = GetSystemMetrics(SM_CXSCREEN), height = GetSystemMetrics(SM_CYSCREEN);
-    if (!p || !answer || width < 640 || height < 480) return -1;
-    platform = p; answer_out = answer; answer_capacity = capacity;
+    if (!p || (!answer&&!native) || width < 640 || height < 480) return -1;
+    platform = p; native_ui = native; answer_out = answer; answer_capacity = capacity;
     count = selected = top = confirmation_len = 0; stage = approved = done = failed = installed = power = reserve_win98 = 0;
     progress_used = 0; progress_line[0] = last_line[0] = 0;
     for (i = 0; i < p->disk_count(p->ctx) && count < UI_DISKS; ++i) {
         plat_disk_t target;
-        if (!setup_review_target(p, i, &target)) choices[count++] = i;
+        if (!eligible(i, &target)) choices[count++] = i;
     }
     instance = GetModuleHandleW(0);
     memset(&wc, 0, sizeof wc); wc.cbSize = sizeof wc; wc.lpfnWndProc = procedure;
@@ -225,6 +245,11 @@ int setup_ui_choose(const plat_t *p, char *answer, size_t capacity)
     if (rc) close_ui();
     return rc;
 }
+
+int setup_ui_choose(const plat_t *p,char *answer,size_t capacity)
+{ return choose(p,answer,capacity,0); }
+int setup_ui_choose_native(const plat_t *p,shz_native_gui *native)
+{ if(!native||!native->prepared)return -1;return choose(p,0,0,native); }
 
 void setup_ui_progress(const char *value)
 {
