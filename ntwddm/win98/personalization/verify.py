@@ -22,7 +22,10 @@ LIMIT=16*1024*1024
 SOURCES=('native.c','core.c','core.h','store.c','store.h','profile.c','profile.h','mock/windows.h','mock/shlobj.h','test_core.c','test_store.c','test_profile.c','test_html.js','verify.py')
 SHARED=('ntwddm/win98/adapter.c','ntwddm/win98/adapter.h','ntwddm/src/ntwddm.c',
         'ntwddm/include/ntwddm.h','platform/freestanding/memory.c','platform/freestanding/memory.h',
-        'ntwin32/prepare.py','benchmarks/win98se-ko-oem-native-exports-v1.json')
+        'ntwin32/prepare.py','ntwddm/win98/theme_selector/selector_core.c','ntwddm/win98/theme_selector/selector_core.h',
+        'ntwddm/win98/theme_selector/native_backend.c','ntwddm/win98/theme_selector/native_backend.h',
+        'ntwddm/win98/theme_selector/native_backend_test.c','ntwddm/win98/theme_selector/mock/windows.h',
+        'benchmarks/win98se-ko-oem-native-exports-v1.json')
 
 def digest(path):return hashlib.sha256(path.read_bytes()).hexdigest()
 def relative(path):return str(path.relative_to(ROOT))
@@ -39,7 +42,8 @@ def main():
     initial.update({name:digest(ROOT/name) for name in SHARED})
     output.mkdir()
     commands=[];tools={};dependencies=set();result={'passed':False,'scope':'host/pure-source and PE32 compile only',
-       'native_Windows98_executed':False,'wallpaper_applied':False,'Explorer_verified':False}
+       'native_Windows98_executed':False,'wallpaper_applied':False,'Explorer_verified':False,
+       'native_theme_applied':False,'cold_start_theme_restored':False}
 
     def bounded():
         total=sum(p.stat().st_size for p in output.iterdir() if p.is_file())
@@ -105,12 +109,22 @@ def main():
             before=digest(executable)
             data=run([str(executable)],label+'-profile-test').decode()
             if not data.startswith('PASS:') or before!=digest(executable):raise RuntimeError('profile verdict/binary changed')
+            theme=HERE.parent/'theme_selector'
+            executable=output/('theme-backend-'+label)
+            run([tools[compiler]['path'],'-std=c11','-Wall','-Wextra','-Werror',*flags,'-I'+str(theme/'mock'),
+                 str(theme/'selector_core.c'),str(theme/'native_backend.c'),str(theme/'native_backend_test.c'),
+                 '-o',str(executable)],label+'-theme-backend-compile')
+            before=digest(executable)
+            data=run([str(executable)],label+'-theme-backend-test').decode()
+            if not data.startswith('PASS:') or before!=digest(executable):raise RuntimeError('theme backend verdict/binary changed')
         html=run([str(output/'core-gcc'),'--html'],'html-generate');(output/'wallpaper.htm').write_bytes(html)
         run([tools['node']['path'],str(HERE/'test_html.js'),str(output/'wallpaper.htm')],'html-behavior')
         compiler=tools['i686-w64-mingw32-gcc']['path']
         flags=['-std=c11','-Os','-Wall','-Wextra','-Werror','-march=i486','-mno-sse','-mno-mmx','-msoft-float',
                '-fno-stack-protector','-fno-builtin','-ffreestanding','-nostdlib','-Intwddm/include']
-        native_sources=[HERE/'native.c',HERE/'core.c',HERE/'store.c',HERE/'profile.c',ROOT/'ntwddm/win98/adapter.c',ROOT/'ntwddm/src/ntwddm.c',ROOT/'platform/freestanding/memory.c']
+        native_sources=[HERE/'native.c',HERE/'core.c',HERE/'store.c',HERE/'profile.c',
+                        theme/'selector_core.c',theme/'native_backend.c',
+                        ROOT/'ntwddm/win98/adapter.c',ROOT/'ntwddm/src/ntwddm.c',ROOT/'platform/freestanding/memory.c']
         for index,source in enumerate(native_sources):
             raw=run([compiler,*flags,'-MM',str(source)],'native-deps-'+str(index)).decode()
             words=raw.replace('\\\n',' ').split(':',1)[1].split()
@@ -123,16 +137,18 @@ def main():
         executable=output/'SHZPERS.EXE'
         run([compiler,*flags,'-Wl,--subsystem,windows:4.10','-Wl,--major-os-version,4','-Wl,--minor-os-version,10',
              '-Wl,--entry,_WinMainCRTStartup@0','-Wl,--disable-dynamicbase','-Wl,--disable-nxcompat','-Wl,--no-insert-timestamp',
-             *map(str,native_sources),'-lkernel32','-luser32','-lgdi32','-lole32','-lshell32','-lgcc','-o',str(executable)],'native-link')
+             *map(str,native_sources),'-lkernel32','-luser32','-lgdi32','-lole32','-lshell32','-ladvapi32','-lgcc','-o',str(executable)],'native-link')
         spec=importlib.util.spec_from_file_location('pz98_pe',ROOT/'ntwin32/prepare.py')
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);pe=module.PE(executable.read_bytes())
         exports=json.loads((ROOT/SHARED[-1]).read_bytes())['dlls'];imports={}
         for entry in pe.imports():
             dll=entry['dll'].upper();names=[item[1] for item in entry['entries']]
-            if dll not in ('KERNEL32.DLL','USER32.DLL','GDI32.DLL','OLE32.DLL','SHELL32.DLL') or any(n not in exports[dll] for n in names):
+            if dll not in ('KERNEL32.DLL','USER32.DLL','GDI32.DLL','OLE32.DLL','SHELL32.DLL','ADVAPI32.DLL') or any(n not in exports[dll] for n in names):
                 raise RuntimeError('import absent from actual Win98 native export inventory: '+str(entry))
             imports[dll]=names
-        if set(imports)!=set(('KERNEL32.DLL','USER32.DLL','GDI32.DLL','OLE32.DLL','SHELL32.DLL')):raise RuntimeError('unexpected native import boundary')
+        if set(imports)!=set(('KERNEL32.DLL','USER32.DLL','GDI32.DLL','OLE32.DLL','SHELL32.DLL','ADVAPI32.DLL')):raise RuntimeError('unexpected native import boundary')
+        if 'SetSysColors' not in imports['USER32.DLL'] or not {'RegSetValueExA','RegQueryValueExA','RegFlushKey'}<=set(imports['ADVAPI32.DLL']):
+            raise RuntimeError('actual native theme mutation/readback imports missing')
         if pe.u16(pe.opt+68)!=2 or (pe.u16(pe.opt+48),pe.u16(pe.opt+50))!=(4,10) or pe.u16(pe.pe+4)!=0x14c:
             raise RuntimeError('not native GUI PE32 4.10')
         pe.offset(pe.u32(pe.opt+16))
@@ -149,5 +165,5 @@ def main():
         result['artifact_sha256']={p.name:digest(p) for p in output.iterdir() if p.is_file()}
         (output/'result.json').write_text(json.dumps(result,indent=2)+'\n')
         bounded()
-    print('PASS: personalization core/store, offline script behavior and native i486 PE32/import compile; Windows not executed')
+    print('PASS: personalization core/store/profile/theme, offline script and native i486 PE32/import compile; Windows not executed')
 if __name__=='__main__':main()

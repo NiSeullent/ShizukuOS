@@ -23,6 +23,10 @@ SOURCES = (
     "ntwddm/win98/theme_selector/selector_core.c",
     "ntwddm/win98/theme_selector/selector_win98.c",
     "ntwddm/win98/theme_selector/selector_core_test.c",
+    "ntwddm/win98/theme_selector/native_backend.c",
+    "ntwddm/win98/theme_selector/native_backend.h",
+    "ntwddm/win98/theme_selector/native_backend_test.c",
+    "ntwddm/win98/theme_selector/mock/windows.h",
     "ntwddm/win98/theme_selector/build.py",
     "platform/freestanding/memory.c",
     "platform/freestanding/memory.h",
@@ -213,6 +217,13 @@ def main():
             text = run([str(binary)], environment)
             require(text.startswith("PASS:"), "host test did not report its completed assertions")
             host.append({"kind": kind, "result": text})
+            binary = directory / (kind + "-backend")
+            run(["clang", "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror"]
+                + flags + ["-I" + str(HERE / "mock"), core, str(HERE / "native_backend.c"),
+                           str(HERE / "native_backend_test.c"), "-o", str(binary)])
+            text = run([str(binary)], environment)
+            require(text.startswith("PASS:"), "native boundary tests did not report completion")
+            host.append({"kind": kind + "-backend", "result": text})
         executable = directory / "SHZTHEME.EXE"
         run(["i686-w64-mingw32-gcc", "-std=c11", "-Os", "-Wall", "-Wextra", "-Werror",
              "-march=i486", "-mno-sse", "-mno-sse2", "-mno-mmx", "-msoft-float",
@@ -221,6 +232,7 @@ def main():
              "-Wl,--major-os-version,4", "-Wl,--minor-os-version,10",
              "-Wl,--disable-dynamicbase", "-Wl,--disable-nxcompat", "-Wl,--disable-tsaware",
              "-Wl,--no-insert-timestamp", core, str(HERE / "selector_win98.c"),
+             str(HERE / "native_backend.c"),
              str(ROOT / "platform/freestanding/memory.c"),
              "-lkernel32", "-luser32", "-lgdi32", "-ladvapi32", "-o", str(executable)])
         gate = native_gate(executable)
