@@ -49,6 +49,8 @@ int copy_to_user(process_t *p,uint64_t a,const void *src,uint64_t n)
 /* Explicit HOST-ONLY substitute for the absent independent producer. Not
  * compiled into production, no runtime caller can install these records. */
 int setup_native_release_available(void){return 1;}
+int setup_native_release_info(unsigned role,uint64_t *bytes,uint8_t sha[32])
+{if(role>1||!bytes||!sha)return -1;*bytes=admitted[role].bytes;memcpy(sha,admitted[role].sha256,32);return 0;}
 int setup_native_release_source(const archive_source_info_t *info,unsigned role)
 {return role>1||info->bytes!=admitted[role].bytes||memcmp(info->sha256,admitted[role].sha256,32)?-1:0;}
 int setup_native_release_pair(const archive_source_info_t pair[2])
@@ -99,6 +101,19 @@ int main(int argc,char **argv)
 #else
  CHECK(r.producer_admission_available==0);
 #endif
+ init(&r,SHZ_NATIVE_RELEASE_INFO);r.index=2;
+ CHECK(call(&process,&r)==STATUS_INVALID_PARAMETER);
+ init(&r,SHZ_NATIVE_RELEASE_INFO);memset(&r.source,0x7a,sizeof r.source);r.handle=55;r.other_handle=56;r.target.generation=99;
+#ifdef SHZ_TEST_COMPILED_ADMISSION
+ CHECK(call(&process,&r)==STATUS_SUCCESS);
+ CHECK(!r.handle&&!r.other_handle&&!r.target.generation);
+ CHECK(r.source.bytes==0&&r.source.generation==0); /* fixture anchor not populated yet */
+ CHECK(!memcmp(r.source.id,(uint8_t[16]){0},16));
+#else
+ CHECK(call(&process,&r)==STATUS_ACCESS_DENIED);
+#endif
+ CHECK(io_buffer_attempts==0&&io_buffer_allocations==0); /* read-only getter has no transfer allocation */
+ init(&r,SHZ_NATIVE_CAPS);
  r.version++;CHECK(call(&process,&r)==STATUS_INVALID_PARAMETER);r.version--;
  CHECK(setup_native_syscall(&process,(uint64_t)(uintptr_t)&r,sizeof r-1)==STATUS_INFO_LENGTH_MISMATCH);
  r.reserved=1;CHECK(call(&process,&r)==STATUS_INVALID_PARAMETER);

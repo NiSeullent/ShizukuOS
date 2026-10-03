@@ -203,6 +203,8 @@ int main(int argc, char **argv)
                 blkio_count, blkio_info, blkio_read, blkio_write, blkio_flush, BLKIO_MAX_SECTORS};
     const char *answer = "C:\\SHZ\\SETUP\\SHZSETUP.INI", *payload = "C:\\SHZ\\SETUP\\PAYLOAD";
     setup_result_t r;
+    shz_native_gui native;
+    int native_mode = 0;
     int i, unattended = 0;
     if (argc > 1 && !strcmp(argv[1], "/native")) return native_cli(&P, argc, argv);
     interactive = 1;
@@ -226,9 +228,30 @@ int main(int argc, char **argv)
         printf("SETUP-RESULT: FAIL block devices could not be enumerated\n");
         return 1;
     }
+    memset(&native,0,sizeof native);
+    {
+        int rc=shz_native_gui_prepare(&native,&P);
+        if(rc==-2)native_mode=0;
+        else if(rc){
+            shz_native_gui_close(&native);
+            BCryptCloseAlgorithmProvider(sha_alg,0);
+            printf("SETUP-RESULT: FAIL prepared Windows installer input unavailable (no disk writes)\n");
+            return 1;
+        }else{
+            native_mode=1;
+            if(!interactive){
+                shz_native_gui_close(&native);
+                BCryptCloseAlgorithmProvider(sha_alg,0);
+                printf("SETUP-RESULT: FAIL prepared Windows installation requires disk review in Setup (no disk writes)\n");
+                return 1;
+            }
+        }
+    }
     if (interactive) {
-        int chosen = setup_ui_choose(&P, interactive_answer, sizeof interactive_answer);
+        int chosen = native_mode ? setup_ui_choose_native(&P,&native) :
+            setup_ui_choose(&P, interactive_answer, sizeof interactive_answer);
         if (chosen) {
+            if(native_mode&&shz_native_gui_close(&native))chosen=-1;
             BCryptCloseAlgorithmProvider(sha_alg, 0);
             printf(chosen > 0 ? "SETUP-RESULT: CANCELLED (no disk writes)\n" :
                                "SETUP-RESULT: FAIL interactive display unavailable (no disk writes)\n");
@@ -236,7 +259,14 @@ int main(int argc, char **argv)
         }
         answer = ui_answer_path;
     }
-    setup_run(&P, answer, payload, &r);
+    if(native_mode){
+        native_setup_result_v1_t actual;
+        shz_native_gui_run(&native,&actual);
+        memset(&r,0,sizeof r);r.ok=actual.ok;
+        memcpy(r.reason,actual.reason,sizeof r.reason);
+        printf(actual.ok ? "SETUP-RESULT: OK native target bytes verified\n" :
+                           "SETUP-RESULT: FAIL native installation\n");
+    }else setup_run(&P, answer, payload, &r);
     BCryptCloseAlgorithmProvider(sha_alg, 0);
     if (interactive) setup_ui_finish(&r);
     blkio_power(r.power);
