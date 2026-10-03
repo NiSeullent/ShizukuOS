@@ -48,6 +48,8 @@ int copy_to_user(process_t *p,uint64_t a,const void *src,uint64_t n)
 /* Explicit HOST-ONLY substitute for the absent independent producer. Not
  * compiled into production, no runtime caller can install these records. */
 int setup_native_release_available(void){return 1;}
+int setup_native_release_source(const archive_source_info_t *info,unsigned role)
+{return role>1||info->bytes!=admitted[role].bytes||memcmp(info->sha256,admitted[role].sha256,32)?-1:0;}
 int setup_native_release_pair(const archive_source_info_t pair[2])
 {return pair[0].bytes!=admitted[0].bytes||pair[1].bytes!=admitted[1].bytes||
  memcmp(pair[0].sha256,admitted[0].sha256,32)||memcmp(pair[1].sha256,admitted[1].sha256,32)?-1:0;}
@@ -108,6 +110,12 @@ int main(int argc,char **argv)
  init(&r,SHZ_NATIVE_OPEN);strcpy(r.path,"C:\\SHZ\\INPUTS\\SECOND.BIN");CHECK(call(&process,&r)==STATUS_SUCCESS);b=r.handle;memcpy(&admitted[1],&r.source,sizeof r.source);
  CHECK(call(&process,&r)!=STATUS_SUCCESS); /* two source slots only */
  {fsnode_t *node=fs_create("C:\\TEMP\\CREATED.BIN",0,&created);CHECK(node!=0);CHECK(fs_write(node,0,"x",1)==0);node->readonly=1;}
+ init(&r,SHZ_NATIVE_ADMIT);r.handle=a;r.index=0;
+#ifdef SHZ_TEST_COMPILED_ADMISSION
+ CHECK(call(&process,&r)==STATUS_SUCCESS);r.index=1;CHECK(call(&process,&r)==STATUS_ACCESS_DENIED);r.handle=b;r.index=1;CHECK(call(&process,&r)==STATUS_SUCCESS);
+#else
+ CHECK(call(&process,&r)==STATUS_ACCESS_DENIED);
+#endif
  init(&r,SHZ_NATIVE_REVIEW);r.handle=a;r.other_handle=b;r.index=1;
 #ifndef SHZ_TEST_COMPILED_ADMISSION
  CHECK(call(&process,&r)==STATUS_ACCESS_DENIED);CHECK(!writes&&!reads&&!flushes);

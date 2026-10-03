@@ -11,6 +11,7 @@ The 472-byte shared boot ABI prefix and `shz_abi.h` are unchanged.
 | --- | --- |
 | caps | actual transport bounds; independent producer admission availability |
 | open/info/read/close | accepted loader archive membership + private PMM snapshot custody |
+| admit | independent compiled producer source record for role 0 manifest / role 1 SIM; no caller SHA authority |
 | review/claim | two independently admitted source snapshots + real block registry/roles/exclusive claim |
 | check/read/write/flush/release | retained exact whole ID/generation; actual atomic block authority operation |
 
@@ -46,11 +47,32 @@ snapshot admission rejects individual files above 256 MiB; caps states that exac
 limit. A larger genuine SIM needs separately reviewed retained immutable extent
 or physical source custody, rather than silently raising a memory bound.
 
-`win64/setup/native_syscall.c` reaches the generated ntdll syscall stub; the
-build's export ordinals and transitive source receipt include the new ABI. This
-transport is not yet the complete `native_setup_ops_v1` user backend. The actual
-installer's native NULL backend is retained pending that connection and genuine
-producer admission. No installed Windows98 or guest execution is claimed.
+`win64/setup/native_syscall.c` reaches the generated ntdll syscall stub. The
+complete user adapter in `native_runtime.c` constructs every native source,
+status-returning SHA, review/claim, relocation, disk info, atomic read/write/flush
+and release callback. It reuses the actual accounts SHA256 core. Legacy platform
+file/raw disk callbacks are never used for native input or target IO. Source
+reads are chunked to the real transport limit; native target IO is capped at
+128 sectors. Display name/serial are labels, while actual ID/generation and role
+admission remain kernel-owned. Snapshot checks authenticate retained immutable
+copies rather than a later mutable namespace re-open.
+
+The actual `/native` CLI selects this full provider only if real kernel caps
+reports independent admission present. Current production absence retains the
+NULL failclosed fallback before source opens or device enumeration. The CLI's
+explicit `/index`, `/whole-id` (32 lowercase hex digits) and `/generation` are
+previously reviewed comparison inputs, never kernel authority. With a provider
+available, these three fields are required and disk enumeration is initialized
+before executing native setup. Existing manifest pin, target label/serial/size
+and exact `ERASE` remain required. An unobserved serial remains unavailable:
+AHCI now decodes only actual ATA IDENTIFY words10..19 and transfers them to block
+metadata; device query also preserves an actual driver-observed NVMe serial.
+No fabricated serial replaces missing hardware observations.
+
+A complete actual Windows98 producer output and compiled independently verified
+release record constructor are still absent. Source hash equality and successful
+host callbacks cannot activate production admission or prove guest acceptance.
+No installed Windows98 or guest execution is claimed by this increment.
 
 ## Verification
 
@@ -58,6 +80,9 @@ producer admission. No installed Windows98 or guest execution is claimed.
 python3 shizukudos/kernel64/host/test_setup_native_sys.py
 NATIVE_HOST_COMPILER=/usr/bin/clang python3 shizukudos/kernel64/host/test_setup_native_sys.py
 python3 shizukudos/kernel64/host/test_setup_native_abi.py
+python3 shizukudos/kernel64/host/test_native_runtime.py
+NATIVE_HOST_COMPILER=/usr/bin/clang python3 shizukudos/kernel64/host/test_native_runtime.py
+python3 drivers/ahci_native/test.py
 ```
 
 Tests compile the real service, archive parser/namespace/snapshot, registry,
@@ -65,3 +90,16 @@ partition routing and atomic block authority. User copy, PMM, IRQ, driver and
 firmware are host models. Production-default tests prove absent admission denies
 all target work. Explicitly labelled HOST-ONLY admission substitutes exercise
 atomic claim/IO and poison retention; these are not native producer evidence.
+
+The runtime tests link the actual installer/core/provider/pure relocator and all
+callback connections to the actual syscall/archive/block authority bodies.
+They exercise all runtime methods, actual SHA `abc` digest, chunked reads above
+64 KiB, stale review rejection, zero legacy raw calls, safe and poisoned cleanup, mandatory close/release reply failures.
+They exercise callback integration; a complete native FAT32 install via this
+specific runtime and an actual admitted Windows producer remains unexecuted.
+The existing standalone actual-provider/FAT32 core host suite supplies separate
+storage-copy/relocation controls, also using synthetic host inputs.
+
+ATA serial field placement was checked against primary
+[EDK II ATA_IDENTIFY_DATA](https://raw.githubusercontent.com/tianocore/edk2/master/MdePkg/Include/IndustryStandard/Atapi.h).
+No EDK implementation was copied into the decoder.

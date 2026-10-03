@@ -190,6 +190,7 @@ int ahci_blk_init(void)
     dev.storage.unit=disk.port;dev.storage.multiplier=0xffff;
     dev.storage.sectors=dev.sectors;dev.storage.block_size=dev.sector_size;
     memcpy(dev.model,disk.identity.model,sizeof dev.model);
+    memcpy(dev.serial,disk.identity.serial,sizeof dev.serial);
     dev.flags=(disk.identity.features&AHCI_FEATURE_FLUSH_EXT)?BLK_F_FLUSH:0;
     dev.driver = "ahci";                            /* storage-track metadata (blk.h extensions) */
     dev.irq_mode = "poll";

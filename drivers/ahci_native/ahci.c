@@ -201,6 +201,19 @@ int ahci_parse_identify(const uint8_t data[512], struct ahci_identity *out)
         identity.model[i]=(char)(c>=32 && c<127?c:'?');
     }
     for(i=40;i>0 && identity.model[i-1]==' ';--i) identity.model[i-1]=0;
+    /* ATA IDENTIFY words 10..19: word-swapped ASCII serial, not a generated
+     * label. Preserve absence on invalid/empty data rather than inventing a
+     * selector. Both ends are space-padded by actual device firmware. */
+    {
+        unsigned first=0,last=20,valid=1,j;
+        char serial[20];
+        for(j=0;j<20;++j){uint8_t c=data[20+(j^1u)];serial[j]=(char)c;if(c<32||c>=127)valid=0;}
+        if(valid){
+            while(first<last&&serial[first]==' ')first++;
+            while(last>first&&serial[last-1]==' ')last--;
+            for(j=first;j<last;++j)identity.serial[j-first]=serial[j];
+        }
+    }
     copy(out,&identity,sizeof(identity));
     return AHCI_OK;
 }

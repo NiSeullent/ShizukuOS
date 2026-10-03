@@ -9,7 +9,7 @@
 #define SHZ_NATIVE_SYS_SOURCE_MAX (256ull<<20)
 enum { SHZ_NATIVE_CAPS=0, SHZ_NATIVE_OPEN=1, SHZ_NATIVE_INFO=2, SHZ_NATIVE_READ=3,
  SHZ_NATIVE_CLOSE=4, SHZ_NATIVE_REVIEW=5, SHZ_NATIVE_CLAIM=6, SHZ_NATIVE_CHECK=7,
- SHZ_NATIVE_TARGET_READ=8, SHZ_NATIVE_TARGET_WRITE=9, SHZ_NATIVE_FLUSH=10, SHZ_NATIVE_RELEASE=11 };
+ SHZ_NATIVE_TARGET_READ=8, SHZ_NATIVE_TARGET_WRITE=9, SHZ_NATIVE_FLUSH=10, SHZ_NATIVE_RELEASE=11, SHZ_NATIVE_ADMIT=12 };
 /* Versioned wire ABI: addresses are user VA only, handles are opaque integers.
  * No process/device pointers or caller approval/role/producer flags cross it. */
 typedef struct { uint8_t whole_id[16]; uint64_t generation,sectors; uint32_t sector_size,flags; } shz_native_target_v1;

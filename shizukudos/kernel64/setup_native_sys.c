@@ -4,7 +4,7 @@
 #include "setup_native_release.h"
 #include "blk_authority.h"
 #define OWNERS 16u
-struct source { uint64_t token; archive_source_t *cap; archive_source_info_t info; };
+struct source { uint64_t token; archive_source_t *cap; archive_source_info_t info; unsigned admitted,role; };
 struct owner {
  process_t *process; int pid; unsigned retired;
  struct source sources[2];
@@ -46,7 +46,7 @@ static blk_dev_t *device(unsigned index)
 static int pair(struct owner *o,const shz_native_call_v1 *r,blk_authority_source_t pins[2])
 {
  struct source *a=source_for(o,r->handle),*b=source_for(o,r->other_handle);archive_source_info_t infos[2];
- if(!a||!b||a==b||archive_source_info(o,a->cap,&a->info,&infos[0])||archive_source_info(o,b->cap,&b->info,&infos[1])||
+ if(!a||!b||a==b||!a->admitted||a->role!=0||!b->admitted||b->role!=1||archive_source_info(o,a->cap,&a->info,&infos[0])||archive_source_info(o,b->cap,&b->info,&infos[1])||
   setup_native_release_pair(infos)||blk_authority_pin_archive(o,a->cap,&a->info,&pins[0])||
   blk_authority_pin_archive(o,b->cap,&b->info,&pins[1]))return -1;
  return 0;
@@ -64,7 +64,7 @@ int32_t setup_native_syscall(process_t *p,uint64_t user,uint64_t bytes)
  if(!p||p->teardown)return STATUS_ACCESS_DENIED;
  if(bytes!=sizeof r)return STATUS_INFO_LENGTH_MISMATCH;
  if(copy_from_user(p,&r,user,sizeof r))return STATUS_ACCESS_VIOLATION;
- if(r.version!=SHZ_NATIVE_SYS_VERSION||r.bytes!=sizeof r||r.reserved||r.tail_reserved||r.operation>SHZ_NATIVE_RELEASE)
+ if(r.version!=SHZ_NATIVE_SYS_VERSION||r.bytes!=sizeof r||r.reserved||r.tail_reserved||r.operation>SHZ_NATIVE_ADMIT)
   return STATUS_INVALID_PARAMETER;
  acquire();if(p->teardown)goto done;
  if(r.operation==SHZ_NATIVE_CAPS){
@@ -81,10 +81,18 @@ int32_t setup_native_syscall(process_t *p,uint64_t user,uint64_t bytes)
   if(!rc){s->token=new_token;r.handle=new_token;memcpy(&r.source,&s->info,sizeof r.source);created_source=1;}
   break;
  case SHZ_NATIVE_INFO:
+ case SHZ_NATIVE_ADMIT:
  case SHZ_NATIVE_READ:
  case SHZ_NATIVE_CLOSE:
   s=source_for(o,r.handle);if(!s){status=STATUS_INVALID_HANDLE;break;}
-  if(r.operation==SHZ_NATIVE_INFO){archive_source_info_t info;rc=archive_source_info(o,s->cap,&s->info,&info);if(!rc)memcpy(&r.source,&info,sizeof r.source);}
+  if(r.operation==SHZ_NATIVE_ADMIT){
+   archive_source_info_t info;
+   if(r.index>1||(s->admitted&&s->role!=r.index))break;
+   rc=archive_source_info(o,s->cap,&s->info,&info);
+   if(!rc)rc=setup_native_release_source(&info,r.index);
+   if(!rc){s->admitted=1;s->role=r.index;memcpy(&r.source,&info,sizeof r.source);}
+  }
+  else if(r.operation==SHZ_NATIVE_INFO){archive_source_info_t info;rc=archive_source_info(o,s->cap,&s->info,&info);if(!rc)memcpy(&r.source,&info,sizeof r.source);}
   else if(r.operation==SHZ_NATIVE_CLOSE){rc=archive_source_close(o,s->cap,&s->info);if(!rc)memset(s,0,sizeof *s);}
   else{
    if(!r.length||r.length>sizeof bounce){status=STATUS_INVALID_PARAMETER;break;}

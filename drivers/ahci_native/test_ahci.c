@@ -599,8 +599,24 @@ static void batch_errors_and_callback_failures(void)
         printf("Batch %s: fault injected after each of %u callbacks\n",op?"write":"read",total);
     }
 }
+static void actual_identify_serial(void)
+{
+    struct model m;struct ahci_identity id;unsigned i;
+    const char padded[21]="  SN-12345          ";
+    const char full[21]="12345678901234567890";
+    reset(&m);CHECK(ahci_parse_identify(m.identify,&id)==AHCI_OK && !id.serial[0]);
+    for(i=0;i<20;i++)m.identify[20+(i^1u)]=(uint8_t)padded[i];
+    CHECK(ahci_parse_identify(m.identify,&id)==AHCI_OK && !strcmp(id.serial,"SN-12345"));
+    for(i=0;i<20;i++)m.identify[20+(i^1u)]=(uint8_t)full[i];
+    CHECK(ahci_parse_identify(m.identify,&id)==AHCI_OK && !strcmp(id.serial,full) && !id.serial[20]);
+    m.identify[20]=0x80;CHECK(ahci_parse_identify(m.identify,&id)==AHCI_OK && !id.serial[0]);
+    memset(m.identify+20,' ',20);CHECK(ahci_parse_identify(m.identify,&id)==AHCI_OK && !id.serial[0]);
+    memset(m.identify+20,0xff,20);CHECK(ahci_parse_identify(m.identify,&id)==AHCI_OK && !id.serial[0]);
+    memset(m.identify+20,0,20);CHECK(ahci_parse_identify(m.identify,&id)==AHCI_OK && !id.serial[0]);
+}
 int main(void)
 {
+    actual_identify_serial();
     success_and_bounds();callback_failures();command_errors();capability_and_dma_errors();identify_errors();
     write_read_flush();write_callback_failures();write_command_errors();
     sparse_ports_and_initial_state();
