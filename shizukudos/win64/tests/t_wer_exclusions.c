@@ -2,7 +2,7 @@
  * Query real registry state independently of WER. Only absent, uniquely named
  * fixture values are changed; existing exclusion values and keys are retained. */
 #include "k32test.h"
-#include <werapi.h>
+#include "wer_exclusions.h"
 
 static const WCHAR list_path[] = L"Software\\Microsoft\\Windows Error Reporting\\ExcludedApplications";
 static WCHAR user_name[120], machine_name[120], worker_name[120];
