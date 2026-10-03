@@ -47,6 +47,7 @@ KERNEL_PATCH_NAMES = (
     "0003-dosmgr-honest-contract.patch",
     "0004-win-startup-chain.patch",
     "0005-korean-cp949-nls.patch",
+    "0006-win98-registry-path.patch",
 )
 PATCHES = [SHZ / "dos16" / "patches" / name for name in KERNEL_PATCH_NAMES]
 FREECOM_PATCHES = sorted((SHZ / "dos16" / "patches").glob("freecom-*.patch"))

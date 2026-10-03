@@ -1,0 +1,133 @@
+--- a/kernel/inthndlr.c
++++ b/kernel/inthndlr.c
+@@ -36,6 +36,74 @@
+ 
+ #ifdef WIN31SUPPORT
+ STATIC UWORD winActiveVersion; /* actual DI from 1605; not the record format version */
++
++/* Source-written MS-DOS7 registry pathname contract; no implicit default.
++   These buffers are resident kernel data, not reclaimed initialization data. */
++#define WIN_REGISTRY_MAX 78
++STATIC BYTE winRegistryPath[WIN_REGISTRY_MAX + 1];
++
++STATIC BOOL winRegistryPathValid(const BYTE *path, UWORD length)
++{
++  UWORD i, base = 0, extension = 0;
++  BOOL dot = FALSE;
++  if (length < 4 ||
++      !((path[0] >= 'A' && path[0] <= 'Z') ||
++        (path[0] >= 'a' && path[0] <= 'z')) ||
++      path[1] != ':' || path[2] != '\\')
++    return FALSE;
++  for (i = 3; i < length; ++i)
++  {
++    BYTE c = path[i];
++    if (c == '\\')
++    {
++      if (!base || (dot && !extension)) return FALSE;
++      base = extension = 0; dot = FALSE;
++    }
++    else if (c == '.')
++    {
++      if (!base || dot) return FALSE;
++      dot = TRUE;
++    }
++    else
++    {
++      if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
++            (c >= '0' && c <= '9') || c == '_' || c == '-'))
++        return FALSE;
++      if (dot) { if (++extension > 3) return FALSE; }
++      else { if (++base > 8) return FALSE; }
++    }
++  }
++  return base && (!dot || extension);
++}
++
++STATIC UWORD winRegistrySet(const BYTE FAR *source)
++{
++  BYTE staged[WIN_REGISTRY_MAX + 1];
++  UWORD i;
++  for (i = 0; i <= WIN_REGISTRY_MAX; ++i)
++  {
++    if ((ULONG)FP_OFF(source) + i > 0xfffful) return WIN_REGISTRY_MAX;
++    staged[i] = source[i];
++    if (!staged[i]) break;
++  }
++  if (i > WIN_REGISTRY_MAX || !winRegistryPathValid(staged, i))
++    return WIN_REGISTRY_MAX;
++  /* Validate completely before changing the resident state. */
++  memcpy(winRegistryPath, staged, i + 1);
++  return 0;
++}
++
++STATIC UWORD winRegistryGet(BYTE FAR *destination, UWORD capacity)
++{
++  UWORD length;
++  if (!winRegistryPath[0]) return 0x1613;
++  length = strlen(winRegistryPath) + 1;
++  if (capacity < length || (ULONG)FP_OFF(destination) + length > 0x10000ul)
++    return WIN_REGISTRY_MAX;
++  fmemcpy(destination, winRegistryPath, length);
++  /* The actual original DOS query preserves caller CX (observed capacity80). */
++  return 0;
++}
+ #endif
+ 
+ #ifdef VERSION_STRINGS
+@@ -1992,6 +2060,12 @@
+     switch (r.AL)
+     {
+       /* default: unhandled requests pass through unchanged */
++      case 0x13:          /* MS-DOS7: get configured SYSTEM.DAT pathname */
++        r.AX = winRegistryGet(MK_FP(r.es, r.DI), r.CX);
++        break;
++      case 0x14:          /* MS-DOS7: set explicit SYSTEM.DAT pathname */
++        r.AX = winRegistrySet(MK_FP(r.es, r.DI));
++        break;
+       case 0x0:          /* is Windows active */
+       {
+         if (winInstanced && !winReportHidden)
+--- a/kernel/config.c
++++ b/kernel/config.c
+@@ -185,6 +185,7 @@
+ STATIC VOID Dosmem(BYTE * pLine);
+ STATIC VOID DosData(BYTE * pLine);
+ STATIC VOID Country(BYTE * pLine);
++STATIC VOID CfgWinReg(BYTE * pLine);
+ STATIC VOID InitPgm(BYTE * pLine);
+ STATIC VOID InitPgmHigh(BYTE * pLine);
+ STATIC VOID CmdInstall(BYTE * pLine);
+@@ -273,6 +274,7 @@
+   {"BUFFERSHIGH", 1, CfgBuffersHigh}, /* as BUFFERS - we use HMA anyway */
+   {"COMMAND", 1, InitPgm},
+   {"COUNTRY", 1, Country},
++  {"WINREG", 1, CfgWinReg},
+   {"DOS", 1, Dosmem},
+   {"DOSDATA", 1, DosData},
+   {"FCBS", 1, Fcbs},
+@@ -1677,6 +1679,24 @@
+   return rc;
+ }
+ 
++STATIC VOID CfgWinReg(BYTE * pLine)
++{
++  iregs r;
++  BYTE *tail = GetStringArg(pLine, szBuf);
++  tail = skipwh(tail);
++  if (*tail && *tail != '\r' && *tail != '\n')
++  {
++    CfgFailure(pLine);
++    return;
++  }
++  memset(&r, 0, sizeof(r));
++  r.a.x = 0x1614;
++  r.es = FP_SEG((BYTE FAR *)szBuf);
++  r.di = FP_OFF((BYTE FAR *)szBuf);
++  init_call_intr(0x2f, &r);
++  if (r.a.x != 0) CfgFailure(pLine);
++}
++
+ STATIC VOID Country(BYTE * pLine)
+ {
+   /* Format: COUNTRY = countryCode, [codePage], filename   */
