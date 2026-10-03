@@ -15,6 +15,17 @@ WATCOM_SHA = '4fdc24c04a02e31ffedae1690fc2c6d53fcb01464f92692adf6b17a7e890af3f'
 # must come from the separately reviewed actual producer, not this generator.
 NATIVE_SOURCE_MAP_SHA = None
 NATIVE_ARTIFACTS = None
+# Actual source-built public BIOS, independently checked against the producer's
+# complete source archive, generated inputs, original tools and closed unit.
+# Native ESP production must use these exact bytes; old packaged BIOS refuses.
+NATIVE_SYSTEM_BIOS_SOURCE = {
+    'artifact': (262144, '7181de0b555e78ea05ca7fa16702f732d4abf71f44ab572ff8d23510ec85638e'),
+    'receipt': (34850, 'b864a9c952d98359601cd3c916c0fb64873f90ccefd55fc2125018f33ce6bcd4'),
+    'source_archive': (2877440, 'deeccf47da2716463f99bc59bb5e2e0e84af23f8a8d88a954e1fe72b77b09c04'),
+    'source_commit': '578d260b94f62150bf6ab9149784287bd1154f06',
+    'source_map_sha256': 'ff41cd97810efc0c509159d7c16e5d431b5f57e9168839569258c4dc96fc83fc',
+    'tool_map_sha256': '0b246662b8a6e1cc76841f80d71f96dfb21e8706d5ce4a197ee20be5efe092ba',
+}
 # Real completed-control checkpoint authority is independently owned and private.
 GENUINE_BASELINE = None
 
