@@ -3,15 +3,15 @@
  * NtQuerySection / NtFlushVirtualMemory): the memory behind CreateFileMapping / MapViewOfFile, shared between every
  * process that maps the same section object (by name, inherited or duplicated handle).
  *
- * A section owns its physical pages. They are created on first touch (demand zero, or read from the backing file), are
- * mapped into every view of every process, and are freed only when the section object dies - which needs the last handle
- * AND the last view to be gone (each view holds an object reference). Page tables of a process therefore never own a view
- * page: views are unmapped before process_teardown() frees the address space, and NtFreeVirtualMemory refuses views.
+ * Anonymous sections own their physical pages. File sections hold references to resident pages keyed by the retained
+ * file node and page index, so independent sections on the same local file see each other's mapped writes. Pages are
+ * created on first touch and released when their last section dies, after its last handle AND view are gone (each view
+ * holds an object reference). Process page tables never own a view page: views are unmapped before process_teardown()
+ * frees the address space, and NtFreeVirtualMemory refuses views.
  *
  *   - pagefile-backed sections (no file) are zero-filled;
- *   - file-backed sections read the file lazily per page; pages of a writable file section are written back to the file on
- *     FlushViewOfFile, on unmap and when the section dies (the RAM file system has no page cache to share, so ReadFile sees
- *     view writes after one of those points - the only deviation from Windows' fully coherent cache);
+ *   - file-backed sections share lazily read resident pages; writable sections write them back on FlushViewOfFile,
+ *     on unmap and when the section dies. Direct ReadFile/WriteFile accesses remain outside this mapped-page cache;
  *   - PAGE_WRITECOPY / PAGE_EXECUTE_WRITECOPY views share pages until the first write, which gives that view (only) a
  *     private copy;
  *   - SEC_RESERVE sections map as reserved and are committed with VirtualAlloc(MEM_COMMIT) inside the view.
@@ -113,6 +113,110 @@ static int32_t sys_open_section(process_t *p, uint64_t ph, uint64_t access, uint
 }
 
 /* ---------------------------------------------------------------- section pages (interrupts off) */
+/* The node's open_count is held by each section until its page references have
+ * been released. Do not retain bare node pointers after the last reference.
+ * A separate cache lock serializes independent sections' acquisitions; existing
+ * per-section/view mutation still follows the caller's interrupt-off contract. */
+#define FILE_PAGE_BUCKETS 256u
+typedef struct file_page {
+    struct file_page *next;
+    fsnode_t *node;
+    uint64_t index, pa, refs;
+} file_page_t;
+static file_page_t *file_pages[FILE_PAGE_BUCKETS];
+static uint64_t file_page_epochs[FILE_PAGE_BUCKETS];
+static uint32_t file_pages_lock;
+
+static unsigned file_page_bucket(fsnode_t *node, uint64_t index)
+{
+    return (unsigned)(((uint64_t)node >> 4) ^ index ^ (index >> 8)) & (FILE_PAGE_BUCKETS - 1);
+}
+
+static uint64_t file_page_lock(void)
+{
+    const uint64_t f = irq_save();
+    while (__atomic_exchange_n(&file_pages_lock, 1, __ATOMIC_ACQUIRE)) __asm__ volatile("pause");
+    return f;
+}
+
+static void file_page_unlock(uint64_t f)
+{
+    __atomic_store_n(&file_pages_lock, 0, __ATOMIC_RELEASE);
+    irq_restore(f);
+}
+
+static uint64_t file_page_acquire(fsnode_t *node, uint64_t index)
+{
+    const unsigned bucket = file_page_bucket(node, index);
+    file_page_t *p, *candidate;
+    uint64_t f, pa, epoch;
+    for (;;) {
+        uint64_t done = 0;
+        f = file_page_lock();
+        for (p = file_pages[bucket]; p; p = p->next) {
+            if (p->node != node || p->index != index) continue;
+            pa = p->refs == UINT64_MAX ? 0 : p->pa;
+            if (pa) ++p->refs;
+            file_page_unlock(f);
+            return pa;
+        }
+        epoch = file_page_epochs[bucket];
+        file_page_unlock(f);
+        /* Allocators and VFS may take other locks: keep them outside the cache
+         * lock. A second lookup publishes only one page if faults race. */
+        candidate = kzalloc(sizeof *candidate);
+        if (!candidate) return 0;
+        pa = pmm_alloc();
+        if (!pa || fs_read(node, index * PAGE_SIZE, (void *)p2v(pa), PAGE_SIZE, &done)) {
+            if (pa) pmm_free(pa);
+            kfree(candidate);
+            return 0;
+        }
+        candidate->node = node; candidate->index = index;
+        candidate->pa = pa; candidate->refs = 1;
+        f = file_page_lock();
+        for (p = file_pages[bucket]; p; p = p->next) {
+            if (p->node != node || p->index != index) continue;
+            const uint64_t existing = p->refs == UINT64_MAX ? 0 : p->pa;
+            if (existing) ++p->refs;
+            file_page_unlock(f);
+            pmm_free(pa);
+            kfree(candidate);
+            return existing;
+        }
+        if (epoch != file_page_epochs[bucket]) {
+            /* An intervening page could have been published, changed, written
+             * back and finally released. Never publish our older read snapshot. */
+            file_page_unlock(f);
+            pmm_free(pa);
+            kfree(candidate);
+            continue;
+        }
+        candidate->next = file_pages[bucket]; file_pages[bucket] = candidate;
+        ++file_page_epochs[bucket];
+        file_page_unlock(f);
+        return pa;
+    }
+}
+
+static void file_page_release(fsnode_t *node, uint64_t index, uint64_t pa)
+{
+    const unsigned bucket = file_page_bucket(node, index);
+    file_page_t **pp, *p;
+    const uint64_t f = file_page_lock();
+    for (pp = &file_pages[bucket]; (p = *pp) != 0; pp = &p->next) {
+        if (p->node != node || p->index != index || p->pa != pa) continue;
+        if (--p->refs) { file_page_unlock(f); return; }
+        *pp = p->next;
+        ++file_page_epochs[bucket];
+        file_page_unlock(f);
+        pmm_free(pa);
+        kfree(p);
+        return;
+    }
+    file_page_unlock(f);
+}
+
 static uint64_t *leaf_of(section_t *s, uint64_t idx, int create)
 {
     uint64_t *d = &s->dir[idx >> 9];
@@ -132,12 +236,8 @@ static uint64_t section_page(section_t *s, uint64_t idx, int create)
     leaf = leaf_of(s, idx, create);
     if (!leaf) return 0;
     if (leaf[idx & 511] || !create) return leaf[idx & 511];
-    pa = pmm_alloc();
+    pa = s->node ? file_page_acquire(s->node, idx) : pmm_alloc();
     if (!pa) return 0;
-    if (s->node) {
-        uint64_t done = 0;
-        fs_read(s->node, idx * PAGE_SIZE, (void *)p2v(pa), PAGE_SIZE, &done);
-    }
     leaf[idx & 511] = pa;
     ++s->resident;
     return pa;
@@ -174,7 +274,10 @@ void section_free(kobject_t *o)
         uint64_t *leaf, i;
         if (!s->dir[d]) continue;
         leaf = (uint64_t *)p2v(s->dir[d]);
-        for (i = 0; i < 512; ++i) if (leaf[i]) pmm_free(leaf[i]);
+        for (i = 0; i < 512; ++i) if (leaf[i]) {
+            if (s->node) file_page_release(s->node, d * 512 + i, leaf[i]);
+            else pmm_free(leaf[i]);
+        }
         pmm_free(s->dir[d]);
     }
     if (s->node) {
