@@ -29,6 +29,13 @@ the independently constructed 2 GiB private FAT32 disk, observed installed
 `WIN.COM`/`SYSTEM.INI`/`SYSTEM/VMM32.VXD`/`IFSHLP.SYS`, and its exact
 `shz.foundation=win98` CONFIG/AUTOEXEC with one observed `WIN.COM` invocation.
 Observed NLS dependencies are preserved; COUNTRY-only startup is refused.
+The ordered DOS producer includes the source-written Korean CP949 NLS patch.
+The held source-profile producer may preserve one observed Windows BILING.SYS
+DEVICE/DEVICEHIGH line without arguments and select explicit COUNTRY=82,949
+configuration. The importer independently reconstructs those startup bytes,
+checks BILING against the original CONFIG.SYS and unchanged installed file,
+and refuses duplicate drivers, injected arguments or claimed locale runtime
+authority. Explicit locale selection remains configuration, not guest proof.
 The exact held source-profile policy functions rederive installed paths and
 locale rows from original FAT CONFIG/AUTOEXEC contents before those rows can be
 replayed; rebound metadata cannot add a second WIN.COM invocation.

@@ -28,7 +28,7 @@ BLOCK = 4096
 FLOOR = 17 << 30
 CONSTRUCTOR_SHA = '1275da21ea913689b37e93503d6ddcf5defdb35736ac4cf5740a0f2de28729cd'
 FAT_READER_SHA = 'c5941f761598107cfb408c5508ee8080a7c81113a1e37f91f72d49868d3d8387'
-PROFILE_PRODUCER_SHA = '2261a9d290addc2611da19505c4867174ebb52fedea684d6f058c003d055f1e0'
+PROFILE_PRODUCER_SHA = '76d84cce05a1416ecaa7023b0894c8ffb1a1c22ad7c0b7ad7dbcc610b2de5f57'
 XMS_SHA = '5e0ed027a150ac1c198e994ca248245c07c1f44796bc0791448afbcf29789211'
 XMS_COMMITS = {'HimemX':'bbaf6b8951cdac785f1f4e9b67c25439c5bf8e75',
                'JWasm':'7f6f32e78b79565d40bcce496756aadd1ff66900'}
@@ -48,6 +48,7 @@ DOS_PATCHES = (
     ('0003-cb43-win98-dos-internals.patch', 'a68f2a6bec6b378f69727bd32b386c097ed926323a98c5e34fb109ccdda10ce0'),
     ('0003-dosmgr-honest-contract.patch', '9ea1d25225664d41d0ba5be40e34455804932272b2f2f6808767e1bf14fc078d'),
     ('0004-win-startup-chain.patch', '72c0dab2e288159523cf3c018abccf3cd895e41c0c4150c6c60678a6c5882eef'),
+    ('0005-korean-cp949-nls.patch', '32de944d45cce7e6fbe9c2ef8345735a005d032dd2f6c5f7ecb808ee7fa72a71'),
     ('freecom-0001-reproducible-build-stamp.patch', 'ff9d333927637beb775a3d33fb42181026d4847f5523fdaa069553f68db2d76e'),
 )
 SCHEMA = 'shizukuos.private-native-install-payload.v1'
@@ -193,12 +194,46 @@ def startup_policy(source, held):
     row=next(r for r in source['producer_inputs'] if Path(r['path']).name=='win98_source_profile.py')
     need(row['sha256']==PROFILE_PRODUCER_SHA,'exact source-profile policy epoch required')
     tree=ast.parse(held.bytes(row,1<<20),filename=row['path'])
-    names={'dos_lines','installed_paths','require_file','locale_lines'}
+    names={'dos_lines','installed_paths','require_file','locale_lines','biling_lines'}
     functions=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name in names]
     need({n.name for n in functions}==names and len(functions)==len(names),'exact reviewed startup policy functions required')
     policy={'need':need,'re':re}
     held.check();exec(compile(ast.Module(body=functions,type_ignores=[]),row['path'],'exec'),policy);held.check()
     return policy
+
+
+def startup_configuration(source, selected):
+    """Reconstruct admitted startup bytes; configuration never grants authority."""
+    locale = source.get('locale', {})
+    country, nls = locale.get('country'), locale.get('nls')
+    need(type(country) is list and type(nls) is list and len(country)<=1 and len(nls)<=1 and
+         (not country or nls), 'observed locale arrays required; COUNTRY-only startup refused')
+    biling = source.get('observed_biling_driver', [])
+    need(type(biling) is list and len(biling)<=1, 'bounded observed BILING selection required')
+    for line in country+nls+biling:
+        need(type(line) is str and len(line)<=250 and all(32<=ord(c)<=126 for c in line) and
+             not any(c in line for c in '&|<>%'), 'bounded observed locale line required')
+    for line in biling:
+        match = re.fullmatch(r'(DEVICE|DEVICEHIGH)\s*=\s*([^\s]+)', line, re.I)
+        need(match and match[2].upper()==selected+'\\BILING.SYS',
+             'exact observed Windows BILING path without arguments required')
+    initial = source.get('initial_locale_configuration')
+    if initial is not None:
+        need(type(initial) is dict and set(initial)=={'country','codepage','origin','runtime_verified','observed_query_authority'} and
+             type(initial['country']) is int and type(initial['codepage']) is int and
+             initial['country']==82 and initial['codepage']==949 and initial['origin']=='explicit_request' and
+             initial['runtime_verified'] is False and initial['observed_query_authority'] is False,
+             'explicit locale configuration cannot claim runtime or observed authority')
+        need(not country, 'explicit initial locale cannot override observed COUNTRY')
+    initial_country = 'COUNTRY=82,949\r\n' if initial is not None else ''
+    windows = selected[3:]
+    config = (initial_country+'DEVICE=C:\\HIMEMX.EXE /VERBOSE\r\n'+''.join(v+'\r\n' for v in biling)+
+              'DEVICE='+selected+'\\IFSHLP.SYS\r\nDOS=HIGH\r\nFILES=30\r\nBUFFERS=20\r\n'
+              'SHELL=C:\\COMMAND.COM C:\\ /E:512 /P\r\n'+''.join(v+'\r\n' for v in country)).encode('ascii')
+    auto = ('@ECHO OFF\r\nSET COMSPEC=C:\\COMMAND.COM\r\nSET windir='+selected+'\r\nSET PATH='+selected+
+            ';'+selected+'\\COMMAND;C:\\\r\nC:\r\nCD \\'+windows+'\r\n'+''.join(v+'\r\n' for v in nls)+
+            selected+'\\WIN.COM\r\n').encode('ascii')
+    return config, auto, country, nls, biling
 
 
 def xms_lineage(source, payload, held):
@@ -325,14 +360,8 @@ def validate_lineage(request, held):
     xms_lineage(source,rows['HIMEMX.EXE'],held)
     for name in ('KERNEL.SYS','COMMAND.COM'):
         need(member_equal(dos.get('artifacts',{}).get(name.lower()),rows[name]), 'DOS payload artifact differs from raw DOS receipt')
-    locale = source.get('locale', {}); country,nls = locale.get('country'),locale.get('nls')
-    need(type(country) is list and type(nls) is list and len(country)<=1 and len(nls)<=1 and
-         (not country or nls), 'observed locale arrays required; COUNTRY-only startup refused')
-    for line in country+nls:
-        need(type(line) is str and len(line) <= 250 and all(32<=ord(c)<=126 for c in line) and not any(c in line for c in '&|<>%'), 'bounded observed locale line required')
+    config, auto, country, nls, biling = startup_configuration(source, selected)
     windows = selected[3:]
-    config = ('DEVICE=C:\\HIMEMX.EXE /VERBOSE\r\nDEVICE='+selected+'\\IFSHLP.SYS\r\nDOS=HIGH\r\nFILES=30\r\nBUFFERS=20\r\nSHELL=C:\\COMMAND.COM C:\\ /E:512 /P\r\n'+''.join(v+'\r\n' for v in country)).encode('ascii')
-    auto = ('@ECHO OFF\r\nSET COMSPEC=C:\\COMMAND.COM\r\nSET windir='+selected+'\r\nSET PATH='+selected+';'+selected+'\\COMMAND;C:\\\r\nC:\r\nCD \\'+windows+'\r\n'+''.join(v+'\r\n' for v in nls)+selected+'\\WIN.COM\r\n').encode('ascii')
     need(held.bytes(rows['CONFIG.SYS']) == config and held.bytes(rows['AUTOEXEC.BAT']) == auto, 'observed WIN.COM startup policy differs')
     original = held.entries[path(profile['disk']['path'])]; disk = held.entries[path(destination['path'])]
     mbr = read_exact(original['fd'],512,0,held.check); active=[mbr[446+i*16:462+i*16] for i in range(4) if mbr[446+i*16]==0x80]
@@ -365,11 +394,14 @@ def validate_lineage(request, held):
     policy['installed_paths'](original_bytes('MSDOS.SYS'),selected)
     need(policy['locale_lines'](original_bytes('CONFIG.SYS'),original_bytes('AUTOEXEC.BAT'),windows,before)==(country,nls),
          'locale/startup rows are not the observed original source policy')
+    need(policy['biling_lines'](original_bytes('CONFIG.SYS'),windows,before)==biling,
+         'BILING selection is not the observed original source policy')
     for name,row in before.items():
         if name not in rows: need(after.get(name)==row, 'unrelated original Windows/private member changed')
     observed_windows=source.get('observed_members')
     required_windows={windows+'/'+name for name in ('WIN.COM','SYSTEM.INI','SYSTEM/VMM32.VXD','IFSHLP.SYS')}
     if country or nls:required_windows|={windows+'/COUNTRY.SYS',windows+'/COMMAND/NLSFUNC.EXE'}
+    if biling:required_windows.add(windows+'/BILING.SYS')
     need(type(observed_windows) is dict and set(observed_windows)==required_windows, 'exact observed Windows/locale file inventory required')
     for key,record in observed_windows.items():
         need(type(record) is dict and record.get('bytes',0)>0 and before.get(key)==record and after.get(key)==record, 'required observed installed Windows member differs')

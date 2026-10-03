@@ -117,10 +117,14 @@ def fat32(target, size, files, *, start=0, template=None):
 
 
 class Fixture:
-    def __init__(self, directory, m):
+    def __init__(self, directory, m, *, biling=False, initial_locale=False):
         self.p=directory;self.m=m;self.constructor=load(ROOT/'shizukudos/win98_boot/prepare_replacement.py','fixture_constructor')
         self.kernel=b'MODELED_KERNEL_NOT_RUN';self.command=b'MODELED_FREECOM_NOT_RUN';self.xms=b'MODELED_HIMEMX_NOT_RUN'.ljust(6100,b'\0')
         self.config=b'DEVICE=C:\\HIMEMX.EXE /VERBOSE\r\nDEVICE=C:\\WINDOWS\\IFSHLP.SYS\r\nDOS=HIGH\r\nFILES=30\r\nBUFFERS=20\r\nSHELL=C:\\COMMAND.COM C:\\ /E:512 /P\r\n'
+        biling_line='device=C:\\WINDOWS\\biling.sys'
+        if biling:
+            self.config=self.config.replace(b'DEVICE=C:\\WINDOWS\\IFSHLP.SYS',biling_line.encode()+b'\r\nDEVICE=C:\\WINDOWS\\IFSHLP.SYS')
+        if initial_locale:self.config=b'COUNTRY=82,949\r\n'+self.config
         self.nls='loadhigh C:\\WINDOWS\\COMMAND\\nlsfunc.exe C:\\WINDOWS\\country.sys'
         self.auto=b'@ECHO OFF\r\nSET COMSPEC=C:\\COMMAND.COM\r\nSET windir=C:\\WINDOWS\r\nSET PATH=C:\\WINDOWS;C:\\WINDOWS\\COMMAND;C:\\\r\nC:\r\nCD \\WINDOWS\r\n'+self.nls.encode()+b'\r\nC:\\WINDOWS\\WIN.COM\r\n'
         self.windows={'WINDOWS/WIN.COM':b'MODELED_WIN.COM', 'WINDOWS/SYSTEM.INI':b'[boot]\r\n',
@@ -128,6 +132,9 @@ class Fixture:
                       'WINDOWS/COUNTRY.SYS':b'MODELED_COUNTRY', 'WINDOWS/COMMAND/NLSFUNC.EXE':b'MODELED_NLSFUNC',
                       'MSDOS.SYS':b'[Paths]\r\nWinDir=C:\\WINDOWS\r\nWinBootDir=C:\\WINDOWS\r\nHostWinBootDrv=C\r\n',
                       'CONFIG.SYS':b'REM original startup\r\n','AUTOEXEC.BAT':self.nls.encode()+b'\r\n'}
+        if biling:
+            self.windows['WINDOWS/BILING.SYS']=b'MODELED_BILING_NOT_EXECUTED'
+            self.windows['CONFIG.SYS']+=biling_line.encode()+b'\r\n'
         template=bytearray(512);template[:3]=b'\xeb\x58\x90';struct.pack_into('<H',template,0x78,96)
         template[0x82:0x85]=b'\x88\x56\x40';template[0x1f1:0x1fc]=b'KERNEL  SYS';template[510:]=b'\x55\xaa'
         self.template=save(directory/'boot-template.bin',template)
@@ -192,6 +199,11 @@ class Fixture:
                      'constructor_input_validation':{**self.replacement,'status':'INPUTS_VALIDATED_REPLACEMENT_NOT_PREPARED'},
                      'observed_members':{k:inventory[k] for k in ('WINDOWS/WIN.COM','WINDOWS/SYSTEM.INI','WINDOWS/SYSTEM/VMM32.VXD','WINDOWS/IFSHLP.SYS','WINDOWS/COUNTRY.SYS','WINDOWS/COMMAND/NLSFUNC.EXE')},
                      'MSDOS.SYS_observation':inventory['MSDOS.SYS'],'original_config':{name:{'present':True,'bytes':inventory[name]['bytes'],'sha256':inventory[name]['sha256'],'source_metadata_sha256':inventory[name]['metadata_sha256']} for name in ('CONFIG.SYS','AUTOEXEC.BAT')}}
+        self.source['observed_biling_driver']=[biling_line] if biling else []
+        self.source['initial_locale_configuration']=None if not initial_locale else {
+            'country':82,'codepage':949,'origin':'explicit_request',
+            'runtime_verified':False,'observed_query_authority':False}
+        if biling:self.source['observed_members']['WINDOWS/BILING.SYS']=inventory['WINDOWS/BILING.SYS']
         self.source_pin=jsave(directory/'source-profile.json',self.source)
         reader=load(ROOT/'shizukudos/supervisor/native_win98/sparse_fat32.py','fixture_sparse_geometry')
         with open(self.esp['path'],'rb') as f:
@@ -253,6 +265,33 @@ class IngestionAPI(unittest.TestCase):
         fd=os.open(out/'ESP.SIM',os.O_RDONLY)
         try:self.m.verify_sim(fd,(out/'ESP.SIM').stat().st_size,self.fixture.esp,lambda:None)
         finally:os.close(fd)
+    def test_actual_fat_observed_biling_and_explicit_locale_reconstruct_without_runtime_claims(self):
+        for index, selection in enumerate(((True,False),(False,True),(True,True))):
+            parent=self.p/('locale-'+str(index));parent.mkdir()
+            fixture=Fixture(parent,self.m,biling=selection[0],initial_locale=selection[1])
+            result=fixture.run()
+            self.assertTrue(all(result[k] is False for k in self.m.FALSE_FLAGS))
+            config,_,_,_,biling=self.m.startup_configuration(fixture.source,'C:\\WINDOWS')
+            self.assertEqual(config,fixture.config)
+            self.assertEqual(bool(biling),selection[0])
+    def test_explicit_locale_never_accepts_runtime_authority_or_extra_fields(self):
+        source=copy.deepcopy(self.fixture.source)
+        initial={'country':82,'codepage':949,'origin':'explicit_request','runtime_verified':False,'observed_query_authority':False}
+        for field,value in (('country',True),('codepage',932),('origin','observed'),
+                            ('runtime_verified',True),('observed_query_authority',True),('approval',True)):
+            changed=copy.deepcopy(source);changed['initial_locale_configuration']={**initial,field:value}
+            with self.subTest(field=field),self.assertRaises(ValueError):
+                self.m.startup_configuration(changed,'C:\\WINDOWS')
+        changed=copy.deepcopy(source);changed['initial_locale_configuration']=initial
+        changed['locale']['country']=['COUNTRY=82,949,C:\\WINDOWS\\COUNTRY.SYS']
+        with self.assertRaises(ValueError):self.m.startup_configuration(changed,'C:\\WINDOWS')
+    def test_biling_paths_arguments_duplicates_and_receipt_forgery_refused(self):
+        for lines in (['DEVICE=C:\\OTHER\\BILING.SYS'],['DEVICE=C:\\WINDOWS\\BILING.SYS /OTHER'],
+                      ['DEVICE=C:\\WINDOWS\\BILING.SYS & OTHER.COM'],['DEVICE=C:\\WINDOWS\\BILING.SYS']*2,
+                      [True],{'approval':True}):
+            source=copy.deepcopy(self.fixture.source);source['observed_biling_driver']=lines
+            with self.subTest(lines=lines),self.assertRaises(ValueError):
+                self.m.startup_configuration(source,'C:\\WINDOWS')
     def test_raw_native_failure_runtime_true_and_optional_epoch_refused(self):
         for field,value in [('status','FAIL_PRIVATE_WIN98_DOMAIN_ESP'),('VM_executed',True),('optional_native_inputs',{'VGACFG.BIN':{}})]:
             native=copy.deepcopy(self.fixture.native);native[field]=value;self.fixture.change('native_build_receipt',native);self.refuse(field)
