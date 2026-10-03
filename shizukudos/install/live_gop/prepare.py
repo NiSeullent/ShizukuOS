@@ -54,6 +54,10 @@ def prepare(request_path,request_sha,out,budget):
                  all(stage.get(n) is False for n in ('public_artifact','VM_executed','default_GOP_registered',
                                                     'Windows98_boot_verified','native_apps_verified')),
                  'raw source-bound GOP staging producer required')
+            for record in (stage,build):
+                need(record.get('guardian_epoch_query_opcode')=='0x4f11' and
+                     record.get('guardian_epoch_query_bytes')==160 and record.get('guardian_epoch_HCALL')==14,
+                     'real guardian epoch160B HC14 query source producer required')
             need(build.get('schema')=='shizukuos.private-win16-gop-installer-build.v1' and
                  build.get('status')=='HOST_COMPILE_LINK_PASS_NOT_EXECUTED' and
                  all(build.get(n) is False for n in ('public_artifact','VM_executed','default_GOP_registered','GPU_active','cold_boot_verified')),
@@ -113,7 +117,9 @@ def prepare(request_path,request_sha,out,budget):
                     'live_provider_identity_sha256':stage['live_provider_identity_sha256'],
                     'VM_executed':False,'default_GOP_registered':False,'GPU_active':False,'Windows98_boot_verified':False,
                     'public_artifact':False,'native_ingester_compatible':False,'Supervisor_epoch_verified':False,
-                    'required_live_operation':'Load actual native GOP provider in an independently admitted boot, then run Win16 GOPINST.EXE /install; supported live RunOnce may be registered by the guest operator, not this staging producer.'}
+                    'guardian_epoch_query_opcode':'0x4f11','guardian_epoch_query_bytes':160,'guardian_epoch_HCALL':14,
+                    'current_guardian_nonce_required':r'C:\SHZGOP\GPEPOCH.NON',
+                    'required_live_operation':'Load actual native GOP provider in an independently admitted boot; independently stage its current actual guardian nonce32B at C:\\SHZGOP\\GPEPOCH.NON, then run Win16 GOPINST.EXE /install; supported live RunOnce may be registered by the guest operator, not this staging producer.'}
             gop.startup.publish(out/'stage-result.json',(json.dumps(result,indent=2)+'\n').encode())
             gop.startup.publish(out/'replacement-profile.json',raw)
             held.add_inputs([profilepin,r.local_pin(out/'stage-result.json')])

@@ -156,6 +156,38 @@ DWORD SHZGOP_current_boot_probe(void) {
     critical_section_enter();result=current_boot_probe_inner();critical_section_leave();
     return result;
 }
+
+static void epoch_cpuid(DWORD leaf,DWORD *out);
+#pragma aux epoch_cpuid = "push ebx" "push esi" "mov esi,edx" "xor ecx,ecx" "db 0fh,0a2h" \
+    "mov [esi],eax" "mov [esi+4],ebx" "mov [esi+8],ecx" "mov [esi+12],edx" \
+    "pop esi" "pop ebx" parm [eax] [edx] modify [eax ecx edx];
+static LONG epoch_word(DWORD index,DWORD *out);
+#pragma aux epoch_word = "push ebx" "push esi" "mov esi,edx" "mov ebx,eax" \
+    "mov ecx,1" "mov eax,14" "db 0fh,01h,0c1h" "mov [esi],ebx" \
+    "cmp ecx,40" "je short epoch_extent_ok" "mov eax,0fffffffdh" \
+    "epoch_extent_ok:" "pop esi" "pop ebx" parm [eax] [edx] value [eax] modify [eax ecx edx];
+static unsigned char current_epoch[SHZGOP_EPOCH_BYTES];
+static BOOL epoch_read(unsigned char *out) {
+    DWORD regs[4],word,i;
+    epoch_cpuid(1,regs);if(!(regs[2]&0x80000000UL)) return FALSE;
+    epoch_cpuid(0x40000000UL,regs);
+    if(regs[1]!=0x5a485353UL || regs[2]!=0x4d4d5675UL || regs[3]!=0x30312d76UL) return FALSE;
+    for(i=0;i<40;i++) {if(epoch_word(i,&word)) return FALSE;probe_u32(out+i*4,word);}
+    return TRUE;
+}
+DWORD SHZGOP_guardian_epoch_probe(void) {
+    unsigned char first[SHZGOP_EPOCH_BYTES],second[SHZGOP_EPOCH_BYTES];DWORD result=0;
+    memset(current_epoch,0,sizeof(current_epoch));
+    critical_section_enter();
+    if(current_boot_probe_inner() && epoch_read(first) &&
+       shzgop_epoch_admit(first,sizeof first,first+64,current_probe) &&
+       current_boot_probe_inner() && epoch_read(second) && !memcmp(first,second,sizeof first) &&
+       shzgop_epoch_admit(second,sizeof second,second+64,current_probe)) {
+        memcpy(current_epoch,second,sizeof second);result=(DWORD)current_epoch;
+    }
+    critical_section_leave();return result;
+}
+
 BOOL VESA_valid(void) { return ready; }
 BOOL VESA_validmode(DWORD w,DWORD h,DWORD bpp) {
     return ready && w==native_mode.width && h==native_mode.height && bpp==32;

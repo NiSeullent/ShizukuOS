@@ -80,6 +80,9 @@ def build(archive,watcom,sdk,out):
         'VM_executed':False,'default_GOP_registered':False,'GPU_active':False,'cold_boot_verified':False,
         'native_current_boot_probe':'REAL_READONLY_QUERY_REQUIRED_NOT_GUEST_EXECUTED',
         'Supervisor_epoch_in_descriptor_ABI':False,
+        'guardian_epoch_query_opcode':'0x4f11','guardian_epoch_query_bytes':160,'guardian_epoch_HCALL':14,
+        'independent_current_guardian_nonce_required':r'C:\SHZGOP\GPEPOCH.NON',
+        'Supervisor_epoch_verified':False,
         'private_SDK_headers_in_output':True,'public_artifact':False}
     write(out/'build-result.json',(json.dumps(receipt,indent=2)+'\n').encode())
     return receipt

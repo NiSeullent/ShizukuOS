@@ -10,7 +10,8 @@ It does not assume NT SetupDi support and does not invoke DefaultInstall.
 
 Installation is admitted only by the **real current-boot query**. The utility
 looks up the already loaded source-built SHZGOP VxD through Win16 INT2F 1684,
-device 4353, and queries additive service 4f10. It maps the actual current query
+device 4353, and queries additive services4f10 (descriptor/HDA) and4f11
+(actual HC14 guardian epoch160B). It maps the actual current query
 result with the original Win98 MapLS ABI, checks the live unique F-segment
 locator, validates two freshly acquired descriptor/HDA snapshots and compares
 the embedded implementation identity with the actual producer receipt. The VxD
@@ -18,12 +19,16 @@ independently re-reads its physical descriptor, initialized backend and current
 PCI identity/BAR. There is no loading, mode-setting or INI-flag fallback. An
 unloaded provider or a legacy BIOS/stdVGA baseline fails admission.
 
-The current descriptor ABI contains **no Supervisor epoch**. This query proves
-availability of the currently loaded native GOP backend and current descriptor;
-it does not assert Supervisor epoch admission. Further full-product admission
-must bind the real guardian/Supervisor epoch. Query snapshot bytes are recorded
-in the guest log for independent host readback, and no compiled executable or
-payload staging claims guest success.
+The descriptor ABI is unchanged and still contains no nonce. The separate4f11
+service reads the Supervisor's actual retained guardian grant and current VMCS
+binding through HC14, twice, while rechecking the real initialized GOP probe.
+Win16 acquires two fresh160B epochs with bounded MapLS aliases, binds descriptor
+owner/BAR and the independently staged current32B guardian nonce, and rejects
+mismatched/stale/absent epochs. It holds C:\SHZGOP\GPEPOCH.NON against writes,
+re-reads that descriptor and repeats both real queries immediately before
+DiCallClassInstaller, after logging and source-LDD changes. No previous first-load
+log admits class mutation. Raw288B snapshot and pre-call160B epoch are recorded
+for host readback. Host compilation/staging never asserts guest admission.
 
 The privately owned original full disk clone must be retained. The caller uses
 fresh `C:\GOPBAK\ENUM.BAK` and `CLASS.BAK` registry-key snapshots before the class
@@ -46,8 +51,10 @@ SETUPX_SHA256=<hash of that guest's actual SYSTEM\SETUPX.DLL>
 LIVE_PROVIDER_SHA256=<source implementation identity in the actual GOP build receipt>
 ```
 
-Stage the three actual driver members at C:\, prepare the owned fresh GOPBAK
-directory, and execute `GOPINST.EXE /install` inside Windows 98. Accept registry
+The active guardian owner must independently stage this boot's actual nonce
+at C:\SHZGOP\GPEPOCH.NON; this producer never mints or substitutes it. Stage the
+three actual driver members at C:\, prepare the owned fresh GOPBAK directory,
+and execute `GOPINST.EXE /install` inside Windows 98. Accept registry
 installation evidence only with observed process exit code zero and the complete
 read-back log; it still does not prove GPU activation. A new boot, actual native
 GOP Enable/DCI/backend probe, live device state and screenshot are separate
@@ -86,17 +93,12 @@ that Microsoft DLL into an output or register RunOnce. Its request schema is
 The underlying root-file constructor backs up/readbacks owned clones. The native
 five-payload ingestion contract still requires a separate integration change.
 
-There is a real existing Windows 98 dynamic-VxD load pattern in this repository:
-`ntwrapper/vxd/diag_probe.c` preflights the exact owned binary before opening
-`\\.\C:\NTWLAB\NTWRAP9X.VXD` with CreateFile and querying its actual backend.
-The GOP producer already emits a dynamic LE VxD and routes both initial and
-dynamic initialization through checked Device_Init. This establishes an OS load
-mechanism, **not a proven GOP loader/guardian route**. SHZGOP activation needs a
-separately trusted native-foundation loader on an owned clone after current
-firmware/descriptor/guardian admission. An early `[386Enh]` SYSTEM.INI device
-entry is another possible Windows loading route, but must preserve/backup and
-read back that real file, and must not be applied to the legacy BIOS/stdVGA
-baseline. An initialized SHZGOP MiniVDD cannot dynamically unload: hooks persist
-until guest shutdown. No automatic early-load operation is implemented here.
-The readonly probe correctly refuses an unloaded provider; ten staged root
-payloads alone do not perform first-time default-display registration.
+The source-built first-load route is ../drivers/shizuku_gop/first_load (from the
+repository root, drivers/shizuku_gop/first_load). It queries actual native HC14
+and the current F-segment descriptor before requesting the dynamic GOP load;
+its retained modules/maps do not imply default installation. Both the first-load
+builder and this utility must use the newly built GOP receipt and provider
+identity after backend/source changes. Preserve the owned original disk clone.
+First-load and SetupX runtime observations, installed registry/file readback,
+reboot/Enable/DCI/GDI rendering and actual Windows98 on ShizukuDOS remain required.
+No guest execution, default registration or GPU activation occurred in this lane.
