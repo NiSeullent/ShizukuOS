@@ -43,6 +43,7 @@ class InstalledSourceProfile(unittest.TestCase):
         for name,data in {'MSDOS.SYS':b'[Paths]\r\nWinDir=C:\\WINDOWS\r\nWinBootDir=C:\\WINDOWS\r\nHostWinBootDrv=C\r\n[Options]\r\nBootGUI=1\r\n',
                           'CONFIG.SYS':self.source_config,'AUTOEXEC.BAT':self.source_auto,
                           'WINDOWS/WIN.COM':b'MZ synthetic Windows launcher fixture',
+                          'WINDOWS/SYSTEM.DAT':b'synthetic registry membership fixture, never executed',
                           'WINDOWS/SYSTEM.INI':b'[boot]\r\nshell=Explorer.exe\r\n',
                           'WINDOWS/SYSTEM/VMM32.VXD':b'MZ synthetic VMM fixture',
                           'WINDOWS/IFSHLP.SYS':b'MZ synthetic filesystem-helper fixture'}.items():self.write_member(name,data)
@@ -92,6 +93,9 @@ class InstalledSourceProfile(unittest.TestCase):
         self.assertEqual((out/'original-config/AUTOEXEC.BAT').read_bytes(),self.source_auto)
         config=(out/'payloads/CONFIG.SYS').read_bytes();auto=(out/'payloads/AUTOEXEC.BAT').read_bytes()
         self.assertIsNone(result['initial_locale_configuration'])
+        self.assertEqual(result['registry_path_configuration'],{'path':r'C:\WINDOWS\SYSTEM.DAT','origin':'validated_source','runtime_verified':False})
+        self.assertTrue(config.startswith(b'WINREG=C:\\WINDOWS\\SYSTEM.DAT\r\n'))
+        self.assertIn('WINDOWS/SYSTEM.DAT',result['observed_members'])
         self.assertNotIn(b'COUNTRY=',config)
         self.assertIn(b'DEVICE=C:\\HIMEMX.EXE /VERBOSE\r\n',config)
         self.assertIn(b'DEVICE=C:\\WINDOWS\\IFSHLP.SYS\r\n',config);self.assertIn(b'DOS=HIGH\r\n',config)
@@ -137,7 +141,7 @@ class InstalledSourceProfile(unittest.TestCase):
         self.request['initial_locale']={'country':82,'codepage':949}
         result=self.generate()
         config=(self.root/'profile/payloads/CONFIG.SYS').read_bytes()
-        self.assertTrue(config.startswith(b'COUNTRY=82,949\r\n'))
+        self.assertTrue(config.startswith(b'WINREG=C:\\WINDOWS\\SYSTEM.DAT\r\nCOUNTRY=82,949\r\n'))
         self.assertEqual(result['locale'],{'country':[],'nls':[]})
         self.assertEqual(result['initial_locale_configuration'],{'country':82,'codepage':949,
             'origin':'explicit_request','runtime_verified':False,'observed_query_authority':False})
@@ -164,6 +168,26 @@ class InstalledSourceProfile(unittest.TestCase):
             self.write_member('MSDOS.SYS',data);self.refresh_disk()
             with self.assertRaises(ValueError):self.generate()
             self.assertFalse((self.root/'profile').exists())
+
+    def test_registry_carrier_uses_actual_alternate_selected_directory(self):
+        subprocess.run(['mren','-i',str(self.disk)+'@@16384','::WINDOWS','::WIN98'],check=True,capture_output=True)
+        self.write_member('MSDOS.SYS',b'[Paths]\r\nWinDir=C:\\WIN98\r\nWinBootDir=C:\\WIN98\r\nHostWinBootDrv=C\r\n')
+        self.refresh_disk();self.request['windows_directory']='WIN98'
+        result=self.generate()
+        self.assertEqual(result['registry_path_configuration'],{'path':r'C:\WIN98\SYSTEM.DAT','origin':'validated_source','runtime_verified':False})
+        self.assertIn('WIN98/SYSTEM.DAT',result['observed_members'])
+        self.assertTrue((self.root/'profile/payloads/CONFIG.SYS').read_bytes().startswith(b'WINREG=C:\\WIN98\\SYSTEM.DAT\r\n'))
+
+    def test_missing_selected_registry_file_refused_before_output(self):
+        subprocess.run(['mdel','-i',str(self.disk)+'@@16384','::WINDOWS/SYSTEM.DAT'],check=True,capture_output=True)
+        self.refresh_disk()
+        with self.assertRaises(ValueError):self.generate()
+        self.assertFalse((self.root/'profile').exists())
+
+    def test_registry_carrier_cannot_be_injected_or_given_independent_authority(self):
+        self.request['registry_path_configuration']={'path':r'C:\OTHER\SYSTEM.DAT','origin':'validated_source','runtime_verified':True}
+        with self.assertRaises(ValueError):self.generate()
+        self.assertFalse((self.root/'profile').exists())
 
     def test_missing_installed_vmm_refused_instead_of_accepting_cabinet_media(self):
         subprocess.run(['mdel','-i',str(self.disk)+'@@16384','::WINDOWS/SYSTEM/VMM32.VXD'],check=True,capture_output=True)

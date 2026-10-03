@@ -236,7 +236,7 @@ def generate(request_path, request_sha, out, capture_budget, *, large_output_roo
         files=replacement.inventory(fd,geometry,check)
         need(len({name.upper() for name in files})==len(files),'case-ambiguous DOS short paths refused')
         observed={}
-        for name in ('WIN.COM','SYSTEM.INI','SYSTEM/VMM32.VXD','IFSHLP.SYS'):
+        for name in ('WIN.COM','SYSTEM.INI','SYSTEM/VMM32.VXD','IFSHLP.SYS','SYSTEM.DAT'):
             observed[windows+'/'+name]=require_file(files,windows+'/'+name)
         need(files.get(windows+'/SYSTEM',{}).get('directory') is True,'observed Windows SYSTEM directory required')
         installed_paths(member_bytes(fd,geometry,files,'MSDOS.SYS',check),selected)
@@ -249,7 +249,8 @@ def generate(request_path, request_sha, out, capture_budget, *, large_output_roo
         if country or nls:
             for name in ('COUNTRY.SYS','COMMAND/NLSFUNC.EXE'):
                 observed[windows+'/'+name]=require_file(files,windows+'/'+name)
-        config=(initial_country+'DEVICE=C:\\HIMEMX.EXE /VERBOSE\r\n'+''.join(v+'\r\n' for v in biling)+'DEVICE='+selected+'\\IFSHLP.SYS\r\nDOS=HIGH\r\n'
+        registry_path=selected+'\\SYSTEM.DAT'
+        config=('WINREG='+registry_path+'\r\n'+initial_country+'DEVICE=C:\\HIMEMX.EXE /VERBOSE\r\n'+''.join(v+'\r\n' for v in biling)+'DEVICE='+selected+'\\IFSHLP.SYS\r\nDOS=HIGH\r\n'
                 'FILES=30\r\nBUFFERS=20\r\nSHELL=C:\\COMMAND.COM C:\\ /E:512 /P\r\n'+''.join(v+'\r\n' for v in country)).encode('ascii')
         auto=('@ECHO OFF\r\nSET COMSPEC=C:\\COMMAND.COM\r\nSET windir='+selected+'\r\n'
               'SET PATH='+selected+';'+selected+'\\COMMAND;C:\\\r\nC:\r\nCD \\'+windows+'\r\n'+
@@ -287,6 +288,7 @@ def generate(request_path, request_sha, out, capture_budget, *, large_output_roo
                 'original_config':{name:{'present':data is not None,**({'bytes':len(data),'sha256':replacement.digest(data),
                     'source_metadata_sha256':files[name]['metadata_sha256']} if data is not None else {})} for name,data in original.items()},
                 'locale':{'country':country,'nls':nls},'observed_biling_driver':biling,
+                'registry_path_configuration':{'path':registry_path,'origin':'validated_source','runtime_verified':False},
                 'initial_locale_configuration':None if initial_locale is None else {**initial_locale,
                     'origin':'explicit_request','runtime_verified':False,'observed_query_authority':False},'xms_receipt':xms['build_receipt'],'xms_sources':xrows,
                 'constructor_input_validation':validation,
