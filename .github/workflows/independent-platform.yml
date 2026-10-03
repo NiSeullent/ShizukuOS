@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-# Host evidence only: no QEMU, Windows media, guest boot, or package publication.
+# Host contracts and standalone QEMU evidence; no Windows media or publication.
 name: Independent platform host validation
 
 'on':
@@ -191,6 +191,43 @@ jobs:
           drivers, boot firmware, use OS installation media, or publish packages.
           Native Windows compatibility requires separate guest evidence.
           SUMMARY
+
+  original-userland-host:
+    name: Original userland source observation with synthetic FAT and real file descriptors
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out the tested revision without retaining credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          lfs: false
+          submodules: false
+
+      - name: Test the actual original observation producer and cleanup failures
+        # Fake nonexecutable contents in a sparse 2GiB FAT disk; no Windows or VM.
+        run: |
+          mkdir -p build/original-userland-ci
+          python3 tools/tests/test_native_original_userland.py -v 2>&1 | tee build/original-userland-ci/producer.log
+
+      - name: Test phase admission and retained-FD re-observation
+        # Includes the production guardian's actual source-admitted FAT observer.
+        run: |
+          python3 shizukudos/supervisor/native_win98/tests/test_original_disk_lineage.py -v 2>&1 | tee build/original-userland-ci/guardian.log
+
+      - name: Keep synthetic observation test logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: original-userland-host-evidence
+          path: build/original-userland-ci/
+          if-no-files-found: warn
 
   shizukudos10-tcg:
     name: ShizukuDOS 10 standalone kernels and Win64 apps under QEMU TCG
