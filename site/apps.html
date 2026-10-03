@@ -20,7 +20,7 @@
 
 <section class="page-hero"><p class="eyebrow">앱 지원 · 공개 기록 2026.10.01</p><h1>앱마다 다른 진행 상황.</h1><p class="lead">확인한 동작과 남은 기능을 한눈에 확인하세요. 버전은 시험 입력이며 최신판 안내가 아닙니다.</p></section>
 
-<section class="scope-note"><h2>Windows 98 통합은 개발 중입니다.</h2><p>Notepad++·VLC는 기존 DOS 부팅 경로의 대조 시험입니다. 독립 Kernel64 결과도 ShizukuDOS 기반 Windows 98의 앱 지원 완료를 뜻하지 않습니다.</p></section>
+<section class="scope-note"><h2>Windows 98 통합은 개발 중입니다.</h2><p>Notepad++·VLC는 기존 DOS 부팅 경로의 대조 시험입니다. 독립 Kernel64 결과도 Windows 98 사용자 영역과 ShizukuCore가 연결된 혼합 OS의 앱 지원 완료를 뜻하지 않습니다.</p></section>
 
 <section class="section-block"><h2>확인한 동작과 남은 기능</h2><div class="table-wrap" role="region" aria-labelledby="support-title" tabindex="0">
       <table>
@@ -33,7 +33,7 @@
 
 <tbody>
 
-<tr><th scope="row">Notepad++<br><span class="small">8.9.8.1</span></th><td><span class="status-pill ready">제한된 실제 시험</span><p>Windows 98 GOP에서 전용 실행기로 편집·저장·재부팅 후 다시 열기·정상 종료 확인.</p></td><td>일반 실행의 정상 종료, ShizukuDOS 통합, 전체 편집기 기능.</td><td><a href="./preview.html?view=latest-npp-gop">GOP 시험</a><br><a href="./preview.html?view=latest-npp">이전 종료 실패</a></td></tr>
+<tr><th scope="row">Notepad++<br><span class="small">8.9.8.1</span></th><td><span class="status-pill ready">제한된 실제 시험</span><p>Windows 98 GOP에서 전용 실행기로 편집·저장·재부팅 후 다시 열기·정상 종료 확인.</p></td><td>일반 실행의 정상 종료, ShizukuCore 통합, 전체 편집기 기능.</td><td><a href="./preview.html?view=latest-npp-gop">GOP 시험</a><br><a href="./preview.html?view=latest-npp">이전 종료 실패</a></td></tr>
 
 
 <tr><th scope="row">VLC<br><span class="small">3.0.24</span></th><td><span class="status-pill component">부분 동작</span><p>Windows 98 GOP에서 Qt 메뉴·재생 제어·160 × 120 시험 영상 변화 확인.</p></td><td>RPCRT4 종료 오류, 청취 가능한 오디오, 별도 부팅에서 선행 진단의 영향, 전체 기능.</td><td><a href="./preview.html?view=vlc-qt-video-gop">Qt 플레이어 시험</a><br><a href="./preview.html?view=vlc-first-startup">첫 실행 실패</a></td></tr>
@@ -57,7 +57,7 @@
 <tr><th scope="row">Steam<br><span class="small">win64 manifest 1788652215<br>2026-09-30 입력 핀</span></th><td><span class="status-pill pending">로더 진단</span><p>공식 bootstrap 해시·AMD64 확인. 기존 클라이언트의 독립 로더 도달 및 Module32Next API 시험.</p></td><td>신규 설치·전체 클라이언트 의존성·CEF·로그인·게임·종료와 Windows 98 연결.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/TARGET_APPS.md">공식 입력 핀</a><br><a href="./continuation/modern-apps-guide.md">클라이언트 인계 기록</a></td></tr>
 
 
-<tr><th scope="row">Supermium<br><span class="small">144.0.7559.256 R5 · x86<br>2026-09-30 목표 핀</span></th><td><span class="status-pill pending">로더 실패 보존</span><p>이전 KernelEx Windows 98 대조 시험은 NTDLL.LdrGetProcedureAddress 누락으로 중단.</p></td><td>새 호환 경로에서 입력 고정 후 브라우징·종료와 ShizukuDOS 통합 재시험.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/benchmarks/app-guest-checkpoint-provider19.json">이전 로더 실패</a><br><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/TARGET_APPS.md">목표 버전과 범위</a></td></tr>
+<tr><th scope="row">Supermium<br><span class="small">144.0.7559.256 R5 · x86<br>2026-09-30 목표 핀</span></th><td><span class="status-pill pending">로더 실패 보존</span><p>이전 KernelEx Windows 98 대조 시험은 NTDLL.LdrGetProcedureAddress 누락으로 중단.</p></td><td>새 호환 경로에서 입력 고정 후 브라우징·종료와 ShizukuCore 통합 재시험.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/benchmarks/app-guest-checkpoint-provider19.json">이전 로더 실패</a><br><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/TARGET_APPS.md">목표 버전과 범위</a></td></tr>
 
 
 <tr><th scope="row">Visual Studio Code<br><span class="small">1.140.0 · x64<br>2026-09-30 입력 핀</span></th><td><span class="status-pill pending">입력 검증</span><p>공식 아카이브·Microsoft 해시·Code.exe x64 확인. 실행 미검증.</p></td><td>실제 앱의 편집·저장·확장·터미널·종료와 Windows 98 연결. VSCodium 시험은 별도.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/TARGET_APPS.md#current-publisher-targets--2026-09-30">다운로드·해시·현재 목표</a></td></tr>

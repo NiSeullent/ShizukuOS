@@ -7,10 +7,10 @@
 
 <section class="page-hero"><p class="eyebrow">Setup · Preparing Pre-Beta 01</p><span class="status-pill pending">Pre-Beta 01 · Pending validation</span><h1>Prepare a test installation.</h1><p class="lead">These manual steps apply to the current Component ZIPs. The Pre-Beta 01 installation ISO is awaiting validation.</p></section>
 
-<section class="scope-note"><h2>Start with a test copy of Windows 98 SE.</h2><p>Back up the installation and settings. Supply your own Windows and application originals. Current trials use the original Microsoft DOS boot path; they do not establish ShizukuDOS integration.</p></section>
+<section class="scope-note"><h2>Start with a test copy of Windows 98 SE.</h2><p>Back up the installation and settings. Supply your own Windows and application originals. Existing published trials use the original Microsoft DOS/VMM boot path; they do not establish the new ShizukuCore integration.</p></section>
 
-<section class="section-block" aria-labelledby="prebeta-checks"><h2 id="prebeta-checks">Checks before Pre-Beta 01 publication</h2><p>The first validation target is an x86_64 UEFI virtual machine. All four conditions below are pending validation.</p><div class="card-grid">
-<article class="info-card"><span class="status-pill pending">Pending validation</span><h3>Windows 98 boot</h3><p>Boot actual Windows 98 on ShizukuDOS.</p></article>
+<section class="section-block" aria-labelledby="prebeta-checks"><h2 id="prebeta-checks">Checks before Pre-Beta 01 publication</h2><p>The first validation target is an x86_64 UEFI virtual machine. All four conditions below are pending validation. The release will identify its migration stage and remaining DOS/VMM dependencies.</p><div class="card-grid">
+<article class="info-card"><span class="status-pill pending">Pending validation</span><h3>Windows 98 boot</h3><p>Verify real Windows 98 windows, input and file operations, together with ShizukuCore service calls.</p></article>
 <article class="info-card"><span class="status-pill pending">Pending validation</span><h3>UEFI target disk installation</h3><p>Install to a test target disk using the project installer.</p></article>
 <article class="info-card"><span class="status-pill pending">Pending validation</span><h3>Cold boot without the ISO</h3><p>Remove the installation ISO, then boot again from the installed disk.</p></article>
 <article class="info-card"><span class="status-pill pending">Pending validation</span><h3>Installed GOP display and core drivers</h3><p>Check actual output from the installed GOP display driver and identify the installed core drivers.</p></article>

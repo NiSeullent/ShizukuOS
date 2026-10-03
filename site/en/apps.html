@@ -20,7 +20,7 @@
 
 <section class="page-hero"><p class="eyebrow">Application support · Records dated 2026-10-01</p><h1>A separate status for every app.</h1><p class="lead">Check observed behavior and remaining work. Versions identify test inputs, rather than current releases.</p></section>
 
-<section class="scope-note"><h2>Windows 98 integration is still in development.</h2><p>Notepad++ and VLC trials use the original DOS boot path as a control. Independent Kernel64 results also do not establish completed app support on Windows 98 with ShizukuDOS.</p></section>
+<section class="scope-note"><h2>Windows 98 integration is still in development.</h2><p>Notepad++ and VLC trials use the original DOS boot path as a control. Independent Kernel64 results also do not establish completed app support in a hybrid OS with Windows 98 userland connected to ShizukuCore.</p></section>
 
 <section class="section-block"><h2>Observed behavior and remaining work</h2><div class="table-wrap" role="region" aria-labelledby="support-title" tabindex="0">
       <table>
@@ -33,7 +33,7 @@
 
 <tbody>
 
-<tr><th scope="row">Notepad++<br><span class="small">8.9.8.1</span></th><td><span class="status-pill ready">Limited actual trial</span><p>Windows 98 GOP: editing, saving, reopening after reboot and normal exit through the dedicated launcher.</p></td><td>Normal exit without the launcher, ShizukuDOS integration and full editor functionality.</td><td><a href="./preview.html?view=latest-npp-gop">GOP trial</a><br><a href="./preview.html?view=latest-npp">Earlier exit failure</a></td></tr>
+<tr><th scope="row">Notepad++<br><span class="small">8.9.8.1</span></th><td><span class="status-pill ready">Limited actual trial</span><p>Windows 98 GOP: editing, saving, reopening after reboot and normal exit through the dedicated launcher.</p></td><td>Normal exit without the launcher, ShizukuCore integration and full editor functionality.</td><td><a href="./preview.html?view=latest-npp-gop">GOP trial</a><br><a href="./preview.html?view=latest-npp">Earlier exit failure</a></td></tr>
 
 
 <tr><th scope="row">VLC<br><span class="small">3.0.24</span></th><td><span class="status-pill component">Partial functionality</span><p>Windows 98 GOP: Qt menus, playback controls and changing 160 × 120 test video.</p></td><td>RPCRT4 exit error, audible audio, preceding diagnostic effects on a separate boot and full functionality.</td><td><a href="./preview.html?view=vlc-qt-video-gop">Qt player trial</a><br><a href="./preview.html?view=vlc-first-startup">First startup failure</a></td></tr>
@@ -57,7 +57,7 @@
 <tr><th scope="row">Steam<br><span class="small">win64 manifest 1788652215<br>Input pin dated 2026-09-30</span></th><td><span class="status-pill pending">Loader diagnosis</span><p>Official bootstrap hash and AMD64 verified. Existing independent client reached the loader; Module32Next API fixture added.</p></td><td>Fresh installation, complete client dependencies, CEF, login, games, exit and Windows 98 integration.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/TARGET_APPS.md">Official input pin</a><br><a href="../continuation/modern-apps-guide.md">Client handoff record</a></td></tr>
 
 
-<tr><th scope="row">Supermium<br><span class="small">144.0.7559.256 R5 · x86<br>Target pin dated 2026-09-30</span></th><td><span class="status-pill pending">Loader failure preserved</span><p>Earlier KernelEx Windows 98 control stopped at missing NTDLL.LdrGetProcedureAddress.</p></td><td>Pin inputs and retry browsing, exit and ShizukuDOS integration through the new compatibility path.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/benchmarks/app-guest-checkpoint-provider19.json">Earlier loader failure</a><br><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/TARGET_APPS.md">Target version and scope</a></td></tr>
+<tr><th scope="row">Supermium<br><span class="small">144.0.7559.256 R5 · x86<br>Target pin dated 2026-09-30</span></th><td><span class="status-pill pending">Loader failure preserved</span><p>Earlier KernelEx Windows 98 control stopped at missing NTDLL.LdrGetProcedureAddress.</p></td><td>Pin inputs and retry browsing, exit and ShizukuCore integration through the new compatibility path.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/benchmarks/app-guest-checkpoint-provider19.json">Earlier loader failure</a><br><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/TARGET_APPS.md">Target version and scope</a></td></tr>
 
 
 <tr><th scope="row">Visual Studio Code<br><span class="small">1.140.0 · x64<br>Input pin dated 2026-09-30</span></th><td><span class="status-pill pending">Input verification</span><p>Official archive, Microsoft hash and Code.exe x64 verified. Execution unverified.</p></td><td>Actual app editing, saving, extensions, terminal, exit and Windows 98 integration. VSCodium trials are separate.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/TARGET_APPS.md#current-publisher-targets--2026-09-30">Download, hashes and current target</a></td></tr>

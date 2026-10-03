@@ -18,21 +18,23 @@
 
 <main id="main">
 
-<section class="page-hero"><p class="eyebrow">개발·소스</p><h1>Windows 98에 새 기반을.</h1><p class="lead">실제 Windows 98을 ShizukuDOS 위에서 구동하고 현대 하드웨어와 앱을 연결합니다.</p></section>
+<section class="page-hero"><p class="eyebrow">개발·소스</p><h1>Windows 98에 새 기반을.</h1><p class="lead">Windows 98의 모습과 코드를 이어, ShizukuCore와 32·64비트 Win32 계층을 결합하는 혼합 OS를 개발합니다.</p></section>
 <div class="hero-actions"><a class="button primary" href="https://github.com/NiSeullent/Win98-Modern">GitHub 소스</a><a class="button secondary" href="./continuation/environment-guide.md">개발 환경</a></div>
-<section class="section-block" id="architecture"><h2>시스템 구성</h2><div class="card-grid">
-<article class="info-card"><h3>ShizukuDOS</h3><p>MS-DOS를 대체하는 기반입니다. 현재 DOS16은 고정 FreeDOS·FreeCOM과 기록된 패치에 기반하며, WIN.COM → VMM 연결은 개발 중입니다.</p></article>
+<section class="section-block" id="architecture"><h2>ShizukuCore와 하위 계층</h2><p>최상위 ShizukuCore Kernel 아래에 네 계층을 통합하는 것이 목표입니다. 현재 부팅·호환 경로를 유지하면서 공통 자원과 권한을 서비스별로 이전합니다. 공통 코어의 통합 완료를 뜻하지 않습니다.</p><div class="card-grid">
+<article class="info-card"><h3>ShizukuDOS (SZRm)</h3><p>ShizukuCore 아래의 DOS 호환·부팅·복구 계층입니다. 현재 DOS16은 고정 FreeDOS·FreeCOM과 기록된 패치를 출발점으로 사용합니다.</p></article>
 
-<article class="info-card"><h3>실제 Windows 98</h3><p>VMM·USER·GDI·Explorer를 유지합니다. 창·입력·파일·앱 실행이 실제 Windows 98에서 이어져야 합니다.</p></article>
+<article class="info-card"><h3>ShizukuOS (Windows 98)</h3><p>Windows 98의 코드·사용자 영역·사용 방식을 이어갑니다. 기존 VMM·USER·GDI·Explorer 경로에서 시작해, 실제 창·입력·파일·앱 동작을 보존하며 점진적으로 전환합니다.</p></article>
 
-<article class="info-card"><h3>Kernel32 · Kernel64 · PMA</h3><p>보호 모드·x64 서비스와 Supervisor를 연결하는 구성요소입니다. 단독 커널과 loopback 시험은 통합 검증과 별도입니다.</p></article>
+<article class="info-card"><h3>Shizuku32 (SZPrtm)</h3><p>기존 Kernel32를 출발점으로 32비트 실행·서비스를 발전시키고 Shizuku Win32 x86 호환 계층을 연결합니다.</p></article>
+
+<article class="info-card"><h3>Shizuku64 (SZLm)</h3><p>기존 Kernel64와 x64 런타임에서 실제 64비트 앱의 API·창·입력·파일 서비스를 연결합니다. 단독 구성요소 시험은 통합 검증과 구분합니다.</p></article>
 
 <article class="info-card"><h3>그래픽·드라이버·호환 계층</h3><p>GOP 출력, 저장장치·USB·PCI-E, NT 앱 API를 연결합니다. 기본 GOP 출력은 GPU 3D 가속 완료가 아닙니다.</p></article>
 </div></section>
 
-<section class="scope-note"><h2>1.0.0의 완료 기준</h2><p>ShizukuDOS → WIN.COM → 실제 Windows 98 부팅과 서비스 왕복, 두 번의 콜드 부팅, 드라이버·가속·앱 기능·정상 종료, 자체 설치 시스템을 실제 실행으로 검증해야 합니다. 현재 최종 수락은 미완료입니다.</p></section>
+<section class="scope-note"><h2>1.0.0의 완료 기준</h2><p>선언한 전환 단계에서 Windows 98 사용자 영역과 ShizukuCore 서비스의 실제 부팅·왕복, 두 번의 콜드 부팅, 드라이버·가속·앱 기능·정상 종료, 자체 설치 시스템을 실제 실행으로 검증해야 합니다. 현재 최종 수락은 미완료입니다.</p></section>
 
-<section class="section-block" id="source"><h2>개발 문서</h2><ul><li><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/SHIZUKUDOS_WINDOWS98_ARCHITECTURE.md">DOS → Windows 98 아키텍처</a></li><li><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/SHIZUKUOS_ARCHITECTURE_SUPPLEMENT.md">통합 계약과 현재 한계</a></li><li><a href="./continuation/modern-apps-guide.md">앱 재시험과 다음 작업</a></li><li><a href="./preview.html">원본 성공·실패 기록</a></li></ul></section>
+<section class="section-block" id="source"><h2>개발 문서</h2><ul><li><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/INTEGRATED_ARCHITECTURE.md">공통 코어와 혼합 OS 아키텍처</a></li><li><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/SHIZUKUDOS_WINDOWS98_ARCHITECTURE.md">기존 DOS → Windows 98 경로의 감사</a></li><li><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/SHIZUKUOS_ARCHITECTURE_SUPPLEMENT.md">통합 계약과 현재 한계</a></li><li><a href="./continuation/modern-apps-guide.md">앱 재시험과 다음 작업</a></li><li><a href="./preview.html">원본 성공·실패 기록</a></li></ul></section>
 
 <section class="section-block" id="licenses"><h2>출처와 라이선스</h2>
 <details><summary id="licenses-title">주요 구성요소의 라이선스</summary><div class="table-wrap" role="region" aria-labelledby="licenses-title" tabindex="0"><table><caption>공개 소스에 기록된 주요 라이선스 · 파일별 원문과 동봉 고지를 우선 확인하세요.</caption>
