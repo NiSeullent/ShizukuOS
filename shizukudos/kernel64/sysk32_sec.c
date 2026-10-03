@@ -135,6 +135,25 @@ int32_t shz_token_bind_subject(process_t *p, uint64_t auth_id, uint32_t session,
     return STATUS_SUCCESS;
 }
 
+/* Registry account authorization is based on the immutable primary subject.
+ * Support impersonation only when it describes that same identity and label;
+ * reject differing contexts even for callers using native syscalls directly. */
+int shz_token_registry_context(process_t *p)
+{
+    int allowed=1;
+    const uint64_t f=irq_save();
+    thread_t *th=thread_current();
+    if(th&&th->proc==p&&th->impersonation){
+        const kobject_t *primary=p->token,*imp=th->impersonation;
+        const shz_token_info *a=primary?primary->u.token.t:0,*b=imp->u.token.t;
+        allowed=primary&&primary->type==OB_TOKEN&&imp->type==OB_TOKEN&&a&&b&&
+            a->type==1&&b->type==2&&b->imp_level>=2&&b->imp_level<=3&&
+            a->auth_id==b->auth_id&&a->session==b->session&&a->integrity_rid==b->integrity_rid;
+    }
+    irq_restore(f);
+    return allowed;
+}
+
 static int32_t sys_token(process_t *p, struct regs *r, uint64_t op, uint64_t a2, uint64_t a3, uint64_t a4)
 {
     (void)r;

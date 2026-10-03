@@ -70,6 +70,7 @@ struct regkey {
     uint32_t flags;
     uint32_t name_len, class_len;               /* UTF-16 code units */
     uint32_t alloc_size;
+    uint32_t account_uid, account_realm;        /* 0 shared, 1 pre-enrollment USER, 2 authenticated account */
     /* uint16_t name[name_len]; uint16_t class[class_len]; follow */
 };
 
@@ -82,6 +83,11 @@ static inline uint8_t *regval_data(regval_t *v) { return (uint8_t *)(v + 1) + ((
 void reg_lock(void);                            /* also seeds the default tree on first use */
 void reg_unlock(void);
 regkey_t *reg_root(void);
+/* Concrete-node gates also cover retained/borrowed handles. Path authorization
+ * precedes every caller-triggered creation and provisions only the bound UID. */
+int32_t reg_access_node(process_t *,regkey_t *,uint32_t);
+int32_t reg_authorize_path(process_t *,regkey_t *,const uint16_t *,uint32_t,uint32_t,int);
+uint32_t reg_maximum_access(process_t *,regkey_t *);
 void reg_key_release(regkey_t *k);              /* locks internally: drops one handle reference */
 
 /* Path resolution. `start` is the key the (relative) path is resolved against. On success *out is the key found or

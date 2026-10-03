@@ -8,6 +8,9 @@
 #include "../accounts/kdf.h"
 extern int32_t shz_token_bind_subject(process_t *,uint64_t,uint32_t,uint32_t);
 extern uint32_t shz_token_integrity(process_t *,uint32_t);
+extern int shz_token_registry_context(process_t *);
+extern void reg_lock(void);
+extern void reg_unlock(void);
 typedef struct {process_t *p;int pid;uint64_t born;shz_subject subject;int bootstrap,pending,gui_entry;} binding;
 static binding subjects[64];
 static shz_accounts authority;
@@ -49,6 +52,21 @@ static int bind(process_t *p,const shz_subject *s) {
     st=shz_token_bind_subject(p,s->auth_id,s->session,s->integrity);
     if(st)return st;
     {const uint64_t f2=irq_save();b->subject=*s;irq_restore(f2);}return 0;
+}
+int shz_auth_registry_subject(process_t *p,shz_subject *out,int *active) {
+    shz_subject s=subject(p);binding *b;uint64_t f;unsigned i;int allowed=0;
+    *out=s;*active=initialized&&authority.count;
+    if(!p||!p->used||p->teardown||s.flags||!shz_token_registry_context(p))return 0;
+    f=irq_save();b=find(p,0);allowed=!b||!b->pending;irq_restore(f);
+    if(!allowed)return 0;
+    /* Keep the initial development realm until trusted enrollment. Its USER
+     * nodes carry a separate registry epoch and never become account data. */
+    if(!*active)return 1;
+    if(s.uid<1000u||s.uid>=1000u+SHZ_ACCOUNT_LIMIT||!s.session||s.reserved||
+       s.auth_id!=(((uint64_t)s.uid<<32)|s.session))return 0;
+    allowed=0;mutex_lock(&authority_lock);
+    for(i=0;i<authority.count;i++)if(authority.accounts[i].uid==s.uid&&authority.accounts[i].roles==s.roles){allowed=1;break;}
+    mutex_unlock(&authority_lock);return allowed;
 }
 int shz_auth_inherit(process_t *parent,process_t *child) {
     shz_subject s;if(!parent)return 0;s=subject(parent);
@@ -147,7 +165,6 @@ int shz_auth_syscall_allowed(process_t *p,uint32_t n) {
     case SYS_NtLoadDriver:case SYS_NtUnloadDriver:case SYS_NtShzSetupBlkWrite:case SYS_NtShzSetupPower:
     case SYS_NtShzBlkRead:case SYS_NtShzSetupBlkRead:case SYS_NtDeviceIoControlFile:
     case SYS_NtShzBlkWrite:case SYS_NtShzBlkBatch:case SYS_NtShzBlkControl:case SYS_NtShzBlkDiscard:
-    case SYS_NtCreateKey:case SYS_NtSetValueKey:case SYS_NtDeleteKey:case SYS_NtDeleteValueKey:
         s=subject(p);return s.uid&&s.roles==SHZ_ROLE_ADMIN&&s.integrity>=0x3000&&!s.flags;
     case SYS_NtCreateNamedPipeFile:case SYS_NtUserClipboard:return 0;
     default:return 1;
@@ -215,10 +232,13 @@ int32_t shz_auth_syscall(process_t *p,uint64_t op,uint64_t input,uint64_t bytes,
     who=subject(p);
     if(op==SHZ_AUTH_REGISTER) {
         binding *b;uint64_t f=irq_save();b=find(p,0);if(b)grant=b->bootstrap;irq_restore(f);
-        mutex_lock(&authority_lock);
+        /* Enrollment changes the USER security epoch. Registry operations
+         * hold reg_lock through authorization and effects; use that same
+         * lock before authority_lock so the transition cannot split them. */
+        reg_lock();mutex_lock(&authority_lock);
         st=auth_status(shz_account_register(&authority,&who,grant,req.user,req.password,req.password_bytes,req.roles));
         if(!st&&grant) {f=irq_save();b=find(p,0);if(b)b->bootstrap=0;irq_restore(f);}
-        mutex_unlock(&authority_lock);goto done;
+        mutex_unlock(&authority_lock);reg_unlock();goto done;
     }
     if(who.flags&&(op==SHZ_AUTH_ELEVATE_LAUNCH||op==SHZ_AUTH_LOGIN_LAUNCH)){st=STATUS_ACCESS_DENIED;goto done;}
     if(!req.image[0]||!req.command[0]||req.roles){st=STATUS_INVALID_PARAMETER;goto done;}

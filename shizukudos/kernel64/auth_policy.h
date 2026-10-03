@@ -4,6 +4,11 @@
 #include "proc_internal.h"
 #include "../accounts/account.h"
 struct fsnode;
+/* Snapshot immutable primary identity and its lowered token label. Registry
+ * callers must still authorize the concrete key and requested operation.
+ * Registry lock must cover authorization through its use. Enrollment uses
+ * registry -> authority lock order; no authority holder acquires registry lock. */
+int shz_auth_registry_subject(process_t *,shz_subject *,int *);
 int32_t shz_auth_object_name(process_t *,char *,size_t);
 int shz_auth_gui_take_entry(process_t *);
 int shz_auth_process_access(process_t *,process_t *);

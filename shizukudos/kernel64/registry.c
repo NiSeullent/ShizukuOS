@@ -13,10 +13,11 @@
  *   - Volatile only: everything lives in the kernel heap and is gone at reboot. There is no hive file. The
  *     REG_OPTION_VOLATILE flag is still tracked so the Windows rule holds that a stable key cannot be created below a
  *     volatile one (STATUS_CHILD_MUST_BE_VOLATILE).
- *   - Security is ignored: keys have no security descriptor, every caller is the single administrator and is granted any
- *     access it asks for. The access mask stored in the handle IS enforced for the operation classes (KEY_QUERY_VALUE,
- *     KEY_SET_VALUE, KEY_CREATE_SUB_KEY, KEY_ENUMERATE_SUB_KEYS, DELETE), because that is per-handle NT behaviour.
- *   - No symbolic links, no hive load/unload, no change notification, no transactions.
+ *   - Account isolation is enforced from the kernel authority and primary token label.
+ *     Ordinary accounts own only their provisioned USER hive; MACHINE is read-only.
+ *     Elevated administrators can access shared keys and other provisioned accounts.
+ *     Handle masks remain enforced. Full NT security descriptors/DACLs are not implemented.
+ *   - No symbolic links, hive load/unload or transactions. Change notifications recheck account access on delivery.
  *   - Bounded: at most REG_QUOTA_BYTES of kernel heap in total, values up to REG_MAX_VALUE_BYTES.
  *
  * Concurrency: one kernel mutex serialises every tree access (the kernel is preemptible; the tree is small and the
@@ -30,15 +31,16 @@
  *                                                          Windows merges HKLM and HKCU class data)
  *   MACHINE\SYSTEM\CurrentControlSet\Control\ComputerName  the computer name the loader puts in COMPUTERNAME
  *   MACHINE\SYSTEM\CurrentControlSet\Hardware Profiles\Current   HKEY_CURRENT_CONFIG target (empty)
- *   USER\.DEFAULT and USER\<SHZ_USER_SID>                  the single user of the system (HKEY_CURRENT_USER target)
+ *   USER\.DEFAULT and USER\<SHZ_USER_SID>                  initial development realm only; retired after enrollment
  */
 #include "registry.h"
+#include "auth_policy.h"
 
-/* The one interactive identity of the system (documented constant, see also advapi32's GetUserNameW). */
+/* Initial development identity only; authenticated hives use their authority UID. */
 #define SHZ_USER_SID "S-1-5-21-2210311251-3305482031-1094512843-1001"
 
 static kmutex_t reg_mutex;                      /* zero-initialised == unlocked */
-static regkey_t *g_root;
+static regkey_t *g_root, *g_machine, *g_user;
 static uint32_t g_bytes;                        /* heap charged to the registry */
 static int g_seeded;
 
@@ -133,6 +135,9 @@ struct regnotify {
     kobject_t *key_obj;                 /* the key object the registration was made on (not referenced) */
     kobject_t *event;                   /* referenced; may be NULL when only the IO_STATUS_BLOCK is polled */
     process_t *proc;
+    kobject_t *proc_object;              /* identity only; never dereferenced */
+    int proc_pid;
+    uint64_t proc_born;
     uint64_t iosb;                      /* user address of an IO_STATUS_BLOCK, or 0 */
     uint32_t filter;
     int subtree;
@@ -143,7 +148,10 @@ static uint32_t g_notify_count;
 /* Registry lock held. Completes and frees `n` (already unlinked). */
 static void notify_complete(regnotify_t *n, int32_t status)
 {
-    if (n->iosb) {
+    const int same_process=n->proc->used&&!n->proc->teardown&&
+        n->proc->object==n->proc_object&&n->proc->pid==n->proc_pid&&n->proc->create_tick==n->proc_born;
+    if (!same_process||reg_access_node(n->proc,n->key,KEY_NOTIFY)) status=STATUS_ACCESS_DENIED;
+    if (n->iosb&&same_process) {
         const uint64_t iosb[2] = { (uint64_t)(int64_t)status, 0 };
         copy_to_user(n->proc, n->iosb, iosb, sizeof iosb);
     }
@@ -158,6 +166,7 @@ static void notify_complete(regnotify_t *n, int32_t status)
 int32_t reg_notify_add(regkey_t *k, kobject_t *key_obj, kobject_t *event, process_t *p, uint64_t iosb_va, uint32_t filter, int subtree)
 {
     regnotify_t *n;
+    if (reg_access_node(p,k,KEY_NOTIFY)) return STATUS_ACCESS_DENIED;
     if (k->flags & RK_DELETED) return STATUS_KEY_DELETED;
     if (g_notify_count >= REG_NOTIFY_MAX_REGISTRATIONS) return STATUS_NO_MEMORY;
     n = kzalloc(sizeof *n);
@@ -167,6 +176,7 @@ int32_t reg_notify_add(regkey_t *k, kobject_t *key_obj, kobject_t *event, proces
     n->event = event;
     if (event) ob_ref(event);
     n->proc = p;
+    n->proc_object=p->object;n->proc_pid=p->pid;n->proc_born=p->create_tick;
     n->iosb = iosb_va;
     n->filter = filter;
     n->subtree = subtree;
@@ -228,6 +238,8 @@ static void link_child(regkey_t *parent, regkey_t *c)
     c->sibling = *pp;
     *pp = c;
     c->parent = parent;
+    c->account_uid = parent->account_uid;
+    c->account_realm = parent == g_user ? 1u : parent->account_realm;
     ++parent->nsubkeys;
     parent->last_write = reg_filetime_now();
     if (g_seeded) notify_fire(parent, REG_NOTIFY_CHANGE_NAME);
@@ -360,6 +372,99 @@ void reg_key_object_free(kobject_t *o)
     reg_unlock();
 }
 
+/* ---------------------------------------------------------------- account policy */
+#define REG_WRITE_RIGHTS (KEY_SET_VALUE|KEY_CREATE_SUB_KEY|KEY_CREATE_LINK|ACC_DELETE|ACC_WRITE_DAC|ACC_WRITE_OWNER|0x01000000u)
+#define SHZ_ACCOUNT_SID_PREFIX "S-1-5-21-2210311251-3305482031-1094512843-"
+
+static uint32_t account_sid(uint32_t uid,uint16_t *out)
+{
+    const char *p=SHZ_ACCOUNT_SID_PREFIX;uint16_t digits[10];uint32_t n=0,d=0;
+    while(*p)out[n++]=(unsigned char)*p++;
+    do{digits[d++]=(uint16_t)('0'+uid%10);uid/=10;}while(uid);
+    while(d)out[n++]=digits[--d];
+    return n;
+}
+static int registry_admin(const shz_subject *s)
+{
+    return s->roles==SHZ_ROLE_ADMIN&&s->integrity>=0x3000;
+}
+int32_t reg_access_node(process_t *p,regkey_t *k,uint32_t access)
+{
+    shz_subject s;int active;regkey_t *top;
+    if(!k||!shz_auth_registry_subject(p,&s,&active))return STATUS_ACCESS_DENIED;
+    if(!active)return STATUS_SUCCESS;
+    /* Check epoch before walking parents: retired legacy nodes may be detached. */
+    if(k->account_realm==1)return STATUS_ACCESS_DENIED;
+    if(k->account_realm==2){
+        if(registry_admin(&s)||(k->account_uid==s.uid&&s.integrity>=0x2000))return STATUS_SUCCESS;
+        return STATUS_ACCESS_DENIED;
+    }
+    if(registry_admin(&s))return STATUS_SUCCESS;
+    for(top=k;top->parent&&top->parent!=g_root;top=top->parent){}
+    return top==g_machine&&!(access&REG_WRITE_RIGHTS)?STATUS_SUCCESS:STATUS_ACCESS_DENIED;
+}
+uint32_t reg_maximum_access(process_t *p,regkey_t *k)
+{
+    return reg_access_node(p,k,KEY_ALL_ACCESS_MASK)?KEY_READ_MASK:KEY_ALL_ACCESS_MASK;
+}
+/* Retire every node separately. An outstanding handle keeps only its own node
+ * alive; denied epoch checks never dereference its former parent. */
+static void retire_legacy(regkey_t *k)
+{
+    regkey_t *c=k->child;
+    while(c){regkey_t *next=c->sibling;retire_legacy(c);c=next;}
+    notify_drop(k,0,STATUS_ACCESS_DENIED);
+    k->child=k->parent=k->sibling=0;k->nsubkeys=0;k->flags|=RK_DELETED;
+    free_values(k);
+    if(!k->refs)key_free_now(k);
+}
+static int32_t provision_user(const shz_subject *s)
+{
+    uint16_t sid[64];uint32_t n=account_sid(s->uid,sid);regkey_t *k=find_child(g_user,sid,n),*env,*software;
+    static const uint16_t en[]={'E','n','v','i','r','o','n','m','e','n','t'},sw[]={'S','o','f','t','w','a','r','e'};
+    if(k&&k->account_realm==2&&k->account_uid==s->uid)return STATUS_SUCCESS;
+    /* Allocate the complete default hive before publishing or retiring legacy
+     * data, so allocation failure cannot publish a partial account hive. */
+    regkey_t *fresh=key_alloc(sid,n,0,0,RK_FIXED);
+    env=fresh?key_alloc(en,11,0,0,0):0;
+    software=env?key_alloc(sw,8,0,0,0):0;
+    if(!software){if(env)key_free_now(env);if(fresh)key_free_now(fresh);return STATUS_NO_MEMORY;}
+    if(k){regkey_t **pp=&g_user->child;while(*pp!=k)pp=&(*pp)->sibling;*pp=k->sibling;--g_user->nsubkeys;retire_legacy(k);}
+    link_child(g_user,fresh);fresh->account_uid=s->uid;fresh->account_realm=2;
+    link_child(fresh,env);link_child(fresh,software);
+    return STATUS_SUCCESS;
+}
+/* Entire path validated before any provisioning. An ordinary caller can traverse
+ * an absolute own-SID prefix without obtaining handles on REGISTRY or USER. */
+int32_t reg_authorize_path(process_t *p,regkey_t *start,const uint16_t *path,uint32_t chars,uint32_t access,int create)
+{
+    shz_subject s;int active;uint32_t i=0,end,ownlen,depth=key_depth(start);uint16_t own[64];regkey_t *at=start;
+    if(!shz_auth_registry_subject(p,&s,&active))return STATUS_ACCESS_DENIED;
+    if(!active)return STATUS_SUCCESS;
+    if(chars&&path[chars-1]=='\\')--chars;
+    if(chars&&path[chars-1]=='\\')return STATUS_OBJECT_NAME_INVALID;
+    for(uint32_t j=0;j<chars;){uint32_t b=j;while(j<chars&&path[j]!='\\'){if(!path[j])return STATUS_OBJECT_NAME_INVALID;++j;}
+        if(j==b)return STATUS_OBJECT_NAME_INVALID;
+        if(j-b>REG_MAX_KEY_NAME)return STATUS_INVALID_PARAMETER;
+        if(++depth>REG_MAX_DEPTH)return STATUS_INVALID_PARAMETER;
+        if(j<chars)++j;
+    }
+    if(at==g_root&&chars){while(i<chars&&path[i]!='\\')++i;at=find_child(g_root,path,i);if(!at)return STATUS_ACCESS_DENIED;if(i<chars)++i;}
+    if(at==g_user&&i<chars){
+        end=i;while(end<chars&&path[end]!='\\')++end;
+        ownlen=account_sid(s.uid,own);
+        if(name_cmp(path+i,end-i,own,ownlen)==0){
+            if(!registry_admin(&s)&&s.integrity<0x2000)return STATUS_ACCESS_DENIED;
+            return provision_user(&s);
+        }
+        /* No caller can invent a hive for another SID. Only the authoritative
+         * owner's first use provisions that account's root. */
+        at=find_child(g_user,path+i,end-i);
+        if(!at||at->account_realm!=2)return STATUS_ACCESS_DENIED;
+    }
+    return reg_access_node(p,at,access|(create?KEY_CREATE_SUB_KEY:0));
+}
+
 uint32_t reg_key_path(regkey_t *k, uint16_t *out, uint32_t cap)
 {
     uint32_t total = 0, pos;
@@ -489,6 +594,7 @@ static void seed_defaults(void)
     machine = seed_key(g_root, "MACHINE");
     user = seed_key(g_root, "USER");
     KASSERT(machine && user);
+    g_machine=machine;g_user=user;
     machine->flags |= RK_FIXED;
     user->flags |= RK_FIXED;
 

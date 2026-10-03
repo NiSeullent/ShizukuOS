@@ -108,6 +108,10 @@ static int32_t key_of(process_t *pr, uint64_t h, uint32_t need, kobject_t **o, u
     const int32_t st = handle_ref(pr, h, OB_KEY, o, &granted);
     if (st) return st;
     if ((granted & need) != need) { ob_deref(*o); *o = 0; return STATUS_ACCESS_DENIED; }
+    reg_lock();
+    const int32_t policy=reg_access_node(pr,(*o)->u.key.node,need);
+    reg_unlock();
+    if(policy){ob_deref(*o);*o=0;return policy;}
     if (access_out) *access_out = granted;
     return STATUS_SUCCESS;
 }
@@ -119,7 +123,7 @@ static int32_t open_create(process_t *pr, uint64_t phandle, uint32_t desired, ui
     struct objattr oa;
     ubuf_t name, cls;
     kobject_t *root_obj = 0;
-    uint32_t root_access = 0, h = 0, access = map_access(desired);
+    uint32_t root_access = 0, h = 0, access = map_access(desired & ~ACC_MAXIMUM_ALLOWED);
     const uint16_t *path;
     uint32_t chars;
     regkey_t *start, *node = 0;
@@ -166,14 +170,21 @@ static int32_t open_create(process_t *pr, uint64_t phandle, uint32_t desired, ui
     reg_lock();
     start = root_obj ? root_obj->u.key.node : reg_root();
     if (start->flags & RK_DELETED) { reg_unlock(); st = STATUS_KEY_DELETED; goto out; }
+    st = reg_authorize_path(pr,start,path,chars,access,0);
+    if(st){reg_unlock();goto out;}
     st = reg_resolve(start, path, chars, 0, 0, 1, 0, 0, &node, 0);
     if (st == STATUS_SUCCESS) {
         created = 0;
     } else if (create && st == STATUS_OBJECT_NAME_NOT_FOUND) {
+        st=reg_authorize_path(pr,start,path,chars,access,1);
+        if(st){reg_unlock();goto out;}
         st = reg_resolve(start, path, chars, 1, options, !root_obj || (root_access & KEY_CREATE_SUB_KEY) != 0, cls.p, cls.chars,
                          &node, &created);
     }
     if (st) { reg_unlock(); goto out; }
+    if(desired & ACC_MAXIMUM_ALLOWED)access|=reg_maximum_access(pr,node);
+    st=reg_access_node(pr,node,access);
+    if(st){reg_unlock();goto out;}
     st = new_key_handle(pr, node, access, &h);          /* drops the registry lock */
     if (st) goto out;
     {
@@ -343,9 +354,12 @@ static int32_t query_value(process_t *pr, uint64_t h, uint64_t vname, uint32_t c
     if (st) { ob_deref(ko); return st; }
     reg_lock();
     k = ko->u.key.node;
-    if (k->flags & RK_DELETED) st = STATUS_KEY_DELETED;
-    else if (!(v = reg_find_value(k, name.p, name.chars))) st = STATUS_OBJECT_NAME_NOT_FOUND;
-    else st = fill_value_info(pr, v, cls, buf, len, pres);
+    st=reg_access_node(pr,k,KEY_QUERY_VALUE);
+    if(!st){
+        if (k->flags & RK_DELETED) st = STATUS_KEY_DELETED;
+        else if (!(v = reg_find_value(k, name.p, name.chars))) st = STATUS_OBJECT_NAME_NOT_FOUND;
+        else st = fill_value_info(pr, v, cls, buf, len, pres);
+    }
     reg_unlock();
     ubuf_free(&name);
     ob_deref(ko);
@@ -369,7 +383,8 @@ static int32_t set_value(process_t *pr, uint64_t h, uint64_t vname, uint32_t typ
     }
     if (!st) {
         reg_lock();
-        st = reg_set_value(ko->u.key.node, name.p, name.chars, type, tmp, size);
+        st=reg_access_node(pr,ko->u.key.node,KEY_SET_VALUE);
+        if(!st)st = reg_set_value(ko->u.key.node, name.p, name.chars, type, tmp, size);
         reg_unlock();
     }
     kfree(tmp);
@@ -387,7 +402,8 @@ static int32_t delete_value(process_t *pr, uint64_t h, uint64_t vname)
     st = ubuf_read(pr, vname, REG_MAX_VALUE_NAME, &name);
     if (!st) {
         reg_lock();
-        st = reg_delete_value(ko->u.key.node, name.p, name.chars);
+        st=reg_access_node(pr,ko->u.key.node,KEY_SET_VALUE);
+        if(!st)st = reg_delete_value(ko->u.key.node, name.p, name.chars);
         reg_unlock();
         ubuf_free(&name);
     }
@@ -401,7 +417,8 @@ static int32_t delete_key(process_t *pr, uint64_t h)
     int32_t st = key_of(pr, h, ACC_DELETE, &ko, 0);
     if (st) return st;
     reg_lock();
-    st = reg_delete_key(ko->u.key.node);
+    st=reg_access_node(pr,ko->u.key.node,ACC_DELETE);
+    if(!st)st = reg_delete_key(ko->u.key.node);
     reg_unlock();
     ob_deref(ko);
     return st;
@@ -417,9 +434,12 @@ static int32_t enum_key(process_t *pr, uint64_t h, uint32_t index, uint32_t cls,
     if (st) return st;
     reg_lock();
     k = ko->u.key.node;
-    if (k->flags & RK_DELETED) st = STATUS_KEY_DELETED;
-    else if (!(c = reg_nth_child(k, index))) st = STATUS_NO_MORE_ENTRIES;
-    else st = fill_key_info(pr, c, cls, buf, len, pres);
+    st=reg_access_node(pr,k,KEY_ENUMERATE_SUB_KEYS);
+    if(!st){
+        if (k->flags & RK_DELETED) st = STATUS_KEY_DELETED;
+        else if (!(c = reg_nth_child(k, index))) st = STATUS_NO_MORE_ENTRIES;
+        else st = fill_key_info(pr, c, cls, buf, len, pres);
+    }
     reg_unlock();
     ob_deref(ko);
     return st;
@@ -434,9 +454,12 @@ static int32_t enum_value(process_t *pr, uint64_t h, uint32_t index, uint32_t cl
     if (st) return st;
     reg_lock();
     k = ko->u.key.node;
-    if (k->flags & RK_DELETED) st = STATUS_KEY_DELETED;
-    else if (!(v = reg_nth_value(k, index))) st = STATUS_NO_MORE_ENTRIES;
-    else st = fill_value_info(pr, v, cls, buf, len, pres);
+    st=reg_access_node(pr,k,KEY_QUERY_VALUE);
+    if(!st){
+        if (k->flags & RK_DELETED) st = STATUS_KEY_DELETED;
+        else if (!(v = reg_nth_value(k, index))) st = STATUS_NO_MORE_ENTRIES;
+        else st = fill_value_info(pr, v, cls, buf, len, pres);
+    }
     reg_unlock();
     ob_deref(ko);
     return st;
@@ -452,7 +475,8 @@ static int32_t query_key(process_t *pr, uint64_t h, uint32_t cls, uint64_t buf, 
     if (st) return st;
     reg_lock();
     k = ko->u.key.node;
-    st = (k->flags & RK_DELETED) ? STATUS_KEY_DELETED : fill_key_info(pr, k, cls, buf, len, pres);
+    st=reg_access_node(pr,k,cls==3?0:KEY_QUERY_VALUE);
+    if(!st)st = (k->flags & RK_DELETED) ? STATUS_KEY_DELETED : fill_key_info(pr, k, cls, buf, len, pres);
     reg_unlock();
     ob_deref(ko);
     return st;
@@ -490,14 +514,19 @@ static int32_t query_object(process_t *pr, uint64_t h, uint32_t cls, uint64_t bu
     uint32_t tchars = 0;
     outbuf_t ob = { pr, buf, len, 0, 0 };
     int32_t st;
+    int key_locked=0;
     if (h == CURRENT_PROCESS_HANDLE) { o = pr->object; ob_ref(o); access = 0x1fffff; }
     else if (h == CURRENT_THREAD_HANDLE) { o = thread_current()->object; ob_ref(o); access = 0x1fffff; }
     else {
         st = handle_ref(pr, h, 0, &o, &access);
         if (st) return st;
     }
+    if(o->type==OB_KEY){
+        reg_lock();key_locked=1;st=reg_access_node(pr,o->u.key.node,0);
+        if(st){reg_unlock();ob_deref(o);return st;}
+    }
     tn = object_type_name(o->type);
-    if (!tn) { ob_deref(o); return STATUS_NOT_SUPPORTED; }
+    if (!tn) { if(key_locked)reg_unlock();ob_deref(o); return STATUS_NOT_SUPPORTED; }
     while (tn[tchars]) { twide[tchars] = (uint8_t)tn[tchars]; ++tchars; }
     switch (cls) {
     case 0: {                                           /* OBJECT_BASIC_INFORMATION (0x38 bytes) */
@@ -529,14 +558,12 @@ static int32_t query_object(process_t *pr, uint64_t h, uint32_t cls, uint64_t bu
         st = STATUS_SUCCESS;
         if (o->type == OB_KEY) {
             regkey_t *kn = o->u.key.node;
-            reg_lock();
             if (kn->flags & RK_DELETED) st = STATUS_KEY_DELETED;
             else {
                 pchars = reg_key_path(kn, 0, 0);
                 path = kmalloc(pchars * 2 + 2);
                 if (!path) st = STATUS_NO_MEMORY; else reg_key_path(kn, path, pchars);
             }
-            reg_unlock();
         } else if (o->name[0]) {
             st = STATUS_NOT_SUPPORTED;                  /* named kernel objects live in a namespace we do not report */
         } else if (o->type == OB_FILE) {
@@ -576,6 +603,7 @@ static int32_t query_object(process_t *pr, uint64_t h, uint32_t cls, uint64_t bu
     default:
         st = STATUS_INVALID_INFO_CLASS;                 /* ObjectAllTypes/ObjectHandleFlag... are not provided */
     }
+    if(key_locked)reg_unlock();
     ob_deref(o);
     return st;
 }
@@ -602,18 +630,16 @@ static int32_t notify_change(process_t *pr, struct regs *r, uint64_t h, uint64_t
     if (ev_h) {
         st = handle_ref(pr, ev_h, OB_EVENT, &ev, 0);
         if (st) { ob_deref(ko); return st; }
-        ob_reset_event(ev);                             /* like every asynchronous operation: the event starts non-signaled */
     }
-    if (iosb) {
+    reg_lock();
+    st=reg_access_node(pr,ko->u.key.node,KEY_NOTIFY);
+    if(!st&&ev)ob_reset_event(ev);
+    if(!st&&iosb){
         const uint64_t pending[2] = { (uint64_t)(int64_t)STATUS_PENDING, 0 };
-        if (copy_to_user(pr, iosb, pending, sizeof pending)) st = STATUS_ACCESS_VIOLATION;
+        if(copy_to_user(pr,iosb,pending,sizeof pending))st=STATUS_ACCESS_VIOLATION;
     }
-    if (!st) {
-        reg_lock();
-        st = ko->u.key.node ? reg_notify_add(ko->u.key.node, ko, ev, pr, iosb, filter & ~REG_NOTIFY_THREAD_AGNOSTIC, subtree)
-                            : STATUS_INVALID_HANDLE;
-        reg_unlock();
-    }
+    if(!st)st=reg_notify_add(ko->u.key.node,ko,ev,pr,iosb,filter & ~REG_NOTIFY_THREAD_AGNOSTIC,subtree);
+    reg_unlock();
     if (ev) ob_deref(ev);                               /* the registration holds its own reference */
     ob_deref(ko);
     return st ? st : STATUS_PENDING;
