@@ -76,7 +76,7 @@ def archive_table(read, size):
     return rows
 
 
-def plan(custody):
+def measure_layout(custody):
     runtime = custody.pin('runtime')
     rows = archive_table(lambda offset, size: custody.read('runtime', offset, size), runtime['bytes'])
     names = {path.replace('/', '\\').upper() for path, _, _ in rows}
@@ -104,14 +104,29 @@ def plan(custody):
                 ((manifest['bytes']+PAGE-1)//PAGE + (sim['bytes']+PAGE-1)//PAGE)*8)
     need(metadata <= 8*MIB, 'snapshot metadata exceeds bounded heap headroom')
     minimum = align(INITRD_PA + at, PAGE) + snapshots + 32*MIB
-    need(at <= LOAD_MAX, 'installer archive exceeds actual 64MiB loader/media limit')
-    need(minimum <= RAM_MAX, 'installer archive and sealed snapshots exceed loader RAM budget')
     custody.check()
     return layout, {'archive_bytes': at, 'sealed_snapshot_bytes': snapshots, 'snapshot_and_origin_metadata_bytes': metadata,
                     'fixed_kernel_heap_bytes': 12*MIB, 'OS_PMM_headroom_bytes': 32*MIB,
                     'minimum_contiguous_ram_bytes_with_headroom': minimum,
                     'loader_ram_limit_bytes': RAM_MAX, 'loader_archive_limit_bytes': LOAD_MAX,
                     'firmware_memory_map_verified': False}
+
+
+def plan(custody,profile=None):
+    layout,budget=measure_layout(custody)
+    archive_limit,ram_limit=LOAD_MAX,RAM_MAX
+    if profile is not None:
+        import native_capacity_profile
+        need(type(profile) is native_capacity_profile.CapacityProfile and profile._custody is custody,
+             'same actual generator-owned private profile required')
+        profile.check()
+        archive_limit,ram_limit=profile.archive_bytes,profile.ram_bytes
+    need(budget['archive_bytes']<=archive_limit,'installer archive exceeds actual 64MiB loader/media limit' if profile is None else 'installer archive exceeds measured private profile')
+    need(budget['minimum_contiguous_ram_bytes_with_headroom']<=ram_limit,
+         'installer archive and sealed snapshots exceed loader RAM budget')
+    budget['loader_archive_limit_bytes']=archive_limit
+    budget['loader_ram_limit_bytes']=ram_limit
+    return layout,budget
 
 
 def write_all(fd, raw):
@@ -121,9 +136,9 @@ def write_all(fd, raw):
         raw = raw[written:]
 
 
-def _copy_archive(custody, output):
+def _copy_archive(custody, output, profile=None):
     """Internal streaming primitive; admission is checked by finalize()."""
-    layout, budget = plan(custody)  # Fail before creating files on size/grammar.
+    layout, budget = plan(custody,profile)  # Fail before creating files on size/grammar.
     output = Path(output)
     need(output.is_absolute() and output.resolve() == output and not output.exists() and
          output.parent.is_dir() and not any((p/'.git').exists() for p in output.parents),
@@ -184,6 +199,7 @@ def _copy_archive(custody, output):
     finally:
         os.close(directory)
     custody.retain_output(row, identity)
+    if profile is not None:profile._archive_pin=dict(row)
     custody.finish()
     return {'schema': 'PRIVATE_INSTALLER_INPUTS_PACKAGED_NOT_BOOTED',
             'private': True, 'public_artifact': False, 'archive': row, 'memory_budget': budget,
@@ -200,7 +216,8 @@ def finalize(release, build, results):
     custody.check()
     need(release['manifest'] == custody.pin('manifest') and release['sim'] == custody.pin('sim'),
          'compiled release source differs from package source')
-    result = _copy_archive(custody, Path(build)/'private-installer')
+    result = _copy_archive(custody, Path(build)/'private-installer',release.get('profile'))
+    if release.get('profile') is not None:result['private_load_profile']=release['profile'].record()
     result['installer_kernel'] = dict(results['kernel64-standalone'])
     # Require the exact K64S/stub bytes produced in this held compiler run.
     for name, expected, filename in (('kernel', result['installer_kernel']['sha256'], 'KERNEL64S.BIN'),

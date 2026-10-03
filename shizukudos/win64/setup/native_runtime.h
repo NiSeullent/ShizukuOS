@@ -13,6 +13,7 @@ typedef struct {
  plat_t original;
  shz_native_runtime_source source[2];
  shz_native_runtime_claim claim;
+ uint64_t max_source_bytes;
  unsigned opened,initialized;
 } shz_native_runtime;
 /* Fresh zero storage. Returns -2 when real kernel independent admission is

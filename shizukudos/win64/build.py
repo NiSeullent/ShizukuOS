@@ -445,7 +445,8 @@ def runtime_source_paths():
     return sorted({p for directory in (W64, SHZ / "install", SHZ / "abi")
                    for p in directory.rglob("*") if p.is_file() and p.suffix.lower() in suffixes}
                   | {SHZ / "accounts/sha256.c", SHZ / "accounts/sha256.h", SHZ / "kernel64/setup_native_abi.h", NTSYS, SHZ / "tools/shzlib.py", SHZ / "upstream/manifest.json",
-                     SHZ / "boot_profile/storage/provenance.h"})
+                     SHZ / "boot_profile/storage/provenance.h",
+                     SHZ / "boot_profile/native_installer_capacity.h"})
 
 
 def main():

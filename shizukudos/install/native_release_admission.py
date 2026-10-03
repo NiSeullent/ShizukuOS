@@ -18,7 +18,7 @@ import stat
 import native_release_policy as policy
 
 ROOT = Path(__file__).resolve().parent
-MAX_ENCODED = 256 << 20
+MAX_ENCODED = 512 << 20
 MAGIC = 0x31524e53
 
 
@@ -145,7 +145,7 @@ def admit_for_build(manifest_path, output, build_pins=()):
     # actual read lease until the compiler and receipt have finished.
     with ingest.Union() as held:
         source_files = [Path(__file__).resolve(), ROOT / 'native_release_policy.py',
-                        ROOT / 'native_payload_ingest.py']
+                        ROOT / 'native_payload_ingest.py', ROOT / 'native_capacity_profile.py']
         for source in source_files:
             held.add(file_pin(ingest, source))
         held.add({'path': str(ROOT / 'native_payload_ingest.py'),
@@ -222,8 +222,15 @@ def admit_for_build(manifest_path, output, build_pins=()):
         held.finish()
         custody = BuildCustody(_CUSTODY_KEY, ingest, held,
                                {'manifest': mrow, 'sim': sim, 'runtime': actual.get('WIN64.IMG')})
+        private_profile = None
+        if actual.get('WIN64.IMG') is not None:
+            import native_capacity_profile
+            private_profile = native_capacity_profile.from_admitted_custody(custody)
+        else:
+            require(sim['bytes'] <= 256 << 20,
+                    'large source requires actual target runtime and measured compiler profile')
         try:
-            yield {'custody': custody, 'source': generated, 'record': record, 'manifest': mrow, 'sim': sim,
+            yield {'profile': private_profile, 'custody': custody, 'source': generated, 'record': record, 'manifest': mrow, 'sim': sim,
                'evidence_sha256': evidence, 'private': True, 'public_artifact': False,
                'producer_anchors': {'DOS_receipt': policy.DOS_RECEIPT,
                                    'native_source_map_sha256': policy.NATIVE_SOURCE_MAP_SHA,

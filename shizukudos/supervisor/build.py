@@ -12,6 +12,8 @@ Toolchains stay separate on purpose:
 """
 import argparse
 import json
+import os
+import stat
 import re
 import shutil
 import struct
@@ -112,10 +114,40 @@ def build_payload():
     return data, commands
 
 
-def build_loader(payload):
+def build_loader(payload, private_profile=None):
+    private_flags = []
+    if private_profile is not None:
+        import native_capacity_profile
+        if type(private_profile) is not native_capacity_profile.CapacityProfile:
+            raise ValueError("actual generator-held private load profile required")
+        private_profile.check()
+        private_flags = private_profile.flags(efi=True)
+        if (not OUT.is_absolute() or OUT.resolve() != OUT or not OUT.is_dir() or
+                any((parent / ".git").exists() for parent in OUT.parents)):
+            raise ValueError("private EFI output must be canonical and outside Git")
+        owner = OUT.stat()
+        owned = (owner.st_dev, owner.st_ino)
+        def private_output_guard():
+            current = OUT.stat()
+            if (OUT.is_symlink() or (current.st_dev, current.st_ino) != owned or
+                    current.st_uid != os.getuid() or stat.S_IMODE(current.st_mode) != 0o700):
+                raise ValueError("private EFI directory custody changed")
+        private_output_guard()
+        private_profile._custody.guard(private_output_guard)
+        if any((OUT / name).exists() for name in ("images.h", "BOOTX64.EFI")):
+            raise ValueError("fresh private EFI compiler outputs required")
     (OUT / "images.h").write_text(c_array("payload_image", payload, "static const unsigned char"))
+    if private_profile is not None:
+        # Preserve the actual generated translation-unit inputs under the same
+        # original descriptor union until packaging finishes.
+        for generated in (OUT / "images.h", OUT / "ap_trampoline_image.h"):
+            state = generated.stat()
+            private_profile._custody.retain_output(
+                {"path": str(generated), "bytes": state.st_size,
+                 "sha256": sha256_file(generated)},
+                (state.st_dev, state.st_ino, state.st_size, state.st_mtime_ns, state.st_ctime_ns))
     out = OUT / "BOOTX64.EFI"
-    cmd = ["x86_64-w64-mingw32-gcc", "-march=x86-64", "-std=gnu11", "-Os", "-Wall", "-Wextra", "-Werror", "-ffreestanding",
+    cmd = ["x86_64-w64-mingw32-gcc", *private_flags, "-march=x86-64", "-std=gnu11", "-Os", "-Wall", "-Wextra", "-Werror", "-ffreestanding",
            "-fno-builtin", "-fno-stack-protector", "-mno-red-zone", "-mno-stack-arg-probe", "-fno-ident",
            "-fno-asynchronous-unwind-tables", "-fno-tree-loop-distribute-patterns", "-nostdlib",
            "-Wl,--subsystem,10", "-Wl,--entry,efi_main", "-Wl,--image-base,0x10000000",
@@ -131,6 +163,14 @@ def build_loader(payload):
     machine = struct.unpack_from("<H", data, pe + 4)[0]
     subsystem = struct.unpack_from("<H", data, pe + 24 + 68)[0]
     assert data[:2] == b"MZ" and machine == 0x8664 and subsystem == 10, "expected PE32+ EFI application"
+    if private_profile is not None:
+        private_profile.check()
+        os.chmod(out, 0o400)
+        state = out.stat()
+        private_profile._custody.retain_output(
+            {"path": str(out), "bytes": state.st_size, "sha256": sha256_file(out)},
+            (state.st_dev, state.st_ino, state.st_size, state.st_mtime_ns, state.st_ctime_ns))
+        private_profile._custody.finish()
     return out, cmd
 
 
@@ -187,6 +227,7 @@ def main():
     sources += [SHZ / "csmwrap/video" / name for name in ("cp437.c", "cp437.h", "font8x8_basic.h")]
     sources.append(SHZ / "boot_profile/win98_foundation.h")
     sources.append(SHZ / "boot_profile/storage/provenance.h")
+    sources.append(SHZ / "boot_profile/native_installer_capacity.h")
     receipt = {
         "profile": "uefi-supervisor-vmx",
         "built_utc": shzlib.utc_now(),

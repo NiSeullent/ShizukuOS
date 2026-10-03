@@ -371,8 +371,21 @@ def efi_readme(loader: Input, csm: Input, mode: str, menu_timeout: int = MENU_TI
 
 def efi_members(loader: Input, csm: Input, shzdos: dict[str, Input], mode: str,
                 setup_files: dict[str, bytes] | None = None,
-                menu_timeout: int = MENU_TIMEOUT) -> dict[str, bytes]:
+                menu_timeout: int = MENU_TIMEOUT, private_native_profile=None) -> dict[str, bytes]:
     """The UEFI file set: the El Torito EFI image of the ISO, and the raw disk's FAT volume root."""
+    installer_limit=64*MIB
+    if private_native_profile is not None:
+        sys.path.insert(0,str(ROOT / "shizukudos/install"))
+        import native_capacity_profile
+        if type(private_native_profile) is not native_capacity_profile.CapacityProfile:
+            raise ValueError("actual generator-held private installer profile required")
+        private_native_profile.check()
+        if mode != "install" or menu_timeout != 0:
+            raise ValueError("private installer requires direct interactive mode and no boot menu")
+        installer_limit=private_native_profile.archive_bytes
+        marker=private_native_profile.marker()
+        if loader.data.count(marker)!=1:
+            raise ValueError("loader does not carry the exact measured private compiler profile")
     members = {
         "EFI/BOOT/BOOTX64.EFI": loader.data,
         "EFI/SHIZUKU/CSMWRAP.EFI": csm.data,
@@ -385,8 +398,13 @@ def efi_members(loader: Input, csm: Input, shzdos: dict[str, Input], mode: str,
     installer = f"{SETUP_ISO_DIR}/{SETUP_MAIN}"
     if setup_files:
         data = setup_files.get(installer, b"")
-        if not data or len(data) > 64 * MIB:
-            raise RuntimeError("the UEFI installer requires an actual INSTALL.IMG within the loader's 64 MiB limit")
+        if not data or len(data) > installer_limit:
+            raise RuntimeError("the UEFI installer requires actual INSTALL.IMG within the compiled load limit (public default64MiB)")
+        if private_native_profile is not None:
+            pin=private_native_profile._archive_pin
+            if pin is None or (len(data),sha256(data))!=(pin['bytes'],pin['sha256']):
+                raise ValueError("private INSTALL.IMG differs from actual held build copy")
+            private_native_profile.check()
         members[installer] = data
     elif mode == "install":
         raise RuntimeError("UEFI mode=install requires the actual installer payload")
