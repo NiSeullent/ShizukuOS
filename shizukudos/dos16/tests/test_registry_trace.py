@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """Actual NASM hook execution; original DOS interrupt services are modeled."""
 import pathlib,re,struct,subprocess,tempfile,unittest
-from unicorn import Uc,UC_ARCH_X86,UC_MODE_16,UC_HOOK_INTR
+from unicorn import Uc,UC_ARCH_X86,UC_MODE_16,UC_HOOK_INTR,UC_HOOK_CODE
 from unicorn.x86_const import *
 SOURCE=pathlib.Path(__file__).resolve().parents[1]/'probes/registry_trace.asm'
 REGS=[UC_X86_REG_AX,UC_X86_REG_BX,UC_X86_REG_CX,UC_X86_REG_DX,
@@ -54,7 +54,8 @@ class TraceTests(unittest.TestCase):
   cls.com=(p/'trace.com').read_bytes();cls.symbols={};pending=[]
   for line in (p/'trace.lst').read_text().splitlines():
    if re.search(r'\bHOOK hook21,',line):pending.append('hook21')
-   if re.search(r'\bstart:\s*$',line):pending.append('start')
+   label=re.search(r'\b([A-Za-z_][A-Za-z_0-9]*):\s*$',line)
+   if label:pending.append(label[1])
    if re.search(r'\bHOOK hook2f,',line):pending.append('hook2f')
    a=re.match(r'\s*\d+\s+([0-9A-F]{8})\s+\S+\s+(?:<\d>\s+)?(.*)',line)
    if not a:continue
@@ -145,6 +146,10 @@ class StartupTests(unittest.TestCase):
     result(2,True)
    elif ah in (0x4c,0x31):exitcode.append(ax&255);u.emu_stop()
    else:raise AssertionError(hex(ax))
+  ticks=[0]
+  def clock(uc,address,size,_):
+   ticks[0]+=20;u.mem_write(0x46c,struct.pack('<I',ticks[0]))
+  u.hook_add(UC_HOOK_CODE,clock,begin=0x10000+self.symbols['read_bios_tick'],end=0x10000+self.symbols['read_bios_tick'])
   u.hook_add(UC_HOOK_INTR,intr);off=self.symbols['start'];u.emu_start(0x10000+off,1<<20,count=50000)
   self.assertTrue(exitcode);return calls,vectors,exitcode[0]
  def test_wrapper_rejects_injection_before_target_access(self):
@@ -162,4 +167,40 @@ class StartupTests(unittest.TestCase):
   calls,vectors,status=self.startup(' C:\\WINDOWS\\WIN.COM',changed_vector=True)
   self.assertEqual(status,1);self.assertIn(0x3101,calls)
   self.assertEqual(vectors[0x21],(0x123,0x4444));self.assertNotIn(0x4c01,calls)
+class PauseTests(unittest.TestCase):
+ @classmethod
+ def setUpClass(cls):
+  # The same NASM routine is assembled with a reduced finite poll budget for
+  # modeled stalled-clock refusal. Production default remains 0x04000000 polls.
+  cls.tmp=tempfile.TemporaryDirectory();p=pathlib.Path(cls.tmp.name)
+  subprocess.run(['nasm','-DPAUSE_POLL_BOUND=16','-f','bin',str(SOURCE),'-o',str(p/'pause.com'),'-l',str(p/'pause.lst')],check=True)
+  cls.com=(p/'pause.com').read_bytes();cls.symbols={};pending=[]
+  for line in (p/'pause.lst').read_text().splitlines():
+   label=re.search(r'\b([A-Za-z_][A-Za-z_0-9]*):\s*$',line)
+   if label:pending.append(label[1])
+   a=re.match(r'\s*\d+\s+([0-9A-F]{8})\s+\S+',line)
+   if a:
+    for name in pending:cls.symbols[name]=int(a[1],16)+0x100
+    pending=[]
+ @classmethod
+ def tearDownClass(cls):cls.tmp.cleanup()
+ def pause(self,sequence):
+  u=Uc(UC_ARCH_X86,UC_MODE_16);u.mem_map(0,1<<20);u.mem_write(0x10100,self.com)
+  for r in (UC_X86_REG_CS,UC_X86_REG_SS):u.reg_write(r,0x1000)
+  u.reg_write(UC_X86_REG_SP,0xe000);u.mem_write(0x1e000,struct.pack('<H',0x9000));u.mem_write(0x19000,b'\xcd\xf3')
+  u.reg_write(UC_X86_REG_EAX,0x12345678);u.reg_write(UC_X86_REG_EDX,0x9abcdef0);u.reg_write(UC_X86_REG_EFLAGS,0x202)
+  count=[0];stopped=[False]
+  def tick(uc,a,size,_):
+   value=sequence[min(count[0],len(sequence)-1)];count[0]+=1;u.mem_write(0x46c,struct.pack('<I',value))
+  def interrupt(uc,n,_):self.assertEqual(n,0xf3);stopped[0]=True;u.emu_stop()
+  address=0x10000+self.symbols['read_bios_tick'];u.hook_add(UC_HOOK_CODE,tick,begin=address,end=address)
+  u.hook_add(UC_HOOK_INTR,interrupt);u.emu_start(0x10000+self.symbols['announcement_pause'],1<<20,count=3000)
+  self.assertTrue(stopped[0]);self.assertEqual(u.reg_read(UC_X86_REG_EAX),0x12345678)
+  self.assertEqual(u.reg_read(UC_X86_REG_EDX),0x9abcdef0);self.assertTrue(u.reg_read(UC_X86_REG_EFLAGS)&0x200)
+  return u.reg_read(UC_X86_REG_EFLAGS)&1,count[0]
+ def test_progressive_clock_waits_54_ticks(self):self.assertEqual(self.pause([100,100,120,153,154]),(0,5))
+ def test_stalled_clock_refuses_at_finite_poll_budget(self):self.assertEqual(self.pause([100]),(1,17))
+ def test_true_midnight_rollover(self):self.assertEqual(self.pause([0x1800b0-20,0x1800b0-10,0,34]),(0,4))
+ def test_backward_or_implausible_timer_refused(self):
+  for sequence in ([100,99],[0x1800b0],[100,220]):self.assertEqual(self.pause(sequence)[0],1)
 if __name__=='__main__':unittest.main()

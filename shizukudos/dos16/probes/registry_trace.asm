@@ -477,6 +477,8 @@ start:
  mov dx,newline
  mov ah,9
  int 21h
+ call announcement_pause
+ jc refused
  mov bx,(program_end-$$+100h+15)/16
  mov ah,4ah
  int 21h
@@ -608,6 +610,72 @@ hex_word:
  pop bx
  pop ax
  ret
+; Source-written pre-EXEC observation window. BIOS 54 ticks is about 3 seconds.
+; Read the BDA timer without consuming INT1A's midnight flag or changing time.
+%ifndef PAUSE_POLL_BOUND
+ %define PAUSE_POLL_BOUND 04000000h
+%endif
+%if PAUSE_POLL_BOUND < 1 || PAUSE_POLL_BOUND > 0ffffffffh
+ %error Invalid finite announcement poll budget
+%endif
+DAY_TICKS equ 01800b0h
+announcement_pause:
+ pushfd
+ pushad
+ push es
+ mov ax,40h
+ mov es,ax
+ call read_bios_tick
+ cmp eax,DAY_TICKS
+ jae .fail
+ mov [cs:pause_start],eax
+ mov [cs:pause_last],eax
+ mov dword [cs:pause_polls],PAUSE_POLL_BOUND
+.loop:
+ call read_bios_tick
+ cmp eax,DAY_TICKS
+ jae .fail
+ cmp eax,[cs:pause_last]
+ jae .forward
+ ; A backwards timer is accepted only across the actual daily rollover.
+ cmp dword [cs:pause_last],DAY_TICKS-54
+ jb .fail
+ cmp eax,54
+ jae .fail
+.forward:
+ mov [cs:pause_last],eax
+ mov edx,eax
+ sub edx,[cs:pause_start]
+ jnc .delta
+ add edx,DAY_TICKS
+.delta:
+ cmp edx,108
+ ja .fail
+ cmp edx,54
+ jae .success
+ dec dword [cs:pause_polls]
+ jnz .loop
+.fail:
+ pop es
+ popad
+ popfd
+ stc
+ ret
+.success:
+ pop es
+ popad
+ popfd
+ clc
+ ret
+read_bios_tick:
+ pushf
+ cli
+ mov eax,[es:6ch]
+ popf
+ ret
+pause_start dd 0
+pause_last dd 0
+pause_polls dd 0
 winname db 'WIN.COM',0
 align 2
 stack_space times 1024 db 0

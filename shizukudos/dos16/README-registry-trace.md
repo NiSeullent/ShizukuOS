@@ -45,7 +45,12 @@ records. A pending call may be retained as an explicit incomplete observation;
 its zero output fields cannot be interpreted as successful returns.
 
 Before EXEC, a source-written message emits the bounded metadata buffer's
-segment:offset. If WIN never returns, a separately reviewed owned VM capture
+segment:offset and keeps the announcement visible for 54 BIOS ticks (about
+three seconds). It atomically reads the BIOS Data Area timer without changing
+the clock or consuming the INT1A midnight flag. Backwards movement, invalid
+day counts, or a jump beyond 108 ticks refuses execution, except for a single
+normal midnight rollover. A finite 0x04000000 poll bound refuses a stalled
+timer; no keyboard input is required. If WIN never returns, a separately reviewed owned VM capture
 may save exactly these 4622 bytes while preserving guest execution, and the
 private result is inspected only after that VM has been stopped and reaped.
 No such VM/capture acceptance follows from host tests. If WIN returns, the
@@ -63,7 +68,10 @@ assembled hooks and startup in Unicorn with explicitly modeled DOS services.
 It covers register/FLAGS preservation, successful handle lifecycle, CF and
 short-count propagation, unrelated paths, case handling, identity refusal,
 ring overflow, reentrant chaining, unsupported 1611, segment wrap, malformed
-CLI, format gates and failed EXEC vector restoration. It does not execute real
+CLI, format gates and failed EXEC vector restoration. The added pause tests
+execute the same assembled timer routine with an explicitly reduced 16-poll
+stall budget; progressive/rollover tests preserve caller registers and IF.
+They model BIOS ticks and do not claim real BIOS timing measurements. It does not execute real
 Windows, hardware, protected mode, or actual filesystem writes.
 
 The original author’s [RBIL release 61](https://www.cs.cmu.edu/~ralf/files.html)
