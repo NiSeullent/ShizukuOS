@@ -1,13 +1,38 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "setup_native_release.h"
-/* No actual independently validated Windows98 native producer output exists
- * in the public tree. A caller receipt/hash, synthetic fixture, or successful
- * RAM snapshot must never supply this authority. Future build-owned release
- * records must be emitted by the real producer under held final-byte custody,
- * authenticate BOTH manifest and encoded SIM, and enter source/tool receipts.
- * Until that independent constructor exists, every target claim refuses. */
+#if defined(SHZ_NATIVE_INSTALLER_RELEASE) && !defined(SHZ_STANDALONE)
+#error "Native release records belong only to the installer standalone kernel"
+#endif
+#ifdef SHZ_NATIVE_INSTALLER_RELEASE
+/* This symbol is generated under held actual-producer custody by kbuild only.
+ * Never provide runtime registration or a caller-approved override. */
+extern const setup_native_release_record_v1 shz_installer_release_v1;
+static int nonzero(const uint8_t *p)
+{ uint8_t v=0;for(unsigned i=0;i<32;i++)v|=p[i];return v!=0; }
+static int equal(const uint8_t *a,const uint8_t *b)
+{ uint8_t v=0;for(unsigned i=0;i<32;i++)v|=a[i]^b[i];return v==0; }
+int setup_native_release_available(void)
+{
+ const setup_native_release_record_v1 *r=&shz_installer_release_v1;
+ return r->magic==0x31524e53u&&r->version==1&&r->bytes==128&&!r->reserved&&
+  r->manifest_bytes&&r->manifest_bytes<=((uint64_t)4<<20)&&
+  r->sim_bytes&&r->sim_bytes<=((uint64_t)256<<20)&&
+  nonzero(r->manifest_sha256)&&nonzero(r->sim_sha256)&&nonzero(r->evidence_sha256);
+}
+int setup_native_release_source(const archive_source_info_t *s,unsigned role)
+{
+ const setup_native_release_record_v1 *r=&shz_installer_release_v1;
+ if(!s||role>1||!setup_native_release_available())return -1;
+ return s->bytes==(role?r->sim_bytes:r->manifest_bytes)&&
+  equal(s->sha256,role?r->sim_sha256:r->manifest_sha256)?0:-1;
+}
+int setup_native_release_pair(const archive_source_info_t p[2])
+{ return p&&setup_native_release_source(&p[0],0)==0&&setup_native_release_source(&p[1],1)==0?0:-1; }
+#else
+/* Public development builds have no private release or producer authority. */
 int setup_native_release_available(void) { return 0; }
-int setup_native_release_source(const archive_source_info_t *source,unsigned role)
-{ (void)source;(void)role;return -1; }
-int setup_native_release_pair(const archive_source_info_t pair[2])
-{ (void)pair; return -1; }
+int setup_native_release_source(const archive_source_info_t *s,unsigned role)
+{ (void)s;(void)role;return -1; }
+int setup_native_release_pair(const archive_source_info_t p[2])
+{ (void)p;return -1; }
+#endif
