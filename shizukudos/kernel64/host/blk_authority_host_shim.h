@@ -21,6 +21,11 @@ void irq_restore(uint64_t);
 void krandom_get(void *,size_t);
 void kprintf(const char *,...);
 void *kmalloc(size_t);
+void *kzalloc(size_t);
+uint64_t ticks_now(void);
+uint64_t pmm_alloc(void);
+void pmm_free(uint64_t);
+#define PAGE_SIZE 4096u
 void kfree(void *);
 uint64_t kernel_pml4(void);
 uint64_t p2v(uint64_t);

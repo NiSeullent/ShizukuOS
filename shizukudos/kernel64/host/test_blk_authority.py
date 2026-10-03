@@ -15,12 +15,7 @@ class BackendAuthority(unittest.TestCase):
    binary=Path(tmp)/'authority'
    flags=['-D_POSIX_C_SOURCE=200809L','-std=c11','-O2','-g','-Wall','-Wextra','-Werror','-pthread']
    if 'clang' in compiler:flags+=['-fsanitize=address,undefined','-fno-omit-frame-pointer']
-   # Compile the actual fs_mount/root_of bodies; model namespace storage only.
-   fs=(K/'fs.c').read_text()
-   bodies=fs[fs.index('int fs_mount('):fs.index('/* NT device names')]
-   namespace=Path(tmp)/'namespace.c'
-   namespace.write_text('#include "'+str(K/'fs.h')+'"\nstatic fsnode_t *mounts[26];\nstatic uint64_t next_node_id=2;\nstatic char fold(char c){return c>=\'a\'&&c<=\'z\'?c-32:c;}\n'+bodies)
-   cmd=[compiler,*flags,'-include',str(K/'host/blk_authority_host_shim.h'),str(K/'host/test_blk_authority.c'),str(K/'blk.c'),str(K/'blk_authority.c'),str(K/'boot_storage.c'),str(K/'blk_part.c'),str(K/'vfs_mounts.c'),str(namespace),'-o',str(binary)]
+   cmd=[compiler,*flags,'-include',str(K/'host/blk_authority_host_shim.h'),str(K/'host/test_blk_authority.c'),str(K/'blk.c'),str(K/'blk_authority.c'),str(K/'boot_storage.c'),str(K/'blk_part.c'),str(K/'vfs_mounts.c'),str(K/'fs.c'),str(K/'archive_source.c'),str(ROOT/'shizukudos/accounts/sha256.c'),'-o',str(binary)]
    compiled=subprocess.run(cmd,capture_output=True,text=True,timeout=30)
    self.assertEqual(compiled.returncode,0,compiled.stderr)
    for mode in ('write','read','flush'):

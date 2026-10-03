@@ -23,7 +23,10 @@ int k64_boot_storage_bind(const shz_bootinfo_t *bi,int archive_loaded)
   p->flags!=SHZ_STORAGE_ARCHIVE_READ||p->reserved||!p->archive_size||
   p->archive_gpa!=bi->initrd_gpa||p->archive_size!=bi->initrd_size||
   !shz_storage_match(&p->boot,&p->archive))return -1;
+ if(archive_source_bind_origin(bi,(const uint8_t *)p2v(bi->initrd_gpa),bi->initrd_size))return -1;
  boot=unique_whole(&p->boot);source=unique_whole(&p->archive);
+ if(!boot&&!source&&p->boot.block_size==2048&&p->boot.media_flags==
+    (SHZ_STORAGE_READONLY|SHZ_STORAGE_REMOVABLE))return blk_authority_bind_archive_origin();
  if(!boot||!source)return -1;
  /* C: is the accepted loader archive. Its actual physical origin remains
   * excluded even though fs.c presently exposes it from RAM. */

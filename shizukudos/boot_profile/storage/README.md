@@ -33,21 +33,22 @@ provides no serial; this increment does not claim durable media identity.
 
 Native AHCI currently exposes ATA, not ATAPI. An observed boot CD can therefore
 have a real, valid firmware locator with no registered Kernel64 block device.
-The current binder **refuses** in that case. A host test of a modeled matching
+The kernel can now adopt that actual readonly/removable2048-byte optical
+origin as an immutable external exclusion, through archive_source and the shared
+block authority. A host test of a modeled matching
 ATA device is not proof of install authority from a real ISO.
 
-Next, retain a kernel-owned immutable *external backing* record for the actual
+The implemented kernel route retains a kernel-owned immutable *external backing* record for the actual
 observed readonly/removable CD and the accepted archive origin, even when its
 physical whole is outside the runtime registry. Require every candidate target's
 actual registered driver locator and exclude the same controller/port/LUN (or
 namespace) independent of geometry. Missing or ambiguous origin must still
-refuse; do not fabricate a boot blk pointer. Source import then needs a separately
-typed immutable archive-range/fsnode capability, independent byte hash and
-producer/lease custody. Existing raw `blk_authority_source_t` represents only
-registered devices and cannot express that archive source. A kernel-owned
-versioned process bridge must expose retained claimed I/O to `native_provider`.
-An actual read-only ATAPI driver is an alternative; neither route is complete
-in this increment. Installed Windows98, GOP, x64, persistence and applications
+refuse; do not fabricate a boot blk pointer. Source import now uses separately typed immutable per-file snapshot handles,
+proven against accepted archive metadata and actual namespace nodes, and retained
+by the existing block claim. It still needs independent producer/lease admission
+and a kernel-owned versioned process bridge exposing retained claimed I/O to
+`native_provider`. Raw device pins remain a separate type.
+An actual read-only ATAPI driver is an alternative; the complete native provider/syscall route remains unfinished. Installed Windows98, GOP, x64, persistence and applications
 still require actual private-media acceptance.
 
 ## Verification

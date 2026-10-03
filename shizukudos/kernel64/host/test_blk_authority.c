@@ -16,6 +16,10 @@ void krandom_get(void *p,size_t n){size_t i;random_seq++;for(i=0;i<n;i++)((uint8
 void kprintf(const char *f,...){(void)f;}
 void *kmalloc(size_t n){return malloc(n);}
 void kfree(void *p){free(p);}
+void *kzalloc(size_t n){return calloc(1,n);}
+uint64_t ticks_now(void){return 0;}
+uint64_t pmm_alloc(void){return (uint64_t)(uintptr_t)calloc(1,PAGE_SIZE);}
+void pmm_free(uint64_t p){free((void *)(uintptr_t)p);}
 uint64_t kernel_pml4(void){return 0;}
 uint64_t p2v(uint64_t x){return x;}
 static uint8_t media[512*64];
@@ -59,6 +63,7 @@ int main(int argc,char **argv)
 {
  uint8_t out[512];unsigned before;blk_authority_identity_t stale,forged;blk_authority_claim_t *second=0;
  pthread_t a,b;struct timespec tiny={0,20000000};
+ fs_init();
  device(&boot,"boot");device(&source,"source");device(&other,"other");device(&target,"target");
  partition=target;strcpy(partition.name,"targetp1");partition.parent=&target;partition.flags=BLK_F_PARTITION;
  partition.start_lba=4;partition.sectors=16;CHECK(blk_register(&partition)==0);
@@ -83,9 +88,9 @@ int main(int argc,char **argv)
  sources[1]=sources[0];
  CHECK(blk_authority_review(&target,sources,&review)!=0); /* missing actual roles */
  CHECK(blk_authority_bind_boot_roles(0,&boot)!=0);
- {shz_bootinfo_t bi={0};
+ {shz_bootinfo_t bi={0};uint8_t archive[16]={'S','H','Z','A','R','C','0','1'};
  bi.magic=SHZ_BOOTINFO_MAGIC;bi.abi_major=SHZ_ABI_MAJOR;bi.size=sizeof bi;bi.domain_id=SHZ_DOM_KERNEL64;
- bi.flags=SHZ_BIF_UEFI_DIRECT;bi.initrd_gpa=0x2000000;bi.initrd_size=16;
+ bi.flags=SHZ_BIF_UEFI_DIRECT;bi.initrd_gpa=(uint64_t)(uintptr_t)archive;bi.initrd_size=16;bi.ram_size=bi.initrd_gpa+16;
  bi.storage.magic=SHZ_STORAGE_MAGIC;bi.storage.version=SHZ_STORAGE_VERSION;bi.storage.size=sizeof bi.storage;
  bi.storage.flags=SHZ_STORAGE_ARCHIVE_READ;bi.storage.boot=boot.storage;bi.storage.archive=boot.storage;
  bi.storage.archive_gpa=bi.initrd_gpa;bi.storage.archive_size=bi.initrd_size;

@@ -83,8 +83,9 @@ Remaining concrete integration gates:
    the accepted archive's physical source in a versioned handoff. The actual
    kernel binder uniquely matches driver observations before binding roles.
    BIOS remains unknown. ISO ATAPI is not registered by the ATA-only AHCI driver:
-   the current registry-only binder refuses it. See boot_profile/storage/README.md
-   for the external readonly backing/archive capability route; never fabricate a
+   the kernel now retains its actual readonly/removable2048-byte external backing
+   and sealed per-file archive capabilities. Unknown origin still refuses.
+   See boot_profile/storage/README.md and README-archive-source.md; never fabricate a
    registered boot device or a 'RAM has no backing' exemption.
 2. Resolve current-system/runtime image backing and source file nodes using
    actual mount/handle provenance, retain source custody/hash/producer admission,
