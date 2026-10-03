@@ -24,6 +24,8 @@ static void host_secret_clear(void *p,size_t n){
     if(n==sizeof(shz_auth_request))request_wipes++;
 }
 process_t *process_slot(unsigned i){(void)i;return 0;}
+void reg_lock(void){}
+void reg_unlock(void){}
 void mutex_init(kmutex_t *m){memset(m,0,sizeof *m);}
 void mutex_lock(kmutex_t *m){(void)m;}
 void mutex_unlock(kmutex_t *m){(void)m;}
@@ -31,6 +33,7 @@ void krandom_get(void *b,size_t n){static unsigned seed=0;uint8_t *p=b;while(n--
 uint64_t ticks_now(void){return 1000;}
 int copy_from_user(process_t *p,void *d,uint64_t s,uint64_t n){(void)p;if(!s)return -1;memcpy(d,(void *)(uintptr_t)s,input_fault?n/2:n);return input_fault?-1:0;}
 int copy_to_user(process_t *p,uint64_t d,const void *s,uint64_t n){(void)p;if(!d||output_fault)return -1;memcpy((void *)(uintptr_t)d,s,n);return 0;}
+int shz_token_registry_context(process_t *p){(void)p;return 1;}
 uint32_t shz_token_integrity(process_t *p,uint32_t fallback){(void)p;return fallback;}
 int32_t shz_token_bind_subject(process_t *p,uint64_t a,uint32_t s,uint32_t i){(void)s;(void)i;if(!a)return STATUS_INVALID_PARAMETER;if(bind_fail)return STATUS_NO_MEMORY;assert(!p->token);return 0;}
 process_t *process_by_pid(int pid){for(int i=0;i<child_count;i++)if(children[i].pid==pid)return &children[i];return 0;}
