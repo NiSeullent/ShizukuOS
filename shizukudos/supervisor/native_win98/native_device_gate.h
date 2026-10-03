@@ -46,4 +46,9 @@ int w98_native_device_gate(const shz_info_t *,const shz_caps_t *);
 const shz_blob_t *w98_native_device_gate_blob(const char *);
 /* Bounded generic SHA256 of0..65536B, used for complete config and ROM bytes. */
 int w98_gate_sha256(const uint8_t *,uint64_t,uint8_t[32]);
+/* Readonly actual production lifetime; rejects absent/storage-only admission.
+ * Output is a40-word version1 guardian snapshot; no caller-supplied evidence. */
+int w98_native_device_gate_gop_words(uint32_t[40]);
+/* Pure extractor for modeled host controls; never itself admits hardware. */
+int w98_native_gate_gop_words(const w98_native_gate_t *,uint32_t[40]);
 #endif

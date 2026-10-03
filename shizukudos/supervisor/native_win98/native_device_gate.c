@@ -219,3 +219,36 @@ const shz_blob_t *w98_native_device_gate_blob(const char *name)
         if(n<16 && !name[n] && !s->name[n] && s->base && s->size)return s;}
     return 0;
 }
+
+/* Word0..6 are completed by the immutable calling-domain binding. */
+int w98_native_gate_gop_words(const w98_native_gate_t *g,uint32_t out[40])
+{
+    const w98_epoch_device_t *v=0;
+    if(!g || !out || !g->admitted || !g->attempted ||
+       !g->protocol.protocol_admitted || !g->protocol.nonce_consumed ||
+       g->protocol.state!=W98_EPOCH_ADMITTED || !g->host_deadline_ns ||
+       !g->protocol.expected.count || g->protocol.expected.count>2 ||
+       empty(g->protocol.expected.nonce,32))return -1;
+    for(unsigned i=0;i<g->protocol.expected.count;i++)
+        if(g->protocol.expected.device[i].role==W98_EPOCH_VGA){
+            if(v)return -1;
+            v=&g->protocol.expected.device[i];
+        }
+    if(!v || v->bdf>=256 || v->vendor!=0x1234 || v->device!=0x1111 ||
+       v->class_code!=0x030000 ||
+       g->snapshots[0].base!=(uintptr_t)g->config[0] || g->snapshots[0].size!=136 ||
+       g->snapshots[1].base!=(uintptr_t)g->rom || g->snapshots[1].size!=65536 ||
+       config_hash(&g->snapshots[0],g->protocol.expected.config_sha256[0]) ||
+       config_hash(&g->snapshots[1],g->protocol.expected.rom_sha256))return -1;
+    zero((uint8_t *)out,160);
+    out[7]=v->bdf;out[8]=v->vendor|(uint32_t)v->device<<16;out[9]=v->class_code;
+    for(unsigned i=0;i<6;i++)out[10+i]=v->raw_bar[i];
+    for(unsigned i=0;i<8;i++){
+        out[16+i]=le32(g->protocol.expected.nonce+i*4);
+        out[24+i]=le32(g->protocol.expected.config_sha256[0]+i*4);
+        out[32+i]=le32(g->protocol.expected.rom_sha256+i*4);
+    }
+    return 0;
+}
+int w98_native_device_gate_gop_words(uint32_t out[40])
+{return w98_native_gate_gop_words(&lifetime,out);}
