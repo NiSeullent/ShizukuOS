@@ -31,6 +31,7 @@ typedef struct {
 } disk_vol_t;
 
 static disk_vol_t dvol;
+static int fat_volume_info(fsvol_t *fv, fs_volume_info_t *out);
 
 uint32_t k64_crc32(const void *data, uint64_t n)
 {
@@ -327,6 +328,7 @@ static int try_mount(blk_dev_t *dev)
     }
     dvol.vol.flush = vol_flush;
     dvol.vol.priv = &dvol;
+    dvol.vol.volume_info = fat_volume_info;
     memset(&dvol.root, 0, sizeof dvol.root);
     dvol.root.is_dir = 1;
     dvol.root.readonly = !dvol.fat.write;
@@ -401,7 +403,8 @@ int disk_volume_info(const fsnode_t *n, uint32_t *serial, char label[12], uint64
                      uint32_t *sectors_per_cluster, int *writable)
 {
     disk_vol_t *d;
-    if (!n || n->backing != FSB_DISK || !n->vol || !n->vol->priv) return -1;
+    /* FSB_DISK is shared by FAT32 and ShizukuFS; their private layouts differ. */
+    if (!n || n->backing != FSB_DISK || n->vol != &dvol.vol || n->vol->priv != &dvol) return -1;
     d = n->vol->priv;
     mutex_lock(&d->lock);
     *serial = d->fat.volume_id;
@@ -412,5 +415,32 @@ int disk_volume_info(const fsnode_t *n, uint32_t *serial, char label[12], uint64
     *sectors_per_cluster = d->fat.spc;
     *writable = n->vol->write && d->fat.write && !d->fat.recovery_required;
     mutex_unlock(&d->lock);
+    return 0;
+}
+
+static int fat_volume_info(fsvol_t *fv, fs_volume_info_t *out)
+{
+    unsigned i, used = 0;
+    if (fv != &dvol.vol || fv->priv != &dvol || !out) return -1;
+    mutex_lock(&dvol.lock);
+    memset(out, 0, sizeof *out);
+    out->serial = dvol.fat.volume_id;
+    /* Preserve the earlier byte-to-UTF16 FAT label mapping through the shared
+     * UTF-8 contract; this does not claim an OEM code-page conversion. */
+    for (i = 0; i < 11 && dvol.fat.label[i]; ++i) {
+        const unsigned c = (uint8_t)dvol.fat.label[i];
+        if (c >= 0x80) {
+            out->label[used++] = (char)(0xc0u | (c >> 6));
+            out->label[used++] = (char)(0x80u | (c & 0x3fu));
+        } else out->label[used++] = (char)c;
+    }
+    memcpy(out->filesystem, "FAT32", 6);
+    out->total_units = dvol.fat.cluster_count;
+    out->free_units = dvol.fat.free_clusters;
+    out->sectors_per_unit = dvol.fat.spc;
+    out->bytes_per_sector = FAT32_SECTOR;
+    out->attributes = 0x2u | 0x4u;       /* case-preserved names, Unicode on disk */
+    out->writable = fv->write && dvol.fat.write && !dvol.fat.recovery_required;
+    mutex_unlock(&dvol.lock);
     return 0;
 }
