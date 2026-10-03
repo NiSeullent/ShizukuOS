@@ -67,3 +67,38 @@ Host controls build a real small xorriso/FAT image with an actual EFI compiler
 and pinned Syslinux, using explicitly modeled non-Windows kernel/archive inputs.
 They establish only pack/copy/readback behavior. No real Windows source admission,
 installation, firmware memory availability or Windows 98 boot is certified.
+
+The complete project inventory separates regular Git blobs from mode160000
+Gitlinks. Every regular file remains under its original read lease. For a
+Gitlink, `--project-gitlink-cache CACHE` must supply `CACHE/<committed-path>` as
+an actual independent clean checkout at the exact commit and repository URL
+recorded in the committed `.gitmodules`. Its complete original source and
+licence are archived separately; the project archive records the original tree
+pointer. Gitlink source availability does not claim that it was compiled or
+that Windows/source admission occurred. Missing or nested unhandled gitlinks
+refuse complete source closure.
+
+The build temporarily raises only its own soft file-descriptor limit before
+private admission, bounded by actual committed regular-file count and producer
+input-family ceilings (maximum65536 descriptors). The hard limit is observed
+and remains unchanged. A hard limit too low for retained source custody refuses;
+all leases close before the original soft limit is restored, including errors.
+No client, service or machine-wide limit/configuration changes occur.
+
+Committed zero-byte metadata is a separate source-only role: the exact regular
+single-link inode, zero extent and SHA of empty bytes remain under an original
+read lease through archive reconstruction and final ISO/source verification.
+Its descriptors always unlock and close before a successful result, including
+cancellation and individual cleanup failure. This scoped mechanism never grants
+native source import or Windows approval and leaves the native Union's nonempty
+file guard unchanged. KernelEx's two committed `.timestamp` blobs are included
+in the complete 544-blob tree; archive omissions are refused.
+
+The independently approved source-built BIOS receipt can pin a host compiler
+with several filesystem hard links. Only that receipt's exact anchored tool-map
+entries may use a scoped source/tool read lease: original canonical path, inode,
+link count, size and timestamps must remain unchanged, with a held read lease
+and full SHA checked at admission and final cleanup. A same-byte alias or link
+count change refuses. These tools support corresponding-source reproducibility;
+they never become native source input roles or disk-write authority. All ordinary
+native input rules, including the single-link requirement, remain unchanged.

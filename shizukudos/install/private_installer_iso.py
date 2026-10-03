@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
 """Private native ISO finalizer; live producer custody, never receipt approval."""
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from argparse import Namespace
 import gzip
+import configparser
+import fcntl
+import resource
 import hashlib
 import importlib.util
 import io
@@ -159,7 +162,7 @@ def _syslinux(custody,cache,spec):
     return files,payload
 
 
-def _bios_sources(custody,receipt_path,manifest):
+def _bios_sources(custody,receipt_path,manifest,source_only=None):
     anchor=getattr(admission.policy,'NATIVE_SYSTEM_BIOS_SOURCE',None)
     need(type(anchor) is dict and receipt_path is not None,
          'independent source-built native system BIOS closure absent')
@@ -190,7 +193,12 @@ def _bios_sources(custody,receipt_path,manifest):
         source=Path(path)
         need('..' not in source.parts,'canonical BIOS source pin required')
         _row(custody,source if source.is_absolute() else source_root/source,sha)
-    for item in tools.values():_row(custody,item['path'],item['sha256'])
+    for name,item in tools.items():
+        if Path(item['path']).stat().st_nlink==1:
+            _row(custody,item['path'],item['sha256'])
+        else:
+            need(type(source_only) is _SourceOnlyLeases,'scoped actual BIOS reproducibility tool lease required')
+            source_only.add_bios_tool(row,tools,name)
     archive=receipt.get('source_archive')
     admission.anchored(archive,anchor.get('source_archive'),'native BIOS corresponding source archive')
     _row(custody,archive['path'],archive['sha256'])
@@ -207,34 +215,202 @@ def _bios_sources(custody,receipt_path,manifest):
     return result
 
 
-def _compliance(custody,cache,bios_receipt):
-    manifest_row=_row(custody,ROOT/'shizukudos/upstream/manifest.json')
-    manifest=json.loads(_read(custody,manifest_row,4*MIB))
-    payload=_bios_sources(custody,bios_receipt,manifest)
-    files,sys_payload=_syslinux(custody,cache,manifest['upstreams']['syslinux'])
-    payload.update(sys_payload)
+def _tree_entries(tree,commit):
+    blobs={};links={}
+    for entry in _git(tree,'ls-tree','-r','-z',commit).split(b'\0'):
+        if not entry:continue
+        fields,raw=entry.split(b'\t',1);mode,kind,oid=fields.decode('ascii').split()
+        name=os.fsdecode(raw);path=Path(name)
+        need(not path.is_absolute() and '..' not in path.parts,'canonical committed source path required')
+        if kind=='blob' and mode in ('100644','100755'):blobs[name]=oid
+        elif kind=='commit' and mode=='160000':links[name]=oid
+        else:raise ValueError('unsupported committed source type: '+mode+'/'+kind)
+    return blobs,links
+
+
+@contextmanager
+def _fd_budget():
+    # Bound the actual project tree plus the producer's bounded input families.
+    # Only this build process and its children inherit the temporary soft limit.
+    blobs,_=_tree_entries(ROOT,_git(ROOT,'rev-parse','HEAD').decode().strip())
+    need(len(blobs)<=30000,'project source descriptor inventory exceeds bound')
+    required=((len(blobs)+32768+512+1023)//1024)*1024
+    need(required<=65536,'private source descriptor budget exceeds process bound')
+    previous=resource.getrlimit(resource.RLIMIT_NOFILE)
+    need(previous[1]==resource.RLIM_INFINITY or previous[1]>=required,
+         'actual hard descriptor limit cannot retain all private source leases')
+    changed=previous[0]<required
+    if changed:resource.setrlimit(resource.RLIMIT_NOFILE,(required,previous[1]))
+    try:yield {'required':required,'previous_soft':previous[0]}
+    finally:
+        if changed:resource.setrlimit(resource.RLIMIT_NOFILE,previous)
+
+
+class _SourceOnlyLeases:
+    """Committed metadata and anchored BIOS tools; never native input roles."""
+    def __init__(self,custody):
+        self.custody=custody;self.entries=[];self.closed=False
+        custody.guard(self.check)
+    def __enter__(self):return self
+    def check(self):
+        for entry in self.entries:
+            path=self.custody._ingest.path(str(entry['path']))
+            state=path.stat()
+            need(stat.S_ISREG(state.st_mode) and state.st_nlink==entry['nlink'] and
+                 self.custody._ingest.identity(state)==entry['identity'],
+                 'source-only original path/inode/link identity changed')
+            if entry['fd'] is not None:
+                held=os.fstat(entry['fd'])
+                need(held.st_nlink==entry['nlink'] and
+                     self.custody._ingest.identity(held)==entry['identity'] and
+                     fcntl.fcntl(entry['fd'],fcntl.F_GETLEASE)==fcntl.F_RDLCK,
+                     'source-only original read lease changed')
+    def _retain(self,path,size,sha,role):
+        self.custody.check();path=self.custody._ingest.path(str(path))
+        fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
+        try:
+            state=os.fstat(fd)
+            need(stat.S_ISREG(state.st_mode) and state.st_size==size and
+                 ((role=='committed-empty-metadata' and size==0 and state.st_nlink==1) or
+                  (role=='anchored-BIOS-reproducibility-tool' and 0<size<=64*MIB and state.st_nlink>=1)),
+                 'independent source-only regular role extent required')
+            fcntl.fcntl(fd,fcntl.F_SETOWN,os.getpid());fcntl.fcntl(fd,fcntl.F_SETLEASE,fcntl.F_RDLCK)
+            need(self._sha(fd,size)==sha,'source-only original SHA differs')
+            self.entries.append({'path':path,'fd':fd,'identity':self.custody._ingest.identity(state),
+                                 'nlink':state.st_nlink,'sha256':sha,'role':role})
+            fd=None;self.check()
+        finally:
+            if fd is not None:os.close(fd)
+    @staticmethod
+    def _sha(fd,size):
+        sha=hashlib.sha256()
+        for offset in range(0,size,MIB):
+            raw=os.pread(fd,min(MIB,size-offset),offset)
+            need(len(raw)==min(MIB,size-offset),'complete original source-only read required')
+            sha.update(raw)
+        return sha.hexdigest()
+    def add_bios_tool(self,receipt_row,tools,name):
+        need(not self.closed,'source-only custody closed')
+        anchor=getattr(admission.policy,'NATIVE_SYSTEM_BIOS_SOURCE',None)
+        need(type(anchor) is dict,'independent actual BIOS producer absent')
+        admission.anchored(receipt_row,anchor.get('receipt'),'exact actual BIOS tool producer receipt')
+        need(type(tools) is dict and admission.digest(admission.canonical(tools))==anchor.get('tool_map_sha256') and
+             name in tools,'exact independently anchored BIOS reproducibility tool map required')
+        item=tools[name];path=self.custody._ingest.path(item['path'])
+        self._retain(path,path.stat().st_size,item['sha256'],'anchored-BIOS-reproducibility-tool')
+    def add(self,path,expected):
+        need(not self.closed and expected==hashlib.sha256(b'').hexdigest(),
+             'exact empty committed metadata role required')
+        self._retain(path,0,expected,'committed-empty-metadata')
+    def __exit__(self,*exc):
+        errors=[]
+        try:
+            self.check()
+            for entry in self.entries:
+                need(self._sha(entry['fd'],entry['identity'][2])==entry['sha256'],
+                     'final source-only original SHA differs')
+            self.check()
+        except BaseException as error:errors.append(error)
+        for entry in reversed(self.entries):
+            fd=entry['fd']
+            try:fcntl.fcntl(fd,fcntl.F_SETLEASE,fcntl.F_UNLCK)
+            except BaseException as error:errors.append(error)
+            try:os.close(fd)
+            except BaseException as error:errors.append(error)
+            entry['fd']=None
+        self.closed=True
+        if errors:raise errors[0]
+
+
+def _project_sources(custody,gitlink_cache=None,empty_metadata=None):
     commit=_git(ROOT,'rev-parse','HEAD').decode().strip()
     need(not _git(ROOT,'status','--porcelain'),'clean current Git source is required')
-    def source_guard():
+    def guard():
         need(_git(ROOT,'rev-parse','HEAD').decode().strip()==commit and
              not _git(ROOT,'status','--porcelain'),'public project source changed during ISO build')
-    custody.guard(source_guard)
-    # Verify all tracked regular file bytes against the same Git objects, then
-    # retain them. The source tar is made from those immutable committed blobs.
-    project_raw=_git_archive(ROOT,'Win98-Modern-'+commit[:12],commit)
+    custody.guard(guard)
+    blobs,links=_tree_entries(ROOT,commit)
+    required=len(custody._held.entries)+len(blobs)+512
+    soft,_=resource.getrlimit(resource.RLIMIT_NOFILE)
+    need(soft>=required,'source descriptor budget not established before admission')
+    raw=_git_archive(ROOT,'Win98-Modern-'+commit[:12],commit)
     prefix='Win98-Modern-'+commit[:12]+'/'
-    tracked={os.fsdecode(raw) for raw in _git(ROOT,'ls-files','-z').split(b'\0') if raw}
     archived=set()
-    with tarfile.open(fileobj=io.BytesIO(project_raw),mode='r:') as tar:
+    with tarfile.open(fileobj=io.BytesIO(raw),mode='r:') as tar:
         for member in tar.getmembers():
             if member.isdir():continue
             need(member.isfile() and member.name.startswith(prefix),'regular committed project source required')
             name=member.name[len(prefix):]
-            need(name in tracked and name not in archived,'exact committed project archive member required')
+            need(name in blobs and name not in archived,'exact committed project archive member required')
             archived.add(name)
-            _row(custody,ROOT/name,hashlib.sha256(tar.extractfile(member).read()).hexdigest())
-    need(archived==tracked,'complete committed project archive required')
-    payload['SOURCE/Win98-Modern-source.tar.gz']=_gz(project_raw)
+            data=tar.extractfile(member).read();sha=hashlib.sha256(data).hexdigest()
+            if not data:
+                need(type(empty_metadata) is _SourceOnlyLeases,'scoped committed metadata read lease required')
+                empty_metadata.add(ROOT/name,sha)
+            else:_row(custody,ROOT/name,sha)
+    need(archived==set(blobs),'complete committed regular project archive required')
+    result={'SOURCE/Win98-Modern-source.tar.gz':_gz(raw)}
+    config=configparser.RawConfigParser()
+    if links:
+        need(gitlink_cache is not None,'pinned project gitlink source cache required')
+        config.read_string(_git(ROOT,'show',commit+':.gitmodules').decode())
+    metadata=[]
+    for name,revision in links.items():
+        entries=[config[section] for section in config.sections() if config[section].get('path')==name]
+        need(len(entries)==1,'exact committed gitlink repository mapping required')
+        url=entries[0].get('url');tree=Path(gitlink_cache)/name
+        need(tree.is_dir() and _git(tree,'rev-parse','--show-toplevel').decode().strip()==str(tree.resolve()),
+             'actual independent project gitlink checkout required')
+        need(_git(tree,'config','--get','remote.origin.url').decode().strip()==url,
+             'project gitlink repository URL differs')
+        need(not _git(tree,'status','--porcelain'),'clean pinned project gitlink checkout required')
+        child_blobs,child_links=_tree_entries(tree,revision)
+        need(not child_links,'nested project gitlinks need independently pinned source closure')
+        def child_guard(tree=tree,revision=revision):
+            need(_git(tree,'rev-parse','HEAD').decode().strip()==revision and
+                 not _git(tree,'status','--porcelain'),'project gitlink source changed')
+        custody.guard(child_guard)
+        child_raw=_git_archive(tree,'project-'+name.replace('/','-'),revision)
+        # Preserve every actual checked-out regular source under original-FD
+        # leases; hashes derive from the exact pinned Git blobs, never a flag.
+        empty_names=[];child_archived={}
+        child_prefix='project-'+name.replace('/','-')+'/'
+        with tarfile.open(fileobj=io.BytesIO(child_raw),mode='r:') as tar:
+            for member in tar.getmembers():
+                if member.isdir():continue
+                need(member.isfile() and member.name.startswith(child_prefix),
+                     'regular pinned project gitlink archive required')
+                path=member.name[len(child_prefix):]
+                need(path in child_blobs and path not in child_archived,
+                     'exact pinned project gitlink archive member required')
+                data=tar.extractfile(member).read();child_archived[path]=data
+                sha=hashlib.sha256(data).hexdigest()
+                if not data:
+                    need(type(empty_metadata) is _SourceOnlyLeases,'scoped committed metadata read lease required')
+                    empty_metadata.add(tree/path,sha);empty_names.append(path)
+                else:_row(custody,tree/path,sha)
+        need(set(child_archived)==set(child_blobs),'complete pinned project gitlink source archive required')
+        label=name.replace('/','-')
+        result['SOURCE/project-gitlinks/'+label+'-'+revision[:12]+'.tar.gz']=_gz(child_raw)
+        licenses=[path for path in child_blobs if Path(path).name.lower() in ('license','license.txt','copying','copying.txt')]
+        need(licenses,'pinned project gitlink licence required')
+        for path in licenses:
+            result['SOURCE/LICENSES/project-'+label+'-'+path.replace('/','-')]=child_archived[path]
+        metadata.append({'path':name,'repository':url,'commit':revision,'regular_source_files':len(child_blobs),
+                         'source_archived':True,'committed_empty_metadata_read_leases':empty_names,
+                         'producer_build_or_Windows_approval':False})
+    result['SOURCE/project-gitlinks.json']=(json.dumps(metadata,sort_keys=True,indent=2)+'\n').encode()
+    guard();custody.check()
+    return result
+
+
+def _compliance(custody,cache,bios_receipt,gitlink_cache=None,empty_metadata=None):
+    manifest_row=_row(custody,ROOT/'shizukudos/upstream/manifest.json')
+    manifest=json.loads(_read(custody,manifest_row,4*MIB))
+    payload=_bios_sources(custody,bios_receipt,manifest,empty_metadata)
+    files,sys_payload=_syslinux(custody,cache,manifest['upstreams']['syslinux'])
+    payload.update(sys_payload)
+    payload.update(_project_sources(custody,gitlink_cache,empty_metadata))
     payload['SOURCE/LICENSES/Shizuku-GPL-2.0.txt']=_read(custody,_row(custody,ROOT/'LICENSE'),MIB)
     for name in GIT_UPSTREAMS:
         spec=manifest['upstreams'][name];tree=Path(cache)/name
@@ -270,7 +446,7 @@ def _compliance(custody,cache,bios_receipt):
                         key='SOURCE/LICENSES/'+name+'-'+sub.replace('/','-')+'-'+path.replace('/','-')
                         payload[key]=_git(sub_tree,'show',sub_commit+':'+path)
     payload['SOURCE/upstream-manifest.json']=_read(custody,manifest_row,4*MIB)
-    source_guard();custody.check()
+    custody.check()
     return files,payload
 
 
@@ -349,42 +525,44 @@ def _assemble(custody,profile,package_result,loader_row,syslinux,compliance,out)
             'BIOS_native_storage_authority':False,'CSM_fallback_included':False}
 
 
-def _finalizer(cache,bios_receipt):
+def _finalizer(cache,bios_receipt,gitlink_cache=None):
     def finish(release,build,results):
         need(type(release) is dict and type(release.get('custody')) is admission.BuildCustody and
              type(release.get('profile')) is capacity.CapacityProfile,'actual live private release required')
         custody=release['custody'];profile=release['profile'];profile.check()
-        packaged=package.finalize(release,build,results)
-        syslinux,compliance=_compliance(custody,cache,bios_receipt)
-        supervisor=_load('private_iso_supervisor',ROOT/'shizukudos/supervisor/build.py')
-        supervisor.OUT=_directory(custody,Path(build)/'private-efi')
-        _,vbios_command=supervisor.build_vbios()
-        _,ap_command=supervisor.build_ap_trampoline()
-        _row(custody,supervisor.OUT/'vbios_image.h')
-        _row(custody,supervisor.OUT/'ap_trampoline_image.h')
-        payload,commands=supervisor.build_payload()
-        commands=[vbios_command,ap_command,*commands]
-        loader,command=supervisor.build_loader(payload,profile)
-        row=_row(custody,loader)
-        compliance['SOURCE/private-installer/native_release_admitted.c']=_read(custody,release['record'],4*MIB)
-        compliance['SOURCE/private-installer/measured-profile.json']=(json.dumps(profile.record(),sort_keys=True)+'\n').encode()
-        compliance['SOURCE/private-installer/efi-commands.json']=(json.dumps([[str(v) for v in values] for values in commands]+[[str(v) for v in command]],indent=2)+'\n').encode()
-        result=_assemble(custody,profile,packaged,row,syslinux,compliance,Path(build)/'private-iso')
-        result['Supervisor_commands']=[[str(v) for v in values] for values in commands]
-        result['EFI_command']=[str(v) for v in command]
-        return result
+        with _SourceOnlyLeases(custody) as empty_metadata:
+            packaged=package.finalize(release,build,results)
+            syslinux,compliance=_compliance(custody,cache,bios_receipt,gitlink_cache,empty_metadata)
+            supervisor=_load('private_iso_supervisor',ROOT/'shizukudos/supervisor/build.py')
+            supervisor.OUT=_directory(custody,Path(build)/'private-efi')
+            _,vbios_command=supervisor.build_vbios()
+            _,ap_command=supervisor.build_ap_trampoline()
+            _row(custody,supervisor.OUT/'vbios_image.h')
+            _row(custody,supervisor.OUT/'ap_trampoline_image.h')
+            payload,commands=supervisor.build_payload()
+            commands=[vbios_command,ap_command,*commands]
+            loader,command=supervisor.build_loader(payload,profile)
+            row=_row(custody,loader)
+            compliance['SOURCE/private-installer/native_release_admitted.c']=_read(custody,release['record'],4*MIB)
+            compliance['SOURCE/private-installer/measured-profile.json']=(json.dumps(profile.record(),sort_keys=True)+'\n').encode()
+            compliance['SOURCE/private-installer/efi-commands.json']=(json.dumps([[str(v) for v in values] for values in commands]+[[str(v) for v in command]],indent=2)+'\n').encode()
+            result=_assemble(custody,profile,packaged,row,syslinux,compliance,Path(build)/'private-iso')
+            result['Supervisor_commands']=[[str(v) for v in values] for values in commands]
+            result['EFI_command']=[str(v) for v in command]
+            return result
     return finish
 
 
-def build_private_iso(manifest,output,upstream_cache,native_bios_producer_receipt=None):
+def build_private_iso(manifest,output,upstream_cache,native_bios_producer_receipt=None,project_gitlink_cache=None):
     need(admission.policy.NATIVE_SOURCE_MAP_SHA is not None and admission.policy.NATIVE_ARTIFACTS is not None,
          'independently approved native producer anchors absent; private ISO refused')
     need(type(getattr(admission.policy,'NATIVE_SYSTEM_BIOS_SOURCE',None)) is dict and native_bios_producer_receipt is not None,
          'independent source-built native system BIOS closure absent; ISO refused')
     kbuild=_load('private_iso_kbuild',ROOT/'shizukudos/kbuild.py')
-    with ExitStack() as stack:
-        kbuild.build_all(Namespace(out=Path(output),native_release_manifest=Path(manifest)),stack,
-                         private_finalize=_finalizer(Path(upstream_cache),Path(native_bios_producer_receipt)))
+    with _fd_budget():
+        with ExitStack() as stack:
+            kbuild.build_all(Namespace(out=Path(output),native_release_manifest=Path(manifest)),stack,
+                             private_finalize=_finalizer(Path(upstream_cache),Path(native_bios_producer_receipt),project_gitlink_cache))
 
 
 def main():
@@ -394,6 +572,7 @@ def main():
     parser.add_argument('--out',type=Path,required=True)
     parser.add_argument('--upstream-cache',type=Path,required=True,help='existing pinned public upstream cache; never downloads')
     parser.add_argument('--native-bios-producer-receipt',type=Path,help='discovery path; must match independent ROOT-owned source-built BIOS anchor')
-    args=parser.parse_args();build_private_iso(args.native_release_manifest,args.out,args.upstream_cache,args.native_bios_producer_receipt)
+    parser.add_argument('--project-gitlink-cache',type=Path,help='existing exact repository/path checkouts for committed project gitlinks')
+    args=parser.parse_args();build_private_iso(args.native_release_manifest,args.out,args.upstream_cache,args.native_bios_producer_receipt,args.project_gitlink_cache)
 
 if __name__=='__main__':main()
