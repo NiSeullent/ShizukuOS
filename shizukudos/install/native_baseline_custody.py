@@ -30,6 +30,23 @@ def need(value, message):
 def identity(s):
     return s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns
 
+def pidfd_identity(fd):
+    need(type(fd) is int and fd>=0 and
+         os.readlink('/proc/self/fd/%d'%fd)=='anon_inode:[pidfd]',
+         'actual original pidfd required')
+    state=os.fstat(fd)
+    return state.st_dev,state.st_ino
+
+def pidfd_ready(fd,original):
+    """Observe the retained kernel object without the select FD number limit."""
+    need(pidfd_identity(fd)==original,'original pidfd identity changed')
+    poller=select.poll();poller.register(fd,select.POLLIN|select.POLLHUP)
+    events=poller.poll(0)
+    need(pidfd_identity(fd)==original,'original pidfd identity changed')
+    need(all(number==fd and not flags&(select.POLLERR|select.POLLNVAL)
+             for number,flags in events),'original pidfd poll failed')
+    return any(flags&(select.POLLIN|select.POLLHUP) for _,flags in events)
+
 
 def canonical(value):
     p = Path(value)
@@ -97,6 +114,7 @@ class BaselineSourceOwner:
             signal.signal(number, self.handler)
         self.pin = dict(pin)
         try:
+            self.owner_pidfd_identity = pidfd_identity(self.owner_pidfd)
             need(not self.descendants(), 'owner unit contains an unrelated process')
             p = canonical(pin['path']); s = p.stat()
             need(stat.S_IMODE(s.st_mode) == 0o400 and s.st_uid == os.getuid() and s.st_nlink == 1 and
@@ -130,7 +148,7 @@ class BaselineSourceOwner:
         need(os.getpid() == self.pid and threading.get_ident() == self.thread and
              self.phase != 'CLOSED' and not self.broken and not self.cancelled and
              all(signal.getsignal(n) is self.handler for n in self.previous), 'owner exit/thread/lease handler changed')
-        need(not select.select([self.owner_pidfd], [], [], 0)[0], 'owner process exited')
+        need(not pidfd_ready(self.owner_pidfd,self.owner_pidfd_identity), 'owner process exited')
         for p, row in self.rows.items():
             fd, saved, _ = row
             need(identity(os.fstat(fd)) == saved == identity(canonical(p).stat()) and
@@ -193,8 +211,9 @@ class BaselineSourceOwner:
         self.process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True, start_new_session=True)
         self.child_pidfd = os.pidfd_open(self.process.pid, 0); self.phase = 'RUNNING'
         try:
+            self.child_pidfd_identity = pidfd_identity(self.child_pidfd)
             result = self.process.wait(timeout=timeout)
-            need(select.select([self.child_pidfd], [], [], 0)[0], 'actual child exit not observed')
+            need(pidfd_ready(self.child_pidfd,self.child_pidfd_identity), 'actual child exit not observed')
             self.quiesce(); self.check()
             need(result == 0, 'actual owned child failed')
             self.full_hash(self.source_fd, self.pin['bytes'], self.pin['sha256'])

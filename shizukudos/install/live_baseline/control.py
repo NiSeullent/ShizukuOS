@@ -15,6 +15,23 @@ NAMES={'BASEOBS.EXE','BASENONC.BIN','BASEOBS.JSON'}
 def need(ok,message):
     if not ok:raise ValueError(message)
 
+def pidfd_identity(fd):
+    need(type(fd) is int and fd>=0 and
+         os.readlink('/proc/self/fd/%d'%fd)=='anon_inode:[pidfd]',
+         'actual original pidfd required')
+    state=os.fstat(fd)
+    return state.st_dev,state.st_ino
+
+def pidfd_ready(fd,original):
+    """Observe the retained kernel object without the select FD number limit."""
+    need(pidfd_identity(fd)==original,'original pidfd identity changed')
+    poller=select.poll();poller.register(fd,select.POLLIN|select.POLLHUP)
+    events=poller.poll(0)
+    need(pidfd_identity(fd)==original,'original pidfd identity changed')
+    need(all(number==fd and not flags&(select.POLLERR|select.POLLNVAL)
+             for number,flags in events),'original pidfd poll failed')
+    return any(flags&(select.POLLIN|select.POLLHUP) for _,flags in events)
+
 def load(path,name):
     spec=importlib.util.spec_from_file_location(name,path)
     result=importlib.util.module_from_spec(spec);spec.loader.exec_module(result);return result
@@ -143,12 +160,13 @@ class OwnedObservation:
         self._pid=os.getpid();self._thread=threading.get_ident();self._active=True;self._compiler_hold_started=False
         self._guard=check;self._held=held;self._source=source;self._clone_fd=clone_fd
         self._clone_pin=clone_pin;self._pidfd=pidfd;self._child=child;self._observed=json.loads(json.dumps(observed))
+        self._pidfd_identity=pidfd_identity(pidfd)
     def __reduce__(self):raise TypeError('live observation cannot be serialized')
     def check(self):
         import threading
         need(self._active and self._pid==os.getpid() and self._thread==threading.get_ident(),'observation owner lifetime differs')
         self._guard(True)
-        need(self._child.poll() is not None and select.select([self._pidfd],[],[],0)[0],'actual owned child must remain reaped')
+        need(self._child.poll() is not None and pidfd_ready(self._pidfd,self._pidfd_identity),'actual owned child must remain reaped')
     def begin_compiler_hold(self,deadline):
         # Only after actual fixed observation/reap and before its phase expires.
         self.check();now=time.monotonic()
@@ -230,7 +248,7 @@ def run(request, retain=None, compiler_hold_deadline=None):
         os.fsync(clone_fd);check(True);need(shutil.disk_usage(out).free>=FLOOR,'fresh launch resource reserve required')
         logs=capture.BoundedLogs(out)
         argv=[request['qemu']['path'],'-name','win98-nonce-observation','-machine','pc-i440fx-rhel10.0.0','-accel','tcg','-cpu','qemu64','-m','128M','-smp','1','-nic','none','-display','none','-vga','std','-drive','if=ide,index=0,format=raw,file=/proc/self/fd/%d'%clone_fd,'-boot','order=c','-qmp','unix:%s/qmp.sock,server=on,wait=off'%out,'-serial','none','-monitor','none']
-        child=subprocess.Popen(argv,cwd=out,stdout=subprocess.DEVNULL,stderr=logs.writers['native-qemu.stderr'],pass_fds=(clone_fd,));pidfd=os.pidfd_open(child.pid);logs.close_writers()
+        child=subprocess.Popen(argv,cwd=out,stdout=subprocess.DEVNULL,stderr=logs.writers['native-qemu.stderr'],pass_fds=(clone_fd,));pidfd=os.pidfd_open(child.pid);pidfd_original=pidfd_identity(pidfd);logs.close_writers()
         check(True)
         admission=time.monotonic()+.25
         actual=Path('/proc/%d/cmdline'%child.pid).read_bytes()
@@ -268,7 +286,7 @@ def run(request, retain=None, compiler_hold_deadline=None):
             # Cleanup continues independently of guest deadline/cancellation.
             reap(child,pidfd,monitor)
             monitor.close();monitor=None;logs.pump(check=False);logs.close();logs=None
-        need(child.poll() is not None and select.select([pidfd],[],[],0)[0],'actual child reap required')
+        need(child.poll() is not None and pidfd_ready(pidfd,pidfd_original),'actual child reap required')
         check(True);os.fsync(clone_fd);os.close(clone_fd);clone_fd=os.open(clone,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
         fcntl.fcntl(clone_fd,fcntl.F_SETOWN,os.getpid());fcntl.fcntl(clone_fd,fcntl.F_SETLEASE,fcntl.F_RDLCK);frozen_clone=replacement.identity(os.fstat(clone_fd))
         check(True)
