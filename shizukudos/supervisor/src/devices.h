@@ -7,6 +7,7 @@
 #ifndef SHZ_DEVICES_H
 #define SHZ_DEVICES_H
 #include <stdint.h>
+#include "../../../drivers/common/device.h"
 
 void dev_init(uint64_t tsc_hz, uint64_t ram_bytes);
 /* Opt-in actual-Windows98 firmware contracts; dev_init keeps the DOS profile. */
@@ -25,6 +26,20 @@ typedef struct {
     dev_native_io_record_t pit[DEV_NATIVE_PIT_RECORDS],kbc[DEV_NATIVE_KBC_RECORDS];
 } dev_native_observation_t;
 void dev_native_win98_enable(void);
+/* Serialized trusted native pointer owner. validate is checked at every
+ * publication/read boundary; poll runs only from the scheduler's dev_poll,
+ * never from a guest port/IRQ callback. No attach happens without a real source.
+ * Detach removes queued AUX bytes and never stops/frees the source transport. */
+struct dev_native_pointer_ops {
+    void *context;
+    int (*validate)(void *);
+    int (*poll)(void *);
+};
+int dev_native_pointer_attach(const struct dev_native_pointer_ops *);
+int dev_native_pointer_detach(void *context);
+/* Input uses HID coordinates (positive Y down), converted to PS/2 positive Y up.
+ * Full movement is retained across FIFO pressure. Failure publishes nothing. */
+int dev_native_pointer_input(void *context,int32_t x,int32_t y,uint8_t buttons);
 /* Passive bounded numeric I/O evidence, valid until the next dev_init. */
 const dev_native_observation_t *dev_native_observation(void);
 /* Port I/O. Return 1 if the port belongs to a modelled device. size is 1, 2 or 4. */

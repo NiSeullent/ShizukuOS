@@ -7,9 +7,9 @@ static int fixed_register(const uint8_t *p,size_t n,size_t ext,size_t legacy,
     if(n>ext && n<ext+12)return SHZ_MALFORMED;
     if(n>=ext+12 && shz_le64(p+ext+4)) g=shz_gas_read(p+ext);
     else { g.space=1;g.bits=(uint8_t)(bytes*8);g.address=shz_le32(p+legacy); }
-    if(!g.address && optional) { *out=g;return SHZ_OK; }
+    if(!g.address && optional) { *out=g;return SHZ_DRIVER_OK; }
     r=shz_gas_valid(&g,bytes);if(r) return r;
-    *out=g;return SHZ_OK;
+    *out=g;return SHZ_DRIVER_OK;
 }
 int shz_parse_fadt(const void *table,size_t bytes,struct shz_fixed *out) {
     const uint8_t *p=table;struct shz_fixed f;size_t n;int r;
@@ -29,7 +29,7 @@ int shz_parse_fadt(const void *table,size_t bytes,struct shz_fixed *out) {
         f.reset=shz_gas_read(p+116);r=shz_gas_valid(&f.reset,1);if(r) return r;
         f.reset_value=p[128];
     }
-    *out=f;return SHZ_OK;
+    *out=f;return SHZ_DRIVER_OK;
 }
 int shz_parse_ecdt(const void *table,size_t bytes,struct shz_ec_table *out) {
     const uint8_t *p=table;struct shz_ec_table e;size_t n,i;int r;
@@ -50,7 +50,7 @@ int shz_parse_ecdt(const void *table,size_t bytes,struct shz_ec_table *out) {
             return SHZ_MALFORMED;
     }
     if(i==n-65 || i==0) return SHZ_MALFORMED;
-    shz_copy(out,&e,sizeof(e));return SHZ_OK;
+    shz_copy(out,&e,sizeof(e));return SHZ_DRIVER_OK;
 }
 static int fixed_read(struct shz_fixed_power *p,const struct shz_gas *g,
     unsigned bytes,uint32_t *v) { return shz_reg_read(&p->ops,p->owner,p->generation,g,bytes,v); }
@@ -61,7 +61,7 @@ int shz_fixed_events(struct shz_fixed_power *p,uint16_t *out) {
     if(!p || !out) return SHZ_INVALID;
     r=fixed_read(p,&p->table.event_a,4,&a);if(r) return r;
     if(p->table.event_b.address) { r=fixed_read(p,&p->table.event_b,4,&b);if(r) return r; }
-    *out=(uint16_t)((a&(a>>16))|(b&(b>>16)));return SHZ_OK;
+    *out=(uint16_t)((a&(a>>16))|(b&(b>>16)));return SHZ_DRIVER_OK;
 }
 static int ack_register(struct shz_fixed_power *p,const struct shz_gas *g,uint16_t events) {
     struct shz_gas word;uint32_t current;int r;
@@ -82,12 +82,12 @@ int shz_fixed_ack(struct shz_fixed_power *p,uint16_t events) {
     if(p->table.event_b.address) {
         r=ack_register(p,&p->table.event_b,events);if(r) return r;
     }
-    return SHZ_OK;
+    return SHZ_DRIVER_OK;
 }
 static int enabled(struct shz_fixed_power *p,int *yes) {
     uint32_t a,b=1;int r=fixed_read(p,&p->table.control_a,2,&a);if(r) return r;
     if(p->table.control_b.address) { r=fixed_read(p,&p->table.control_b,2,&b);if(r) return r; }
-    *yes=(a&b&1u)!=0;return SHZ_OK;
+    *yes=(a&b&1u)!=0;return SHZ_DRIVER_OK;
 }
 int shz_fixed_enable(struct shz_fixed_power *p) {
     struct shz_budget budget;struct shz_gas smi;int r,yes;

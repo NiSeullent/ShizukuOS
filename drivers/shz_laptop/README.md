@@ -68,6 +68,22 @@ it must not assume a small legacy IRQ stack can host descriptor parsing.
 Host checks do not establish actual Win98 installation, real hardware DMA,
 sensor accuracy, power state transitions or security isolation.
 
+`pointer_adapter.c` is the shared descriptor-derived HID class consumer. It
+converts calibrated relative or single-contact absolute frames to atomic
+movement/button publications, keeps fractional motion and reestablishes the
+baseline after contact changes/lift. Extra buttons and multiple contacts remain
+unsupported. The Windows98 native Supervisor binds this same adapter through
+`shizukudos/supervisor/native_win98/pointer_bridge.c` to its i8042 auxiliary
+endpoint. NTDRV/class owners can use the same sink interface; no separate HID
+decoder or unverified NT binary ABI is introduced. Driver success is named
+`SHZ_DRIVER_OK` (still zero), separate from Supervisor IPC's `SHZ_OK` so both
+public interfaces may be included in an actual native binding.
+
+The native binding is explicit after `shz_hidi2c_open` succeeds with verified
+I2C/GPIO resources. No discovered OEM/I2C resource provider currently calls it
+on live hardware; actual Win98 mouse-driver/USER input and hardware tests are
+still required. See the native bridge's `POINTER_BRIDGE.md` for that gate.
+
 Protocol references used for this independently authored implementation:
 
 - [UEFI ACPI6.6 software programming model: FADT/GAS/ECDT](https://uefi.org/specs/ACPI/6.6/05_ACPI_Software_Programming_Model.html)

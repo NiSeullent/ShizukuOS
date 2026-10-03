@@ -485,6 +485,10 @@ def source_files():
     # Pin its implementation, interface and included font outside Supervisor/.
     files.update(ROOT / "shizukudos/csmwrap/video" / name
                  for name in ("cp437.c", "cp437.h", "font8x8_basic.h"))
+    # Native pointer bridge links the actual portable HID/I2C class adapter.
+    files.update(ROOT / "drivers/shz_laptop" / name for name in
+                 ("pointer_adapter.c", "hid.c", "hidi2c.c", "laptop.h", "internal.h"))
+    files.add(ROOT / "drivers/common/device.h")
     return sorted(files)
 
 

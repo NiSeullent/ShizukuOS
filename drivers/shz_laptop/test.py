@@ -15,10 +15,10 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 COMMON = ROOT / "drivers/common"
 PRODUCTION = [COMMON / "device.c", COMMON / "native_sessions.c"] + [
-    HERE / name for name in ("acpi.c", "ec.c", "hid.c", "hidi2c.c", "sensors.c")
+    HERE / name for name in ("acpi.c", "ec.c", "hid.c", "hidi2c.c", "sensors.c", "pointer_adapter.c")
 ] + [ROOT / "drivers/ahci_native/ahci.c", ROOT / "drivers/xhci_native/xhci.c"]
 TESTS = [COMMON / name for name in ("test_device.c", "test_ahci_session.c", "test_xhci_session.c")] + [
-    HERE / name for name in ("test_acpi.c", "test_ec.c", "test_hid.c", "test_sensors.c")
+    HERE / name for name in ("test_acpi.c", "test_ec.c", "test_hid.c", "test_sensors.c", "test_pointer_adapter.c")
 ]
 FLAGS = ["-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", "-Wpedantic",
          "-Wconversion", "-Wshadow", "-fno-builtin"]
@@ -69,12 +69,20 @@ def main():
                                     "-fno-omit-frame-pointer"])
     ):
         suites = []
+        # Compile every production body strictly once per profile. Linking
+        # those same objects into each suite preserves actual-C coverage and
+        # avoids recompiling all controller/descriptor code for every fixture.
+        host_objects = []
+        for index, source in enumerate(PRODUCTION):
+            obj = build / f"{label}-host-{index}.o"
+            run([compiler, *FLAGS, *extra, "-c", source, "-o", obj])
+            host_objects.append(obj)
         for test in TESTS:
             executable = build / (label + "-" + test.stem)
             # GCC diagnoses a baseline test's compact legacy for-loop; the new
             # production objects are independently checked with no suppression.
             legacy = ["-Wno-misleading-indentation"] if "session" in test.stem else []
-            run([compiler, *FLAGS, *legacy, *extra, *PRODUCTION, test, "-o", executable])
+            run([compiler, *FLAGS, *legacy, *extra, *host_objects, test, "-o", executable])
             environment = dict(os.environ, ASAN_OPTIONS="detect_leaks=1:abort_on_error=1",
                                UBSAN_OPTIONS="halt_on_error=1")
             output = run([executable], environment)

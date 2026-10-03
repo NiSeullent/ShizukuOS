@@ -14,7 +14,7 @@ int shz_hid_parse_descriptor(const uint8_t *p,size_t n,struct shz_hid_descriptor
     if(!d.vendor || !d.report_bytes || d.input_bytes<2) return SHZ_MALFORMED;
     if(d.report_bytes>SHZ_HID_DESCRIPTOR_MAX || d.input_bytes>SHZ_HID_REPORT_MAX ||
        d.output_bytes>SHZ_HID_REPORT_MAX) return SHZ_CAPACITY;
-    *out=d;return SHZ_OK;
+    *out=d;return SHZ_DRIVER_OK;
 }
 struct hid_global { uint32_t page,size,count;int32_t minimum,maximum;uint8_t report; };
 struct hid_local { uint32_t usages[32],first,last;unsigned count;uint8_t range; };
@@ -85,6 +85,7 @@ int shz_hid_parse_report(const uint8_t *p,size_t n,struct shz_hid_layout *out) {
                 uint32_t usage=local_usage(&local,0);uint8_t group=depth ? groups[depth-1]:0;
                 if(depth==8)return SHZ_CAPACITY;
                 if(usage==0x000d0005u && value==1)l.touchpad=1;
+                if(usage==0x00010002u && value==1)l.pointer=1;
                 if(usage==0x000d0022u) {
                     if(next_group==SHZ_HID_CONTACTS)return SHZ_CAPACITY;
                     group=(uint8_t)++next_group;
@@ -126,7 +127,7 @@ int shz_hid_parse_report(const uint8_t *p,size_t n,struct shz_hid_layout *out) {
     }
     if(depth || push || !l.count || !l.report_count) return SHZ_MALFORMED;
     if(l.numbered) for(pos=0;pos<l.report_count;pos++)if(!l.reports[pos].id)return SHZ_MALFORMED;
-    shz_copy(out,&l,sizeof(l));return SHZ_OK;
+    shz_copy(out,&l,sizeof(l));return SHZ_DRIVER_OK;
 }
 static int field_value(const struct shz_hid_field *f,const uint8_t *p,size_t bits,int32_t *out) {
     uint32_t raw=0;unsigned i;int32_t value;
@@ -141,7 +142,7 @@ static int field_value(const struct shz_hid_field *f,const uint8_t *p,size_t bit
         value=(int32_t)raw;
     }
     if(value<f->minimum || value>f->maximum) return SHZ_MALFORMED;
-    *out=value;return SHZ_OK;
+    *out=value;return SHZ_DRIVER_OK;
 }
 int shz_hid_decode(const struct shz_hid_layout *l,const uint8_t *p,size_t n,
     struct shz_hid_value *out,size_t capacity,size_t *count) {
@@ -169,13 +170,14 @@ int shz_hid_decode(const struct shz_hid_layout *l,const uint8_t *p,size_t n,
         }
         if(out && capacity<used)return SHZ_CAPACITY;
     }
-    *count=used;return SHZ_OK;
+    *count=used;return SHZ_DRIVER_OK;
 }
 int shz_hid_pointer(const struct shz_hid_layout *l,const uint8_t *p,size_t n,struct shz_pointer *out) {
     struct shz_hid_value v[SHZ_HID_FIELDS];struct shz_pointer result;
     struct shz_contact groups[SHZ_HID_CONTACTS+1];uint8_t tip[SHZ_HID_CONTACTS+1];
     size_t count,i;unsigned group;int r,expected=-1;
     if(!out)return SHZ_INVALID;
+    if(!l || (!l->pointer && !l->touchpad))return SHZ_UNSUPPORTED;
     r=shz_hid_decode(l,p,n,v,SHZ_HID_FIELDS,&count);if(r)return r;
     shz_zero(&result,sizeof(result));shz_zero(groups,sizeof(groups));shz_zero(tip,sizeof(tip));
     for(i=0;i<count;i++) {
@@ -209,5 +211,5 @@ int shz_hid_pointer(const struct shz_hid_layout *l,const uint8_t *p,size_t n,str
     }
     if(expected>=0 && expected!=result.count)return SHZ_UNSUPPORTED; /* No partial-frame aggregation yet. */
     if(!result.count && !l->touchpad)return SHZ_UNSUPPORTED;
-    *out=result;return SHZ_OK;
+    *out=result;return SHZ_DRIVER_OK;
 }

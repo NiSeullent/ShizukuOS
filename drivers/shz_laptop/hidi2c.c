@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "internal.h"
 static int valid(struct shz_hidi2c *h) {
-    return h->ops.validate(h->ops.context,h->owner,h->generation,h->address)==SHZ_OK ? SHZ_OK:SHZ_REVOKED;
+    return h->ops.validate(h->ops.context,h->owner,h->generation,h->address)==SHZ_DRIVER_OK ? SHZ_DRIVER_OK:SHZ_REVOKED;
 }
 static int transfer(struct shz_hidi2c *h,const uint8_t *tx,size_t nt,size_t nr) {
     uint64_t start,end;int r=valid(h);if(r)return r;
@@ -25,7 +25,7 @@ static int interrupt(struct shz_hidi2c *h,int *level) {
     r=h->ops.interrupt(h->ops.context,&l);if(r)return r;
     r=valid(h);if(r)return r;
     if(l!=0 && l!=1)return SHZ_MALFORMED;
-    *level=l;return SHZ_OK;
+    *level=l;return SHZ_DRIVER_OK;
 }
 static int discard_old_input(struct shz_hidi2c *h) {
     struct shz_budget budget;unsigned packets=0;int r,level;
@@ -70,7 +70,7 @@ static int enumerate(struct shz_hidi2c *h) {
         size_t bytes=(l.reports[i].bits+7u)/8u+2u+l.numbered;
         if(bytes>d.input_bytes)return SHZ_MALFORMED;
     }
-    shz_copy(&h->layout,&l,sizeof(l));return SHZ_OK;
+    shz_copy(&h->layout,&l,sizeof(l));return SHZ_DRIVER_OK;
 }
 int shz_hidi2c_open(struct shz_hidi2c *h,const struct shz_i2c_ops *o,
     uint64_t owner,uint64_t generation,uint16_t address,uint16_t reg,uint32_t timeout) {
@@ -80,12 +80,12 @@ int shz_hidi2c_open(struct shz_hidi2c *h,const struct shz_i2c_ops *o,
        address<8 || address>0x77) return SHZ_INVALID;
     if(h->state!=SHZ_I2C_EMPTY && h->state!=SHZ_I2C_CLOSED)return SHZ_BUSY;
     if(generation<=h->generation)return SHZ_STALE;
-    if(o->validate(o->context,owner,generation,address)!=SHZ_OK)return SHZ_REVOKED;
+    if(o->validate(o->context,owner,generation,address)!=SHZ_DRIVER_OK)return SHZ_REVOKED;
     h->ops=*o;h->owner=owner;h->generation=generation;h->address=address;
     h->descriptor_register=reg;h->timeout_us=timeout;h->state=SHZ_I2C_STARTING;h->command_known=0;
     r=enumerate(h);
     if(r){h->last_error=r;h->state=SHZ_I2C_QUARANTINED;return r;}
-    h->state=SHZ_I2C_READY;h->last_error=0;return SHZ_OK;
+    h->state=SHZ_I2C_READY;h->last_error=0;return SHZ_DRIVER_OK;
 }
 int shz_hidi2c_input(struct shz_hidi2c *h,uint8_t *out,size_t capacity,size_t *bytes) {
     size_t length,fields;int r,level;
@@ -100,13 +100,13 @@ int shz_hidi2c_input(struct shz_hidi2c *h,uint8_t *out,size_t capacity,size_t *b
     if(length<2 || length>h->descriptor.input_bytes)return SHZ_MALFORMED;
     r=shz_hid_decode(&h->layout,h->buffer+2,length-2,0,0,&fields);if(r)return r;
     if(capacity<length-2)return SHZ_CAPACITY;
-    shz_copy(out,h->buffer+2,length-2);*bytes=length-2;return SHZ_OK;
+    shz_copy(out,h->buffer+2,length-2);*bytes=length-2;return SHZ_DRIVER_OK;
 }
 int shz_hidi2c_stop(struct shz_hidi2c *h,int suspend) {
     int r;
     if(!h || (suspend!=0 && suspend!=1))return SHZ_INVALID;
-    if(h->state==SHZ_I2C_CLOSED)return SHZ_OK;
-    if(h->state==SHZ_I2C_SUSPENDED && suspend)return SHZ_OK;
+    if(h->state==SHZ_I2C_CLOSED)return SHZ_DRIVER_OK;
+    if(h->state==SHZ_I2C_SUSPENDED && suspend)return SHZ_DRIVER_OK;
     if(!h->ops.validate || !h->ops.drain)return SHZ_INVALID;
     h->state=SHZ_I2C_STOPPING; /* No more input/resume/open admission. */
     r=valid(h);
@@ -116,7 +116,7 @@ int shz_hidi2c_stop(struct shz_hidi2c *h,int suspend) {
     if(!r)r=h->ops.drain(h->ops.context,h->timeout_us);
     if(!r)r=valid(h);
     if(r){h->last_error=r;h->state=SHZ_I2C_QUARANTINED;return SHZ_QUARANTINED;}
-    h->state=suspend ? SHZ_I2C_SUSPENDED:SHZ_I2C_CLOSED;return SHZ_OK;
+    h->state=suspend ? SHZ_I2C_SUSPENDED:SHZ_I2C_CLOSED;return SHZ_DRIVER_OK;
 }
 int shz_hidi2c_resume(struct shz_hidi2c *h) {
     int r;
@@ -124,5 +124,5 @@ int shz_hidi2c_resume(struct shz_hidi2c *h) {
     if(h->state!=SHZ_I2C_SUSPENDED)return SHZ_BUSY;
     h->state=SHZ_I2C_STARTING;r=enumerate(h);
     if(r){h->last_error=r;h->state=SHZ_I2C_QUARANTINED;return r;}
-    h->state=SHZ_I2C_READY;return SHZ_OK;
+    h->state=SHZ_I2C_READY;return SHZ_DRIVER_OK;
 }
