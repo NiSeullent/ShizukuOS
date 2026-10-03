@@ -36,6 +36,9 @@ class AdmissionTests(unittest.TestCase):
     def test_private_original_requires_independent_custody(self):
         with self.assertRaisesRegex(ValueError, 'installed-source custody absent'):
             release.policy.verify_private_source_custody({'approval': True, 'sha256': 'a'*64}, None)
+        with self.assertRaisesRegex(ValueError, 'installed-source custody absent'):
+            with release.policy.hold_private_source_custody({'approval': True}, None):
+                self.fail('managed lifetime cannot invent authority')
 
     def test_stale_ingestion_epoch(self):
         with patch.object(release.policy, 'INGEST_SHA', 'a'*64):
@@ -80,10 +83,22 @@ class AdmissionTests(unittest.TestCase):
             manifest = obj('manifest', release.manifest_expected(ingest, request, lineage, sim))
             def modeled_lineage(req, held):
                 return held.add(esp), lineage
+            closed_with_original_lease = []
+            @contextmanager
+            def modeled_source_owner(req, held):
+                # Windows authority is modeled; actual Linux original FD and
+                # its read lease must survive this owner's failure cleanup.
+                entry = held.add(esp)
+                try:
+                    yield {'HOST_ONLY': 'modeled custody'}
+                finally:
+                    self.assertEqual(fcntl.fcntl(entry['fd'], fcntl.F_GETLEASE),
+                                     fcntl.F_RDLCK)
+                    closed_with_original_lease.append(True)
             ap = (component['bytes'], component['sha256'])
             with patch.object(release, 'load_ingester', return_value=ingest), \
                  patch.object(ingest, 'validate_lineage', side_effect=modeled_lineage), \
-                 patch.object(release.policy, 'verify_private_source_custody', return_value={'HOST_ONLY': 'modeled custody'}), \
+                 patch.object(release.policy, 'hold_private_source_custody', side_effect=modeled_source_owner), \
                  patch.object(release.policy, 'DOS_RECEIPT', (dos['bytes'], dos['sha256'])), \
                  patch.object(release.policy, 'DOS_ARTIFACTS', {n: (payload['bytes'], payload['sha256']) for n in release.policy.DOS_ARTIFACTS}), \
                  patch.object(release.policy, 'NATIVE_SOURCE_MAP_SHA', release.digest(release.canonical(mapping))), \
@@ -104,6 +119,11 @@ class AdmissionTests(unittest.TestCase):
                     self.assertEqual(release.digest(generated.read_bytes()), result['record']['sha256'])
                 with generated.open('rb') as stream:
                     self.assertEqual(fcntl.fcntl(stream.fileno(), fcntl.F_GETLEASE), fcntl.F_UNLCK)
+                self.assertEqual(closed_with_original_lease, [True])
+                with self.assertRaisesRegex(RuntimeError, 'host compiler failure'):
+                    with release.admit_for_build(manifest['path'], base/'compiler-failure'):
+                        raise RuntimeError('host compiler failure')
+                self.assertEqual(closed_with_original_lease, [True, True])
                 changed = release.manifest_expected(ingest, request, lineage, sim)
                 changed['Windows98_boot_verified'] = True
                 bad = obj('forged-manifest', changed)
