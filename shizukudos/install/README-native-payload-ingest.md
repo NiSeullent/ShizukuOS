@@ -102,3 +102,15 @@ comparing 1/8 MiB sparse exports. Source provenance is modeled; source FDs,
 full SHA, unrelated late path aliases, output substitution and partial IO are
 real. These host timings do not establish 2304 MiB NAS performance.
 No genuine Windows file, NAS media image or target disk is consumed by tests.
+
+## Explicit SYSTEM.DAT startup input
+
+The importer reconstructs `WINREG=C:\<selected>\SYSTEM.DAT` before device
+initialization from the independently observed selected Windows directory. It
+requires that original registry member in the unchanged FAT inventory, the exact
+reviewed source-profile producer, and the ordered source-written DOS registry
+pathname patch. The configuration carries no runtime or source approval.
+
+The independently checked complete DOS producer provides a 74009-byte kernel
+and its normal receipt. The public DOS artifact anchors refer to that actual
+build; a partial compiler output or modeled test receipt cannot update them.

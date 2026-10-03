@@ -28,7 +28,7 @@ BLOCK = 4096
 FLOOR = 17 << 30
 CONSTRUCTOR_SHA = '1275da21ea913689b37e93503d6ddcf5defdb35736ac4cf5740a0f2de28729cd'
 FAT_READER_SHA = 'c5941f761598107cfb408c5508ee8080a7c81113a1e37f91f72d49868d3d8387'
-PROFILE_PRODUCER_SHA = '76d84cce05a1416ecaa7023b0894c8ffb1a1c22ad7c0b7ad7dbcc610b2de5f57'
+PROFILE_PRODUCER_SHA = 'd2d1b7018248cff14a0e81475b1d36f1a8aa4e2d2a943b0f8bc738925d211f43'
 XMS_SHA = '5e0ed027a150ac1c198e994ca248245c07c1f44796bc0791448afbcf29789211'
 XMS_COMMITS = {'HimemX':'bbaf6b8951cdac785f1f4e9b67c25439c5bf8e75',
                'JWasm':'7f6f32e78b79565d40bcce496756aadd1ff66900'}
@@ -49,6 +49,7 @@ DOS_PATCHES = (
     ('0003-dosmgr-honest-contract.patch', '9ea1d25225664d41d0ba5be40e34455804932272b2f2f6808767e1bf14fc078d'),
     ('0004-win-startup-chain.patch', '72c0dab2e288159523cf3c018abccf3cd895e41c0c4150c6c60678a6c5882eef'),
     ('0005-korean-cp949-nls.patch', '32de944d45cce7e6fbe9c2ef8345735a005d032dd2f6c5f7ecb808ee7fa72a71'),
+    ('0006-win98-registry-path.patch', '62925e53a57b750a53c9c35c0fccd9a99ecba8cdd9f84caf96c8774b6807aad1'),
     ('freecom-0001-reproducible-build-stamp.patch', 'ff9d333927637beb775a3d33fb42181026d4847f5523fdaa069553f68db2d76e'),
 )
 SCHEMA = 'shizukuos.private-native-install-payload.v1'
@@ -204,6 +205,12 @@ def startup_policy(source, held):
 
 def startup_configuration(source, selected):
     """Reconstruct admitted startup bytes; configuration never grants authority."""
+    registry = source.get('registry_path_configuration')
+    registry_path = selected+'\\SYSTEM.DAT'
+    need(type(registry) is dict and set(registry)=={'path','origin','runtime_verified'} and
+         registry['path']==registry_path and registry['origin']=='validated_source' and
+         registry['runtime_verified'] is False and len(registry_path)<=78,
+         'exact observed Windows registry path configuration without runtime authority required')
     locale = source.get('locale', {})
     country, nls = locale.get('country'), locale.get('nls')
     need(type(country) is list and type(nls) is list and len(country)<=1 and len(nls)<=1 and
@@ -227,7 +234,7 @@ def startup_configuration(source, selected):
         need(not country, 'explicit initial locale cannot override observed COUNTRY')
     initial_country = 'COUNTRY=82,949\r\n' if initial is not None else ''
     windows = selected[3:]
-    config = (initial_country+'DEVICE=C:\\HIMEMX.EXE /VERBOSE\r\n'+''.join(v+'\r\n' for v in biling)+
+    config = ('WINREG='+registry_path+'\r\n'+initial_country+'DEVICE=C:\\HIMEMX.EXE /VERBOSE\r\n'+''.join(v+'\r\n' for v in biling)+
               'DEVICE='+selected+'\\IFSHLP.SYS\r\nDOS=HIGH\r\nFILES=30\r\nBUFFERS=20\r\n'
               'SHELL=C:\\COMMAND.COM C:\\ /E:512 /P\r\n'+''.join(v+'\r\n' for v in country)).encode('ascii')
     auto = ('@ECHO OFF\r\nSET COMSPEC=C:\\COMMAND.COM\r\nSET windir='+selected+'\r\nSET PATH='+selected+
@@ -399,7 +406,7 @@ def validate_lineage(request, held):
     for name,row in before.items():
         if name not in rows: need(after.get(name)==row, 'unrelated original Windows/private member changed')
     observed_windows=source.get('observed_members')
-    required_windows={windows+'/'+name for name in ('WIN.COM','SYSTEM.INI','SYSTEM/VMM32.VXD','IFSHLP.SYS')}
+    required_windows={windows+'/'+name for name in ('WIN.COM','SYSTEM.INI','SYSTEM/VMM32.VXD','IFSHLP.SYS','SYSTEM.DAT')}
     if country or nls:required_windows|={windows+'/COUNTRY.SYS',windows+'/COMMAND/NLSFUNC.EXE'}
     if biling:required_windows.add(windows+'/BILING.SYS')
     need(type(observed_windows) is dict and set(observed_windows)==required_windows, 'exact observed Windows/locale file inventory required')

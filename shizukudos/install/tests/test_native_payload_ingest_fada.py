@@ -125,9 +125,11 @@ class Fixture:
         if biling:
             self.config=self.config.replace(b'DEVICE=C:\\WINDOWS\\IFSHLP.SYS',biling_line.encode()+b'\r\nDEVICE=C:\\WINDOWS\\IFSHLP.SYS')
         if initial_locale:self.config=b'COUNTRY=82,949\r\n'+self.config
+        self.config=b'WINREG=C:\\WINDOWS\\SYSTEM.DAT\r\n'+self.config
         self.nls='loadhigh C:\\WINDOWS\\COMMAND\\nlsfunc.exe C:\\WINDOWS\\country.sys'
         self.auto=b'@ECHO OFF\r\nSET COMSPEC=C:\\COMMAND.COM\r\nSET windir=C:\\WINDOWS\r\nSET PATH=C:\\WINDOWS;C:\\WINDOWS\\COMMAND;C:\\\r\nC:\r\nCD \\WINDOWS\r\n'+self.nls.encode()+b'\r\nC:\\WINDOWS\\WIN.COM\r\n'
         self.windows={'WINDOWS/WIN.COM':b'MODELED_WIN.COM', 'WINDOWS/SYSTEM.INI':b'[boot]\r\n',
+                      'WINDOWS/SYSTEM.DAT':b'MODELED_SYSTEM_REGISTRY_NOT_EXECUTED',
                       'WINDOWS/SYSTEM/VMM32.VXD':b'MODELED_VMM', 'WINDOWS/IFSHLP.SYS':b'MODELED_IFS',
                       'WINDOWS/COUNTRY.SYS':b'MODELED_COUNTRY', 'WINDOWS/COMMAND/NLSFUNC.EXE':b'MODELED_NLSFUNC',
                       'MSDOS.SYS':b'[Paths]\r\nWinDir=C:\\WINDOWS\r\nWinBootDir=C:\\WINDOWS\r\nHostWinBootDrv=C\r\n',
@@ -197,9 +199,11 @@ class Fixture:
                      'source_disk':self.original,'producer_inputs':[observed(ROOT/'shizukudos/install/win98_source_profile.py'),observed(ROOT/'shizukudos/win98_boot/prepare_replacement.py')],
                      'xms_sources':xrows,'xms_receipt':jsave(directory/'xms-result.json',self.xreceipt),'locale':{'country':[],'nls':[self.nls]},
                      'constructor_input_validation':{**self.replacement,'status':'INPUTS_VALIDATED_REPLACEMENT_NOT_PREPARED'},
-                     'observed_members':{k:inventory[k] for k in ('WINDOWS/WIN.COM','WINDOWS/SYSTEM.INI','WINDOWS/SYSTEM/VMM32.VXD','WINDOWS/IFSHLP.SYS','WINDOWS/COUNTRY.SYS','WINDOWS/COMMAND/NLSFUNC.EXE')},
+                     'observed_members':{k:inventory[k] for k in ('WINDOWS/WIN.COM','WINDOWS/SYSTEM.INI','WINDOWS/SYSTEM/VMM32.VXD','WINDOWS/IFSHLP.SYS','WINDOWS/SYSTEM.DAT','WINDOWS/COUNTRY.SYS','WINDOWS/COMMAND/NLSFUNC.EXE')},
                      'MSDOS.SYS_observation':inventory['MSDOS.SYS'],'original_config':{name:{'present':True,'bytes':inventory[name]['bytes'],'sha256':inventory[name]['sha256'],'source_metadata_sha256':inventory[name]['metadata_sha256']} for name in ('CONFIG.SYS','AUTOEXEC.BAT')}}
         self.source['observed_biling_driver']=[biling_line] if biling else []
+        self.source['registry_path_configuration']={'path':'C:\\WINDOWS\\SYSTEM.DAT',
+                                                    'origin':'validated_source','runtime_verified':False}
         self.source['initial_locale_configuration']=None if not initial_locale else {
             'country':82,'codepage':949,'origin':'explicit_request',
             'runtime_verified':False,'observed_query_authority':False}
@@ -285,6 +289,14 @@ class IngestionAPI(unittest.TestCase):
         changed=copy.deepcopy(source);changed['initial_locale_configuration']=initial
         changed['locale']['country']=['COUNTRY=82,949,C:\\WINDOWS\\COUNTRY.SYS']
         with self.assertRaises(ValueError):self.m.startup_configuration(changed,'C:\\WINDOWS')
+    def test_registry_path_requires_source_directory_and_cannot_claim_runtime_authority(self):
+        original=self.fixture.source['registry_path_configuration']
+        for changed in (None,{},dict(original,path='C:\\OTHER\\SYSTEM.DAT'),
+                        dict(original,path='C:\\WINDOWS\\USER.DAT'),dict(original,runtime_verified=True),
+                        dict(original,origin='caller'),dict(original,approval=True)):
+            source=copy.deepcopy(self.fixture.source);source['registry_path_configuration']=changed
+            with self.subTest(changed=changed),self.assertRaises(ValueError):
+                self.m.startup_configuration(source,'C:\\WINDOWS')
     def test_biling_paths_arguments_duplicates_and_receipt_forgery_refused(self):
         for lines in (['DEVICE=C:\\OTHER\\BILING.SYS'],['DEVICE=C:\\WINDOWS\\BILING.SYS /OTHER'],
                       ['DEVICE=C:\\WINDOWS\\BILING.SYS & OTHER.COM'],['DEVICE=C:\\WINDOWS\\BILING.SYS']*2,
