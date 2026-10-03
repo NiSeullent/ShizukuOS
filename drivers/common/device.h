@@ -5,7 +5,9 @@
 #include <stdint.h>
 
 enum shz_result {
-    SHZ_OK = 0, SHZ_INVALID = -1, SHZ_UNSUPPORTED = -2, SHZ_IO = -3,
+    /* Distinct from Supervisor IPC's enum shz_status/SHZ_OK. Laptop/native
+     * consumers must include both interfaces without enum-name collisions. */
+    SHZ_DRIVER_OK = 0, SHZ_INVALID = -1, SHZ_UNSUPPORTED = -2, SHZ_IO = -3,
     SHZ_TIMEOUT = -4, SHZ_REVOKED = -5, SHZ_BUSY = -6,
     SHZ_QUARANTINED = -7, SHZ_STALE = -8, SHZ_MALFORMED = -9,
     SHZ_CLOCK = -10, SHZ_NO_EVENT = -11, SHZ_CAPACITY = -12,

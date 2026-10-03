@@ -1,0 +1,271 @@
+{
+  "schema": 1,
+  "status": "PASS_PRODUCTION_DRIVER_HOST_AND_NATIVE_POINTER_CONTRACT_TESTS",
+  "base_commit": "fb6cff17fd08058f6a0094ec24dcc3cd2257016f",
+  "scope": {
+    "actual_production_c": true,
+    "existing_native_core_models": true,
+    "actual_win98_bound": false,
+    "physical_hardware": false,
+    "aml_evaluator_supplied": false,
+    "i2c_host_bound": false,
+    "system_suspend_implemented": false,
+    "driver_binary_compatibility_claim": false,
+    "actual_hid_i2c_to_native_aux_c_executed": true,
+    "hardware_boundaries_modeled": true,
+    "live_oem_i2c_gpio_binder_implemented": false,
+    "NTDRV_binary_ABI_claim": false,
+    "PMA_legacy_migration_claim": false
+  },
+  "driver_sources_sha256": {
+    "drivers/ahci_native/ahci.c": "8e36adbb66e53be8c3a6762e13447c488515526fc5c7387325ef484588bd2f96",
+    "drivers/ahci_native/ahci.h": "7664a9f06d2f22fcb052313ff75e4d338484f920cbca1852e9b11797c4f53ac2",
+    "drivers/ahci_native/ahci_clock.h": "7cda7aee4f8b79e92d6f718e1a2fe962e69eced51ec416510b2853314e5b169f",
+    "drivers/ahci_native/test_ahci.c": "6b4a99c4a3f34f8fe7bbc6b337d1da0b3c4fb35f937b0a01239af31ffc8434cd",
+    "drivers/common/README.md": "4f4904b3b9587028fecb8caf2219fdb9c2af2d0f7d0d56cb54e4c123cd3053cc",
+    "drivers/common/device.c": "23b79ec572298af6d0ea20557d8640cb349e91495aee9558839be27b39e9f619",
+    "drivers/common/device.h": "83126227e77c0517b4b4eece96c9ae90448e544fa1a9a253142c1760f4e5a280",
+    "drivers/common/native_sessions.c": "47023216f234631b12a7c9a32cafd29ff65f50e2577950b316f186b8a0c9b115",
+    "drivers/common/native_sessions.h": "91060572727fc15c9f9eabe6c0866699322fc1b6547adca6e7acf845e8423bdf",
+    "drivers/common/test_ahci_session.c": "9fae48cc82e3b2a0a8d932dbc1d751c2458fb2fe19528ce3919a90cc36d4929c",
+    "drivers/common/test_device.c": "d9b95bc8605edf32565307b4cdbbe3500cae7a0e62c69579605cdab39be0c823",
+    "drivers/common/test_xhci_session.c": "e8470d194706c1b7ac60f2335c404cbadc85f825723d82d84b5cf7e41c1a5c86",
+    "drivers/shz_laptop/README.md": "30c9243faf938f1672ccf496d4840a04658342db07e5cfbb7adc1b50e19804d9",
+    "drivers/shz_laptop/acpi.c": "09e3e72c997042d88e05cfca35b31fba8343c1d135e880476ac244b2d0cafb19",
+    "drivers/shz_laptop/ec.c": "e96d21f68e38a4264b9829fd4d4def71adef47a8bd11de97fc663381f3ecfc34",
+    "drivers/shz_laptop/hid.c": "f038d0f9c4292020c298db507ca72bee546672dbe6a4db37ac7722886fad03f9",
+    "drivers/shz_laptop/hidi2c.c": "62acb90e5f831b59bb080ed1f2c7ff64fe218677f45ac2e264bf83a5b33ab00b",
+    "drivers/shz_laptop/internal.h": "329072fb33d40c6c223db6c6825fcacd685a47c7be2dbccd95a5524fa88a4705",
+    "drivers/shz_laptop/laptop.h": "29fa8993139bcae62b604da8dff7e6b0aaed9112d63e79ba8fd67b33e9abaf84",
+    "drivers/shz_laptop/pointer_adapter.c": "34c097d55261511fc54828869c12499c15c5fcdb35704f06fe980262d65f95b2",
+    "drivers/shz_laptop/sensors.c": "ce265a402688613f420af2f16a380967fc0ad136c5b1991ddb5338815a6599cb",
+    "drivers/shz_laptop/test.py": "b062421543d37c5174172ce510ebeebf6a8b50cc67022be2769252f9a2c6e02a",
+    "drivers/shz_laptop/test_acpi.c": "9d5bb821797bb5d5602e9ee0b43a9e96219876aa4933177ab6bab07bc96e77ef",
+    "drivers/shz_laptop/test_ec.c": "f913d8574daafdf44c833fa4e573a66ba150f8d7341f9a8fadf6eac26211c226",
+    "drivers/shz_laptop/test_hid.c": "73b406b38eae458af4b7158445cab3c18d0299c7fe5b5cf3a0683a58557aa0ec",
+    "drivers/shz_laptop/test_pointer_adapter.c": "d8564574c323b79a6f951c7a2fe745eff5f76b35ab72cb82025c83b911aa8447",
+    "drivers/shz_laptop/test_sensors.c": "926aa7956009649347dcfe344008f8c1115dc70615f7fe835b8f544283bb0290",
+    "drivers/xhci_native/test_xhci.c": "baa6518ab4db3523632ef0029844b4eda92f51c5d9e82a7cab9cbfc384ee8f57",
+    "drivers/xhci_native/xhci.c": "7024e5dca32f08d29b1b0cf2a04e9b02fa51ef1c18cc6752027216affa6af277",
+    "drivers/xhci_native/xhci.h": "abe09154388f0c336950433b6063c7fe0f774e1e559882dea81c268895a8303d",
+    "drivers/xhci_native/xhci_internal.h": "f67712f46e9fe78d54397216300a924fe0932cb2bb39ba1b843af1863ccf262a"
+  },
+  "host": {
+    "gcc": {
+      "compiler": "gcc (GCC) 14.3.1 20251022 (Red Hat 14.3.1-4)",
+      "suites": [
+        {
+          "test": "drivers/common/test_device.c",
+          "assertions": 72,
+          "binary_sha256": "5297ce86246cbf630e07c6930cd12d2ef6f2d5686f43daa3378bda6145993f57",
+          "log_sha256": "f913447957f27ded9906bfbd5f982f079f32290dc611b2fc41729e6e26d29eba",
+          "passed": true
+        },
+        {
+          "test": "drivers/common/test_ahci_session.c",
+          "assertions": 15292711,
+          "binary_sha256": "cf124e8f21c4715956858d848bbf24520408d0ae7245a3403633979d34bdc7d0",
+          "log_sha256": "cded8e5e15186b7587efc514343b790d5fed55c3dddae8a8cd3ba14ac74556e3",
+          "passed": true
+        },
+        {
+          "test": "drivers/common/test_xhci_session.c",
+          "assertions": 3032878,
+          "binary_sha256": "45c6d6ecc88ba4a914218f30b60dca906c5b5a41cee016aac4ab19e754c22626",
+          "log_sha256": "a5d301a9c052dd05f0e5d2b1427d6be71098cedd2d598c7f49f130f3604b8b82",
+          "passed": true
+        },
+        {
+          "test": "drivers/shz_laptop/test_acpi.c",
+          "assertions": 23,
+          "binary_sha256": "d76098cd399e794a37fab4c123135cab40ea065d2df3c911caa3d6b4f8e195cc",
+          "log_sha256": "16290bc43f209cecbaade0c5f5701a76749352792451bfd720c484da19fe68bb",
+          "passed": true
+        },
+        {
+          "test": "drivers/shz_laptop/test_ec.c",
+          "assertions": 51,
+          "binary_sha256": "fe1aa94c065330722c27e0ae2439c274aab5c43a1df7822da94cb4d54a5e9189",
+          "log_sha256": "3cbf052cec54eafb8174ab3425d409d5d88086c38be21714a2a515216ae91b93",
+          "passed": true
+        },
+        {
+          "test": "drivers/shz_laptop/test_hid.c",
+          "assertions": 12968,
+          "binary_sha256": "4a74bb9904139106e6f9c604780875b46c9db0eb8a6353f37934d1bcdfb597de",
+          "log_sha256": "cb6ae99493b8437e0829873022a5a61aa9c25d81a0fbc2377bf732ecf53c0f6b",
+          "passed": true
+        },
+        {
+          "test": "drivers/shz_laptop/test_sensors.c",
+          "assertions": 64,
+          "binary_sha256": "d30c75ba4c81ece4ce1b1cf59176ed3a617c92fc1f90b54e86b3d29556d81654",
+          "log_sha256": "9d1148fe8f39fb1350f6b32dc8d9fafecf692586e25d92985ce0f83726acbc0e",
+          "passed": true
+        },
+        {
+          "test": "drivers/shz_laptop/test_pointer_adapter.c",
+          "assertions": 26,
+          "binary_sha256": "1f8530d22b919b587b1abb553174ce8598883c5052fed7f2b060d904db4bd3a4",
+          "log_sha256": "76353bcda20f6426782c30f00aaaca371d24a0dfb4e9ef96516c686af97cc601",
+          "passed": true
+        }
+      ]
+    },
+    "clang": {
+      "compiler": "clang version 21.1.8 (AlmaLinux OS Foundation 21.1.8-1.el10.alma.1)",
+      "suites": [
+        {
+          "test": "drivers/common/test_device.c",
+          "assertions": 72,
+          "binary_sha256": "01708a430cfdf862d3595b3af390e4e6e081d6e106d3a94db4d7247837d7b999",
+          "log_sha256": "f913447957f27ded9906bfbd5f982f079f32290dc611b2fc41729e6e26d29eba",
+          "passed": true
+        },
+        {
+          "test": "drivers/common/test_ahci_session.c",
+          "assertions": 15292711,
+          "binary_sha256": "02c1110cc4bb7e8985a59acec58e429cf60097a5d085cddd4d8be09782f8a30d",
+          "log_sha256": "cded8e5e15186b7587efc514343b790d5fed55c3dddae8a8cd3ba14ac74556e3",
+          "passed": true
+        },
+        {
+          "test": "drivers/common/test_xhci_session.c",
+          "assertions": 3032878,
+          "binary_sha256": "a35a9c2d1bd0eabeb7d9a258fc4ea4ba1cdc4d45ba6bdefeeb5e70d9106a3224",
+          "log_sha256": "a5d301a9c052dd05f0e5d2b1427d6be71098cedd2d598c7f49f130f3604b8b82",
+          "passed": true
+        },
+        {
+          "test": "drivers/shz_laptop/test_acpi.c",
+          "assertions": 23,
+          "binary_sha256": "5c786cf9471979e36ec3349226c577165724e263d2c0d770ecc5b2832d19b74c",
+          "log_sha256": "16290bc43f209cecbaade0c5f5701a76749352792451bfd720c484da19fe68bb",
+          "passed": true
+        },
+        {
+          "test": "drivers/shz_laptop/test_ec.c",
+          "assertions": 51,
+          "binary_sha256": "41407751cd6e37c3af5c578c7de2ac96a83d8b9ae3ca03d5a542052c8143568b",
+          "log_sha256": "3cbf052cec54eafb8174ab3425d409d5d88086c38be21714a2a515216ae91b93",
+          "passed": true
+        },
+        {
+          "test": "drivers/shz_laptop/test_hid.c",
+          "assertions": 12968,
+          "binary_sha256": "f40d8e580982feb9eb0e8dd39f7b234564f344ecb18be3d105688aade0ba066b",
+          "log_sha256": "cb6ae99493b8437e0829873022a5a61aa9c25d81a0fbc2377bf732ecf53c0f6b",
+          "passed": true
+        },
+        {
+          "test": "drivers/shz_laptop/test_sensors.c",
+          "assertions": 64,
+          "binary_sha256": "8eb0786cf0dd678a338156f3c1ce7d0cad49e0ff7253e6a43dc5a677c254ffdb",
+          "log_sha256": "9d1148fe8f39fb1350f6b32dc8d9fafecf692586e25d92985ce0f83726acbc0e",
+          "passed": true
+        },
+        {
+          "test": "drivers/shz_laptop/test_pointer_adapter.c",
+          "assertions": 26,
+          "binary_sha256": "f8f62583431d956009e1fdf19f71306316df74d618ac2cf52a9f60b4e7222d43",
+          "log_sha256": "76353bcda20f6426782c30f00aaaca371d24a0dfb4e9ef96516c686af97cc601",
+          "passed": true
+        }
+      ]
+    },
+    "clang_sanitized": {
+      "compiler": "clang version 21.1.8 (AlmaLinux OS Foundation 21.1.8-1.el10.alma.1)",
+      "suites": [
+        {
+          "test": "drivers/common/test_device.c",
+          "assertions": 72,
+          "binary_sha256": "8a20f8ded96cd9ed6c2e813fc89258937fbb61f92d1a50ab8a340cec931e6de2",
+          "log_sha256": "f913447957f27ded9906bfbd5f982f079f32290dc611b2fc41729e6e26d29eba",
+          "passed": true
+        },
+        {
+          "test": "drivers/common/test_ahci_session.c",
+          "assertions": 15292711,
+          "binary_sha256": "eca8ad1da43d2ad92b5260f4d1649fc9f91e2b6b3ed114f8253688a9c71b77ca",
+          "log_sha256": "cded8e5e15186b7587efc514343b790d5fed55c3dddae8a8cd3ba14ac74556e3",
+          "passed": true
+        },
+        {
+          "test": "drivers/common/test_xhci_session.c",
+          "assertions": 3032878,
+          "binary_sha256": "09ba9056ac60ccd219fa9e27a08e93b6e43580dfed74e10b9bbc7e14603bf507",
+          "log_sha256": "a5d301a9c052dd05f0e5d2b1427d6be71098cedd2d598c7f49f130f3604b8b82",
+          "passed": true
+        },
+        {
+          "test": "drivers/shz_laptop/test_acpi.c",
+          "assertions": 23,
+          "binary_sha256": "baf20424881ecc7e0b4ce2e600c18260fcc543cd6b9b7ab96b8ccc27fda60a86",
+          "log_sha256": "16290bc43f209cecbaade0c5f5701a76749352792451bfd720c484da19fe68bb",
+          "passed": true
+        },
+        {
+          "test": "drivers/shz_laptop/test_ec.c",
+          "assertions": 51,
+          "binary_sha256": "385d315801f38bbd3edfdce516d4d2c7af1c9d86329f1a2429e1d7f70900bc0b",
+          "log_sha256": "3cbf052cec54eafb8174ab3425d409d5d88086c38be21714a2a515216ae91b93",
+          "passed": true
+        },
+        {
+          "test": "drivers/shz_laptop/test_hid.c",
+          "assertions": 12968,
+          "binary_sha256": "40fe14adb7f45bd29291916648d8f8878c4ffb973b45de0434471f059ac9e990",
+          "log_sha256": "cb6ae99493b8437e0829873022a5a61aa9c25d81a0fbc2377bf732ecf53c0f6b",
+          "passed": true
+        },
+        {
+          "test": "drivers/shz_laptop/test_sensors.c",
+          "assertions": 64,
+          "binary_sha256": "d51ced15e4629ce4515b608fb6b58cdf137600c05f7226a531d8290bb29fc6e1",
+          "log_sha256": "9d1148fe8f39fb1350f6b32dc8d9fafecf692586e25d92985ce0f83726acbc0e",
+          "passed": true
+        },
+        {
+          "test": "drivers/shz_laptop/test_pointer_adapter.c",
+          "assertions": 26,
+          "binary_sha256": "77e97162ea9f15f1f900279ec9fcdd9ba54d6f51482d68232ac2e156e70f089b",
+          "log_sha256": "76353bcda20f6426782c30f00aaaca371d24a0dfb4e9ef96516c686af97cc601",
+          "passed": true
+        }
+      ]
+    }
+  },
+  "i486": {
+    "gcc": {
+      "passed": true,
+      "undefined_symbols": [],
+      "linked_sha256": "b841b8c727314ea4c08dadbe3db2cd61b07b3c721fe6eddec098018e3ed18c6e",
+      "maximum_static_or_bounded_frame_bytes": 3012
+    },
+    "clang": {
+      "passed": true,
+      "undefined_symbols": [],
+      "linked_sha256": "66b00fc787ead94b5b9e5b112de4632efd2492cd99544e4ad7c972c5927526f6",
+      "maximum_static_or_bounded_frame_bytes": 3080
+    }
+  },
+  "native_validation": {
+    "test_modules": [
+      "shizukudos/supervisor/native_win98/tests/test_pointer_bridge.py",
+      "shizukudos/supervisor/native_win98/tests/test_native_devices.py"
+    ],
+    "default_6000_operation_transcript_sha256": "48b25118cd1fb0f0023aaa6fc3dd9090783ff9d478efae1b60383e6951425df1",
+    "captured_logs_sha256": {
+      "goal-laptop-20261003-final-native-tests.log": "d6118d314c93f0d651aeb991df37c58594434b4dd0b9d443a9c66acb6929f1e5",
+      "goal-laptop-20261003-final-pointer-tests.log": "f845adc257fdd449eaf905b9496c8662c80a32b5983a7f7ddd7ade57b015b83e"
+    },
+    "sources_sha256": {
+      "shizukudos/supervisor/src/devices.c": "312aa69917735fd5c8ac36e74ab2fa8934542363a06a2ff338ca221eb7232ce8",
+      "shizukudos/supervisor/src/devices.h": "142f6c42662769a07b44d954f90a302ec8614fc3b549c160f46cfe7214e03b9b",
+      "shizukudos/supervisor/native_win98/pointer_bridge.c": "8371b16bf3755e52430fc6e021c9ab94ab521c18594b62f7d4038d32bccb0845",
+      "shizukudos/supervisor/native_win98/pointer_bridge.h": "0ccb263d26f2f6763934aacaab96a24268ecf2cf2bd1d488ac5b20cf2df9ed3a",
+      "shizukudos/supervisor/native_win98/tests/pointer_bridge_host.c": "de4a26c614bc650c93b147b96ff92396209bcdf0d5325683caf5b0619eff619d",
+      "shizukudos/supervisor/native_win98/tests/test_pointer_bridge.py": "4f5d4445fe73c6c5bb23e0d8fe9eaa2f87f994b7b2ce3e5462c85ffb2e14c75b"
+    }
+  }
+}

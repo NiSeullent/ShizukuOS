@@ -382,8 +382,55 @@ static void cmos_init(uint64_t ram_bytes)
 static uint8_t kbc_out, kbc_cmd_pending, kbc_cmd, kbc_config = 0x45;
 static uint8_t kbc_out_full;
 static uint8_t a20_gate = 1;
-static uint8_t kbc_fifo[16],kbc_fifo_head,kbc_fifo_count;
+static uint8_t kbc_fifo[16],kbc_fifo_aux[16],kbc_fifo_head,kbc_fifo_count;
 static uint8_t keyboard_pending,keyboard_scanset,keyboard_scanning,keyboard_leds,keyboard_typematic;
+static struct dev_native_pointer_ops pointer_ops;
+static uint8_t pointer_bound,pointer_pending,pointer_enabled,pointer_remote,pointer_wrap;
+static uint8_t pointer_scale,pointer_resolution,pointer_rate,pointer_buttons,pointer_reported_buttons;
+static uint8_t pointer_last[4],pointer_last_count;
+static int32_t pointer_x,pointer_y;
+static int32_t pointer_resolution_x,pointer_resolution_y;
+static uint64_t pointer_last_tsc;
+static void native_keyboard_irq(void);
+static void pointer_flush(uint64_t);
+static void pointer_defaults(void)
+{
+    pointer_pending=pointer_enabled=pointer_remote=pointer_wrap=pointer_scale=0;
+    pointer_resolution=2;pointer_rate=100;pointer_x=pointer_y=0;
+    pointer_resolution_x=pointer_resolution_y=0;
+    pointer_buttons=pointer_reported_buttons=0;pointer_last_count=0;pointer_last_tsc=rdtsc();
+}
+static void pointer_remove_bytes(void)
+{
+    uint8_t retained[16],count=0;
+    for(unsigned i=0;i<kbc_fifo_count;++i) {
+        unsigned slot=(kbc_fifo_head+i)%sizeof kbc_fifo;
+        if(!kbc_fifo_aux[slot])retained[count++]=kbc_fifo[slot];
+    }
+    memcpy(kbc_fifo,retained,count);memset(kbc_fifo_aux,0,sizeof kbc_fifo_aux);
+    kbc_fifo_head=0;kbc_fifo_count=count;
+    pic[1].irr&=(uint8_t)~0x10;pic_refresh_cascade();
+}
+static int pointer_valid(void)
+{
+    if(!pointer_bound)return 0;
+    if(pointer_ops.validate(pointer_ops.context)==SHZ_DRIVER_OK)return 1;
+    pointer_bound=0;pointer_remove_bytes();pointer_defaults();
+    return 0;
+}
+int dev_native_pointer_attach(const struct dev_native_pointer_ops *o)
+{
+    if(!native_win98 || !o || !o->context || !o->validate || !o->poll)return SHZ_INVALID;
+    if(pointer_ops.context)return SHZ_BUSY; /* Revocation still requires explicit detach. */
+    if(o->validate(o->context)!=SHZ_DRIVER_OK)return SHZ_REVOKED;
+    pointer_ops=*o;pointer_defaults();pointer_bound=1;return SHZ_DRIVER_OK;
+}
+int dev_native_pointer_detach(void *context)
+{
+    if(!native_win98 || pointer_ops.context!=context)return SHZ_INVALID;
+    pointer_bound=0;pointer_remove_bytes();pointer_defaults();
+    memset(&pointer_ops,0,sizeof pointer_ops);native_keyboard_irq();return SHZ_DRIVER_OK;
+}
 
 void dev_native_win98_enable(void)
 {
@@ -392,10 +439,14 @@ void dev_native_win98_enable(void)
     native_observation.start_tsc=g_start_tsc;
     kbc_fifo_head=kbc_fifo_count=0;kbc_cmd_pending=0;kbc_out_full=0;kbc_config=0x45;
     keyboard_pending=0;keyboard_scanset=2;keyboard_scanning=1;keyboard_leds=0;keyboard_typematic=0x2b;
+    pointer_bound=0;memset(&pointer_ops,0,sizeof pointer_ops);pointer_defaults();
 }
 static void native_keyboard_irq(void)
 {
-    if(kbc_fifo_count && (kbc_config&1) && !(kbc_config&0x10))dev_irq_raise(1);
+    if(!kbc_fifo_count)return;
+    if(kbc_fifo_aux[kbc_fifo_head]) {
+        if((kbc_config&2) && !(kbc_config&0x20))dev_irq_raise(12);
+    } else if((kbc_config&1) && !(kbc_config&0x10))dev_irq_raise(1);
 }
 
 int dev_a20_get(void) { return a20_gate; }
@@ -410,7 +461,9 @@ void dev_a20_set(int enabled)
 static uint8_t kbc_read(uint16_t port)
 {
     if(native_win98) {
-        if(port==0x64)return (uint8_t)(0x14|(kbc_fifo_count?1:0));
+        (void)pointer_valid();
+        if(port==0x64)return (uint8_t)(0x14|(kbc_fifo_count?1:0)|
+            (kbc_fifo_count && kbc_fifo_aux[kbc_fifo_head]?0x20:0));
         if(!kbc_fifo_count)return 0;
         const uint8_t value=kbc_fifo[kbc_fifo_head];
         kbc_fifo_head=(uint8_t)((kbc_fifo_head+1)%sizeof kbc_fifo);--kbc_fifo_count;
@@ -429,8 +482,117 @@ static void kbc_reply(uint8_t v)
         if(native_observation.kbc_reply_dropped!=UINT32_MAX)++native_observation.kbc_reply_dropped;
         return;
     }
-    kbc_fifo[(kbc_fifo_head+kbc_fifo_count)%sizeof kbc_fifo]=v;++kbc_fifo_count;
+    unsigned slot=(kbc_fifo_head+kbc_fifo_count)%sizeof kbc_fifo;
+    kbc_fifo[slot]=v;kbc_fifo_aux[slot]=0;++kbc_fifo_count;
     native_keyboard_irq();
+}
+static int pointer_reply(const uint8_t *bytes,unsigned count,int remember)
+{
+    if(count>sizeof kbc_fifo-kbc_fifo_count) {
+        if(native_observation.kbc_reply_dropped!=UINT32_MAX)++native_observation.kbc_reply_dropped;
+        return SHZ_CAPACITY;
+    }
+    for(unsigned i=0;i<count;++i) {
+        unsigned slot=(kbc_fifo_head+kbc_fifo_count)%sizeof kbc_fifo;
+        kbc_fifo[slot]=bytes[i];kbc_fifo_aux[slot]=1;++kbc_fifo_count;
+    }
+    if(remember) {
+        /* ACK and following ID/BAT/status/data are separate wire packets.
+         * RESEND repeats the last packet, not the already-accepted ACK. */
+        unsigned start=count>1 && bytes[0]==0xfa?1:0;
+        memcpy(pointer_last,bytes+start,count-start);pointer_last_count=(uint8_t)(count-start);
+    }
+    native_keyboard_irq();return SHZ_DRIVER_OK;
+}
+static int32_t pointer_scaled(int32_t value)
+{
+    if(!pointer_scale)return value;
+    const int32_t magnitude=value<0?-value:value;
+    const int32_t scaled=magnitude<=1?magnitude:magnitude==2?1:magnitude==3?3:
+        magnitude==4?6:magnitude==5?9:magnitude*2;
+    return value<0?-scaled:scaled;
+}
+static int pointer_packet(int ack)
+{
+    uint8_t data[4];unsigned offset=ack?1:0;
+    /* Split large HID deltas into complete representable PS/2 packets. This
+     * preserves movement across FIFO pressure without invented overflow bytes. */
+    const int32_t limit=pointer_scale?127:255;
+    const int32_t x=pointer_x>limit?limit:pointer_x<-limit?-limit:pointer_x;
+    const int32_t y=pointer_y>limit?limit:pointer_y<-limit?-limit:pointer_y;
+    const int32_t sx=pointer_scaled(x),sy=pointer_scaled(y);
+    data[0]=0xfa;data[offset]=(uint8_t)(8|pointer_buttons|(sx<0?16:0)|(sy<0?32:0));
+    data[offset+1]=(uint8_t)sx;data[offset+2]=(uint8_t)sy;
+    int r=pointer_reply(data,offset+3,1);if(r)return r;
+    pointer_x-=x;pointer_y-=y;pointer_reported_buttons=pointer_buttons;pointer_last_tsc=rdtsc();
+    return SHZ_DRIVER_OK;
+}
+static void pointer_flush(uint64_t now)
+{
+    if(!pointer_valid() || !pointer_enabled || pointer_remote || pointer_wrap || (kbc_config&0x20))return;
+    if(!pointer_x && !pointer_y && pointer_buttons==pointer_reported_buttons)return;
+    if(now<pointer_last_tsc || now-pointer_last_tsc<g_tsc_hz/pointer_rate)return;
+    (void)pointer_packet(0);
+}
+int dev_native_pointer_input(void *context,int32_t x,int32_t y,uint8_t buttons)
+{
+    int64_t dx=x,dy=-(int64_t)y,rx=0,ry=0;
+    if(!native_win98 || !pointer_bound || pointer_ops.context!=context)return SHZ_BUSY;
+    if(!pointer_valid())return SHZ_REVOKED;
+    if(buttons>7)return SHZ_UNSUPPORTED;
+    /* The source calibration is in counts at default resolution (4/mm).
+     * Honor guest E8 resolution changes, retaining fractional counts. */
+    if(pointer_resolution<2) {
+        const int64_t divisor=1ll<<(2-pointer_resolution);
+        dx+=pointer_resolution_x;dy+=pointer_resolution_y;
+        rx=dx%divisor;ry=dy%divisor;dx/=divisor;dy/=divisor;
+    } else {dx*=1ll<<(pointer_resolution-2);dy*=1ll<<(pointer_resolution-2);}
+    dx+=pointer_x;dy+=pointer_y;
+    if(dx<INT32_MIN || dx>INT32_MAX || dy<INT32_MIN || dy>INT32_MAX)return SHZ_CAPACITY;
+    pointer_x=(int32_t)dx;pointer_y=(int32_t)dy;
+    pointer_resolution_x=(int32_t)rx;pointer_resolution_y=(int32_t)ry;pointer_buttons=buttons;
+    return SHZ_DRIVER_OK;
+}
+static void native_pointer_command(uint8_t value)
+{
+    uint8_t data[4]={0xfa,0,0,0};unsigned count=1;
+    if(!pointer_valid())return; /* Never manufacture an installed input source. */
+    if(pointer_wrap && value!=0xff && value!=0xec){data[0]=value;(void)pointer_reply(data,1,1);return;}
+    if(value==0xfe) {
+        if(pointer_last_count)(void)pointer_reply(pointer_last,pointer_last_count,0);
+        else {data[0]=0xfe;(void)pointer_reply(data,1,0);}return;
+    }
+    if(pointer_pending) {
+        const int rate=value==10 || value==20 || value==40 || value==60 || value==80 || value==100 || value==200;
+        const int accepted=pointer_pending==0xe8?value<=3:rate;
+        if(!accepted){data[0]=0xfe;(void)pointer_reply(data,1,0);return;}
+        if(pointer_reply(data,1,1))return;
+        if(pointer_pending==0xe8)pointer_resolution=value;else pointer_rate=value;
+        pointer_pending=0;pointer_x=pointer_y=pointer_resolution_x=pointer_resolution_y=0;return;
+    }
+    switch(value) {
+    case 0xff: data[1]=0xaa;count=3;break; /* This virtual endpoint's reset/BAT/ID. */
+    case 0xf2: count=2;break; /* Standard 3-button, 3-byte protocol ID0 only. */
+    case 0xe9:
+        data[1]=(uint8_t)((pointer_remote?64:0)|(pointer_enabled?32:0)|(pointer_scale?16:0)|
+            (pointer_buttons&4)|((pointer_buttons&1)<<1)|((pointer_buttons&2)>>1));
+        data[2]=pointer_resolution;data[3]=pointer_rate;count=4;break;
+    case 0xeb:(void)pointer_packet(1);return;
+    case 0xe6:case 0xe7:case 0xe8:case 0xea:case 0xee:case 0xec:
+    case 0xf0:case 0xf3:case 0xf4:case 0xf5:case 0xf6:break;
+    default:data[0]=0xfe;(void)pointer_reply(data,1,0);return;
+    }
+    if(pointer_reply(data,count,1))return; /* No state transition on partial response. */
+    if(value==0xff || value==0xf6) {
+        /* Defaults must keep the just-published packet available to RESEND. */
+        pointer_defaults();unsigned start=count>1?1:0;
+        memcpy(pointer_last,data+start,count-start);pointer_last_count=(uint8_t)(count-start);
+    } else if(value==0xe6 || value==0xe7)pointer_scale=value==0xe7;
+    else if(value==0xe8 || value==0xf3)pointer_pending=value;
+    else if(value==0xee || value==0xec){pointer_wrap=value==0xee;pointer_x=pointer_y=pointer_resolution_x=pointer_resolution_y=0;}
+    else if(value==0xea || value==0xf0){pointer_remote=value==0xf0;pointer_x=pointer_y=pointer_resolution_x=pointer_resolution_y=0;}
+    else if(value==0xf4 || value==0xf5){pointer_enabled=value==0xf4;pointer_x=pointer_y=pointer_resolution_x=pointer_resolution_y=0;}
+    else if(value==0xe9 || value==0xf2)pointer_x=pointer_y=pointer_resolution_x=pointer_resolution_y=0;
 }
 static void native_keyboard_command(uint8_t value)
 {
@@ -469,11 +631,11 @@ static void native_kbc_write(uint16_t port,uint8_t value)
         case 0x60:case 0xd1:case 0xd4:kbc_cmd=value;kbc_cmd_pending=1;break;
         case 0xaa:kbc_reply(0x55);break;
         case 0xab:kbc_reply(0);break;
-        case 0xa9:kbc_reply(1);break; /* Explicitly no auxiliary mouse. */
+        case 0xa9:kbc_reply(pointer_valid()?0:1);break;
         case 0xad:kbc_config|=0x10;break;
         case 0xae:kbc_config&=(uint8_t)~0x10;native_keyboard_irq();break;
         case 0xa7:kbc_config|=0x20;break;
-        case 0xa8:kbc_config&=(uint8_t)~0x20;break;
+        case 0xa8:kbc_config&=(uint8_t)~0x20;native_keyboard_irq();break;
         case 0xd0:kbc_reply((uint8_t)(1|(a20_gate?2:0)));break;
         case 0xdd:dev_a20_set(0);break;
         case 0xdf:dev_a20_set(1);break;
@@ -483,7 +645,7 @@ static void native_kbc_write(uint16_t port,uint8_t value)
         kbc_cmd_pending=0;
         if(kbc_cmd==0x60){kbc_config=value;native_keyboard_irq();}
         else if(kbc_cmd==0xd1)dev_a20_set((value>>1)&1);
-        /* D4 has no auxiliary device, and deliberately produces no ACK. */
+        else if(kbc_cmd==0xd4)native_pointer_command(value);
     } else native_keyboard_command(value);
 }
 
@@ -665,6 +827,10 @@ int dev_pio_out(uint16_t port, int size, uint32_t value)
 
 void dev_poll(uint64_t now)
 {
+    if(native_win98 && pointer_valid()) {
+        (void)pointer_ops.poll(pointer_ops.context);
+        pointer_flush(now);
+    }
     struct pit_ch *c = &pit[0];
     if (c->running && (c->mode == 2 || c->mode == 3) && now >= c->next_irq_tsc) {
         const uint64_t period = pit_period_tsc(c);
