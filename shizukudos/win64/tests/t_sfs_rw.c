@@ -329,6 +329,26 @@ static void write_tests(void)
     }
 }
 
+/* Real PE fixture; these assertions need run_k64_sfs.py guest execution.
+ * Host callback tests and compilation alone do not establish this result. */
+static void volume_tests(void)
+{
+    char label[32] = {0}, filesystem[32] = {0};
+    DWORD serial = 0, max_component = 0, flags = 0, spc = 0, bps = 0, free_units = 0, units = 0;
+    ULARGE_INTEGER available = {0}, total = {0}, free_bytes = {0};
+    U_CHECK("SFS volume metadata query", GetVolumeInformationA(P(""), label, sizeof label, &serial,
+            &max_component, &flags, filesystem, sizeof filesystem));
+    U_CHECK("SFS filesystem type and on-disk label", !strcmp(filesystem, "SHIZUKUFS") && !strcmp(label, "SHZSFS"));
+    U_CHECK("SFS writable fixture reports supported capabilities", max_component == 127 &&
+            (flags & (FILE_CASE_PRESERVED_NAMES | FILE_UNICODE_ON_DISK)) ==
+            (FILE_CASE_PRESERVED_NAMES | FILE_UNICODE_ON_DISK) && !(flags & (FILE_READ_ONLY_VOLUME | FILE_PERSISTENT_ACLS | FILE_FILE_COMPRESSION)));
+    U_CHECK("SFS byte capacity comes from disk, not kernel heap", GetDiskFreeSpaceExA(P(""), &available, &total, &free_bytes) &&
+            total.QuadPart > 32u * 1024u * 1024u && available.QuadPart <= free_bytes.QuadPart && free_bytes.QuadPart <= total.QuadPart);
+    U_CHECK("SFS allocation-unit query", GetDiskFreeSpaceA(P(""), &spc, &bps, &free_units, &units));
+    U_CHECK("SFS allocation units agree with byte capacity", bps == 512 && spc == 8 &&
+            (ULONGLONG)units * spc * bps == total.QuadPart && (ULONGLONG)free_units * spc * bps == free_bytes.QuadPart);
+}
+
 int main(void)
 {
     char l;
@@ -342,6 +362,7 @@ int main(void)
         return 0;
     }
     printf("SFS-DRIVE %c\n", drive);
+    volume_tests();
     read_tests();
     write_tests();
     return u_finish("t_sfs_rw");

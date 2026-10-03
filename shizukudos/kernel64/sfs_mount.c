@@ -42,6 +42,36 @@ typedef struct sfsk_vol {
 static sfsk_vol vols[SFSK_MAX];
 static unsigned nvols;
 
+static int vol_volume_info(fsvol_t *fv, fs_volume_info_t *out)
+{
+    sfsk_vol *v;
+    sfs_statfs_t f;
+    uint32_t serial = 2166136261u;
+    unsigned i;
+    int rc;
+    if (!fv || fv->volume_info != vol_volume_info || !fv->priv || !out) return -1;
+    v = fv->priv;
+    if (&v->vol != fv) return -1;
+    mutex_lock(&v->lock);
+    rc = sfs_statfs(v->fs, &f);
+    if (!rc && (f.block_size < 512 || f.block_size % 512 || f.free_blocks > f.blocks)) rc = SFS_EIO;
+    if (!rc) {
+        memset(out, 0, sizeof *out);
+        for (i = 0; i < sizeof f.uuid; ++i) serial = (serial ^ f.uuid[i]) * 16777619u;
+        out->serial = serial;           /* stable 32-bit identity derived from the on-disk UUID */
+        memcpy(out->label, f.label, 16);
+        memcpy(out->filesystem, "SHIZUKUFS", 10);
+        out->total_units = f.blocks;
+        out->free_units = f.free_blocks;
+        out->sectors_per_unit = f.block_size / 512;
+        out->bytes_per_sector = 512;
+        out->attributes = 0x2u | 0x4u;
+        out->writable = fv->write && !v->ro && !f.read_only;
+    }
+    mutex_unlock(&v->lock);
+    return rc ? -1 : 0;
+}
+
 /* ---------------------------------------------------------------- libsfs callbacks */
 static int io_unaligned(sfsk_vol *v, uint64_t off, uint8_t *buf, uint32_t bytes, int write)
 {
@@ -355,6 +385,7 @@ static int probe_one(blk_dev_t *d)
         v->vol.rename = vol_rename;
     }
     v->vol.priv = v;
+    v->vol.volume_info = vol_volume_info;
     v->root.is_dir = 1;
     v->root.readonly = v->ro;
     v->root.attrs = FILE_ATTRIBUTE_DIRECTORY;

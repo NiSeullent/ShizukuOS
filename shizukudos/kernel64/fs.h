@@ -17,6 +17,17 @@ enum { FSB_RAM = 0, FSB_DISK = 1 };         /* fsnode backing */
 
 typedef struct fsnode fsnode_t;
 typedef struct fsvol fsvol_t;
+/* Filesystem-owned volume properties; allocation units describe this volume,
+ * never the kernel heap. Fixed strings include their NUL terminators. */
+typedef struct fs_volume_info {
+    uint32_t serial;
+    char label[33];                     /* UTF-8: at most 32 bytes and 16 UTF-16 units, plus NUL */
+    char filesystem[12];                /* ASCII filesystem name */
+    uint64_t total_units, free_units;
+    uint32_t sectors_per_unit, bytes_per_sector;
+    uint32_t attributes;                /* implemented FILE_* filesystem capabilities */
+    int writable;                      /* effective live volume state */
+} fs_volume_info_t;
 struct fsnode {
     char name[FS_NAME_MAX];
     int is_dir;
@@ -57,6 +68,7 @@ struct fsvol {
      * directory not empty. */
     int (*remove)(fsvol_t *v, fsnode_t *n);
     int (*rename)(fsvol_t *v, fsnode_t *n, fsnode_t *newdir, const char *newname, int replace);
+    int (*volume_info)(fsvol_t *v, fs_volume_info_t *out); /* optional: 0 = snapshot, -1 = failure */
 };
 
 typedef struct {
