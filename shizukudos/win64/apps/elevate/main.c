@@ -2,11 +2,12 @@
 #include "nt.h"
 #include "shzcrt.h"
 #include "prompt.h"
+#include "consent.h"
 #include "../../../abi/shz_auth.h"
 #include <string.h>
 static int copy(char *d,size_t cap,const char *s){size_t n=strlen(s);if(n>=cap)return -1;memcpy(d,s,n+1);return 0;}
 int main(int argc,char **argv) {
- shz_auth_request req={0};shz_auth_reply reply={0};unsigned op=SHZ_AUTH_ELEVATE_LAUNCH;int i=1;NTSTATUS st;
+ shz_auth_request req={0};shz_auth_reply reply={0};char consent[SHZ_ELEVATE_CONSENT_BYTES];unsigned op=SHZ_AUTH_ELEVATE_LAUNCH;int i=1;NTSTATUS st;
  req.version=1;
  if(argc==2&&!strcmp(argv[1],"--status")) {
   st=NtShzToken(SHZ_AUTH_QUERY,0,sizeof reply,(ULONG_PTR)&reply);
@@ -22,8 +23,11 @@ int main(int argc,char **argv) {
   if(i<argc){if(i+1!=argc||copy(req.command,sizeof req.command,argv[i]))goto usage;}else if(copy(req.command,sizeof req.command,req.image))goto usage;
  } else if(i!=argc)goto usage;
  if(op!=SHZ_AUTH_SANDBOX_LAUNCH) {
-  int n=shz_password_prompt(req.user,op==SHZ_AUTH_REGISTER?"Register a credential (volatile account store)":req.image,req.password,sizeof req.password);
-  if(!n){SecureZeroMemory(&req,sizeof req);printf("Authentication cancelled.\n");return 1;}req.password_bytes=(uint32_t)n;
+  int n;
+  if(!shz_elevate_consent(op,&req,consent,sizeof consent)){SecureZeroMemory(&req,sizeof req);goto usage;}
+  n=shz_password_prompt(req.user,consent,req.password,sizeof req.password);
+  SecureZeroMemory(consent,sizeof consent);
+  if(!n){SecureZeroMemory(&req,sizeof req);printf("Authentication cancelled or request could not be displayed.\n");return 1;}req.password_bytes=(uint32_t)n;
  }
  st=NtShzToken(op,(ULONG_PTR)&req,sizeof req,(ULONG_PTR)&reply);SecureZeroMemory(&req,sizeof req);
  if(st){printf("Account operation refused: %08x\n",(unsigned)st);return 1;}
