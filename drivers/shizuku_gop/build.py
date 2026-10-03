@@ -35,6 +35,16 @@ def digest(path):
     return shzlib.sha256_file(path)
 
 
+def provider_identity():
+    # Source implementation identity embedded in the live VxD query. No file or
+    # INI success flag substitutes for the actual current-boot query.
+    h = hashlib.sha256()
+    for name in ("backend.c", "gop_contract.h", "gop_live_contract.h", "build.py"):
+        raw = (HERE/name).read_bytes()
+        h.update(name.encode()+b"\0"+len(raw).to_bytes(8,"little")+raw)
+    return h.hexdigest()
+
+
 def pinned_tree(path, repository, commit):
     if not (path / ".git").exists():
         if path.exists():
@@ -140,10 +150,21 @@ def adapt(work):
             '#define VER_FILEDESCRIPTION_STR    "Shizuku basic graphics driver"')
     replace("res/display.rcv", '#define VER_PRODUCTNAME_STR         "Windows 9x Display Driver\\0"',
             '#define VER_PRODUCTNAME_STR         "Shizuku basic graphics driver\\0"')
+    replace("vxd_main.c", '\t\tcase OP_FBHDA_SETUP:\n\t\t\t{\n\t\t\t\tDWORD dptr = (DWORD)FBHDA_setup();',
+            '\t\tcase OP_SHZGOP_CURRENT_BOOT:\n\t\t{\n'
+            '\t\t\tDWORD probe = SHZGOP_current_boot_probe();\n'
+            '\t\t\tstate->Client_ECX = probe;\n\t\t\trc = probe ? 1 : 0xFFFF;\n'
+            '\t\t\tbreak;\n\t\t}\n\t\tcase OP_FBHDA_SETUP:\n\t\t\t{\n\t\t\t\tDWORD dptr = (DWORD)FBHDA_setup();')
+    replace("vxd_main.c", 'void VXD_API_entry();',
+            '#include "gop_live_contract.h"\nDWORD SHZGOP_current_boot_probe(void);\nvoid VXD_API_entry();')
     # Backend and bounded wire parser are original root-owned GPL sources.
     original["vxd_vesa.c"] = (work / "vxd_vesa.c").read_text()
     shutil.copy2(HERE / "backend.c", work / "vxd_vesa.c")
     shutil.copy2(HERE / "gop_contract.h", work / "gop_contract.h")
+    shutil.copy2(HERE / "gop_live_contract.h", work / "gop_live_contract.h")
+    identity = provider_identity()
+    (work / "gop_provider_identity.h").write_text("static const unsigned char shzgop_provider_identity[32]={" +
+        ",".join("0x%02x" % byte for byte in bytes.fromhex(identity)) + "};\n")
     diff = []
     for name, old in original.items():
         diff.extend(difflib.unified_diff(old.splitlines(keepends=True), (work / name).read_text().splitlines(keepends=True),
@@ -352,7 +373,7 @@ def main():
     work = out / "work"
     vmd = pinned_tree(REF, "https://github.com/JHRobotics/vmdisp9x.git", VMDISP_COMMIT)
     fix = pinned_tree(FIXREF, "https://github.com/JHRobotics/fixlink.git", FIXLINK_COMMIT)
-    original_inputs = {name: digest(HERE / name) for name in ("backend.c", "gop_contract.h", "build.py", "SHZGOP.INF", "README.md", "NOTICE.md")}
+    original_inputs = {name: digest(HERE / name) for name in ("backend.c", "gop_contract.h", "gop_live_contract.h", "build.py", "SHZGOP.INF", "README.md", "NOTICE.md")}
     upstream_inputs = source_manifest(vmd)
     fixlink_inputs = source_manifest(fix)
     if work.exists():
@@ -453,11 +474,12 @@ def main():
                "runtime_validation": "pending: native install/load/GDI rendering requires guest evidence",
                "upstreams": {"vmdisp9x": {"repository": "https://github.com/JHRobotics/vmdisp9x", "commit": VMDISP_COMMIT, "license": "MIT", "sources": upstream_inputs},
                              "fixlink": {"repository": "https://github.com/JHRobotics/fixlink", "commit": FIXLINK_COMMIT, "license": "MIT", "sources": fixlink_inputs}},
+               "live_provider_identity_sha256": provider_identity(), "live_query_opcode": "0x4f10",
                "original_inputs": original_inputs, "adaptations_sha256": digest(out / "source-adaptations.patch"),
                "copied_sources_before": before, "compiled_sources": after,
                "generated_link_inputs": {name: digest(work / name) for name in ("SHZGOP16.lnk", "SHZGOP32.lnk")},
                "open_watcom_snapshot": shzlib.open_watcom_snapshot()[0],
-               "toolchain": {name: {"path": str(ow / "binl64" / name), "sha256": digest(ow / "binl64" / name)}
+               "toolchain": {name: {"path": str((ow / "binl64" / name).resolve()), "sha256": digest(ow / "binl64" / name)}
                              for name in ("wcc", "wcc386", "wlink", "wasm", "wrc", "wlib")},
                "commands": commands,
                "formats": formats, "vxd_before_fixlink_sha256": pre_fix_sha,
