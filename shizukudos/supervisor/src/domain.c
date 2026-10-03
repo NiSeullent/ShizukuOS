@@ -335,6 +335,12 @@ int hcall_vmcall(domain_t *d)
         r[GPR_RCX] = d->chan[c].peer;
         break;
     }
+    case SHZ_HC_NATIVE_GOP_EPOCH: {
+        uint32_t word=0;
+        status=win98_native_gop_epoch_word(d,r[GPR_RBX],r[GPR_RCX],&word);
+        r[GPR_RBX]=status==SHZ_OK?word:0;r[GPR_RCX]=status==SHZ_OK?40:0;
+        break;
+    }
     case SHZ_HC_WALLTIME: {
         /* RTC registers are BCD (or binary, per register B bit 2); convert the platform clock. */
         const uint8_t regb = dev_cmos_read(0x0b), bin = (regb >> 2) & 1;

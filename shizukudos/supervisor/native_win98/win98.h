@@ -13,4 +13,6 @@ void win98_housekeeping(void);
  * Immutable VMCS/CPU binding stays retained; this releases execution only. */
 int win98_execution_begin(domain_t *);
 int win98_execution_end(domain_t *);
+/* Readonly, called with the current paused Win98 VMCS after execution_end. */
+int win98_native_gop_epoch_word(domain_t *,uint64_t,uint64_t,uint32_t *);
 #endif

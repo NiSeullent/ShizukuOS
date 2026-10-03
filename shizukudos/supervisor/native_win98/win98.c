@@ -17,6 +17,8 @@
 #include "../src/video.h"
 #include "../src/platform.h"
 static domain_t *w98;
+/* Separate from optional storage: frozen only after actual domain creation. */
+static struct {domain_t *domain;uint64_t vmcs;uint32_t generation,owner_cpu;} gop_epoch;
 static w98_ata_t ata;
 static const shz_blob_t *rom;
 static uint8_t *absent_lapic;
@@ -262,6 +264,8 @@ int win98_domain_create(shz_info_t *info,const shz_caps_t *caps)
     if(win98_persistence_init(d,info,caps)){
         log_capture(info->last_error,sizeof info->last_error,"explicit persistence device/member admission failed; no RAM fallback");return -1;
     }
+    gop_epoch.domain=d;gop_epoch.vmcs=d->vc.vmcs_pa;
+    gop_epoch.generation=d->generation;gop_epoch.owner_cpu=d->vc.owner_cpu;
     w98=d;d->state=SHZ_DS_RUNNABLE;
     info->domains[d->id].kind=d->kind;info->domains[d->id].generation=d->generation;info->domains[d->id].state=d->state;
     kprintf("SHZ: real Win98 VMCS created RAM=%lluMiB SeaBIOS=%llu owned ATA=%llu bytes (boot unverified)\n",d->ram_size>>20,rom->size,ata.bytes);
@@ -453,4 +457,27 @@ void win98_housekeeping(void)
         ept_invalidate();
     }
     if(rdtsc()-last_render>G.tsc_hz/20) {last_render=rdtsc();video_render();}
+}
+
+int win98_native_gop_epoch_word(domain_t *d,uint64_t index,uint64_t version,uint32_t *out)
+{
+    uint64_t current=~0ull;uint8_t failed;uint32_t words[40];
+    if(!out || version!=1)return SHZ_E_INVALID;
+    if(index>=40)return SHZ_E_RANGE;
+    if(!d || d!=w98 || d!=gop_epoch.domain || d!=&g_dom[SHZ_DOM_WIN98] ||
+       d->id!=SHZ_DOM_WIN98 || d->kind!=DK_WIN98 || d->state!=SHZ_DS_RUNNABLE ||
+       !d->generation || d->generation!=gop_epoch.generation ||
+       __atomic_load_n(&d->vc.cpu_binding_valid,__ATOMIC_ACQUIRE)!=1 ||
+       d->vc.domain_id!=SHZ_DOM_WIN98 || !gop_epoch.vmcs ||
+       d->vc.vmcs_pa!=gop_epoch.vmcs || d->vc.owner_cpu!=gop_epoch.owner_cpu ||
+       !vga.active || vga.failed)return SHZ_E_NOENT;
+    /* Scheduler checked CPU ownership before VM entry; inspect the actual
+     * current VMCS instead of accepting an unrelated caller's domain record. */
+    __asm__ volatile("vmptrst %0; setna %1" : "=m"(current),"=qm"(failed) :: "cc","memory");
+    if(failed || current!=gop_epoch.vmcs || (vmread(0x0802)&3))return SHZ_E_STALE;
+    if(w98_native_device_gate_gop_words(words))return SHZ_E_NOENT;
+    words[0]=0x31455047u; /* GPE1 */
+    words[1]=1;words[2]=40;words[3]=SHZ_DOM_WIN98;words[4]=gop_epoch.generation;
+    words[5]=gop_epoch.owner_cpu;words[6]=3; /* native VGA admitted + actual VMCS bound */
+    *out=words[index];return SHZ_OK;
 }
