@@ -5,7 +5,7 @@ import errno
 import json
 import os
 from pathlib import Path
-import select
+import selectors
 import socket
 import stat
 import struct
@@ -29,6 +29,29 @@ def available_memory_bytes(path=Path('/proc/meminfo')):
     if len(entries)!=1 or len(entries[0])!=3 or entries[0][2]!='kB' or not entries[0][1].isdigit():
         raise ValueError('one exact Linux MemAvailable report required')
     return int(entries[0][1])*1024
+
+
+def _poll_select(readers, writers, errors, timeout):
+    """Poll original descriptors; never duplicate, consume or close them."""
+    if errors:
+        raise ValueError('exceptional readiness is not used by this transport')
+    read_rows = [(item, item if isinstance(item, int) else item.fileno()) for item in readers]
+    write_rows = [(item, item if isinstance(item, int) else item.fileno()) for item in writers]
+    requests = {}
+    for rows, event in ((read_rows, selectors.EVENT_READ), (write_rows, selectors.EVENT_WRITE)):
+        for _, fd in rows:
+            requests[fd] = requests.get(fd, 0) | event
+    with selectors.PollSelector() as waiter:
+        for fd, event in requests.items():
+            # PollSelector maps POLLNVAL to readiness; retain select's EBADF refusal.
+            os.fstat(fd)
+            waiter.register(fd, event)
+        events = waiter.select(timeout)
+        for fd in requests:
+            os.fstat(fd)
+    ready = {key.fd: event for key, event in events}
+    return ([item for item, fd in read_rows if ready.get(fd, 0) & selectors.EVENT_READ],
+            [item for item, fd in write_rows if ready.get(fd, 0) & selectors.EVENT_WRITE], [])
 
 
 class OwnedQMP:
@@ -87,7 +110,8 @@ class OwnedQMP:
                 return json.loads(line)
             if len(self.buffer) > (1 << 20):
                 raise RuntimeError('QMP response exceeded its byte bound')
-            ready, _, _ = select.select([self.socket], [], [], min(.05, self._remaining(stop)))
+            ready, _, _ = _poll_select([self.socket], [], [], min(.05, self._remaining(stop)))
+            self.pump();self._remaining(stop)
             if ready:
                 chunk = self.socket.recv(65536)
                 if not chunk:
@@ -103,7 +127,8 @@ class OwnedQMP:
         payload = memoryview((json.dumps(message) + '\n').encode())
         while payload:
             self.pump();self._remaining(stop)
-            _, writable, _ = select.select([], [self.socket], [], min(.05, self._remaining(stop)))
+            _, writable, _ = _poll_select([], [self.socket], [], min(.05, self._remaining(stop)))
+            self.pump();self._remaining(stop)
             if writable:
                 sent = self.socket.send(payload)
                 if not sent:raise RuntimeError('owned QMP closed while sending')
@@ -151,7 +176,7 @@ class BoundedLogs:
 
     def pump(self, timeout=0, check=True):
         if self.readers:
-            ready, _, _ = select.select(list(self.readers), [], [], timeout)
+            ready, _, _ = _poll_select(list(self.readers), [], [], timeout)
             for fd in ready:
                 name = self.readers[fd]
                 for _ in range(4):

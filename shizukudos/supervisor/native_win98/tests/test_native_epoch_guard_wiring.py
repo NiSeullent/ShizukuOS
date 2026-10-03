@@ -253,7 +253,7 @@ class GuardWiringTests(unittest.TestCase):
             if len(ticks) == 3:
                 raise refusal
         gate = self.gate(left, guard)
-        with mock.patch.object(host.select, 'select', side_effect=first):
+        with mock.patch.object(host, '_poll_select', side_effect=first):
             with self.assertRaises(OSError) as caught:
                 gate.transfer(None, 3)
         self.assertIs(caught.exception, first)
