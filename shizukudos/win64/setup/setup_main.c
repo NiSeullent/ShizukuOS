@@ -13,6 +13,7 @@
 #include <bcrypt.h>
 #include "plat.h"                       /* before shzcrt.h, whose malloc/free macros would rename plat_t members */
 #include "native_install.h"
+#include "native_runtime.h"
 #include "blkio.h"
 #include "interactive_ui.h"
 #include "shzcrt.h"
@@ -97,14 +98,15 @@ static uint64_t now(void *c)
     return t < 116444736000000000ull ? 0 : (t - 116444736000000000ull) / 10000000ull;
 }
 
-/* Development entry only. The kernel storage-authority adapter is not yet
- * supplied. NULL native ops refuse before file opens, device enumeration or
- * writes. Final importer/UI will supply its own admitted pin and reviewed
- * whole tuple; command-line text cannot provide whole-device authority. */
+/* Runtime provider is selected only when the actual kernel reports independent
+ * release admission and all callbacks are constructed. Caller pins/review text
+ * are still compared against sealed source admission and actual device facts. */
 static int native_cli(const plat_t *p, int argc, char **argv)
 {
     native_setup_request_v1_t q;
     native_setup_result_v1_t r;
+    shz_native_runtime runtime;
+    int provider_rc;
     unsigned seen = 0;
     int i;
     memset(&q, 0, sizeof q);
@@ -129,6 +131,27 @@ static int native_cli(const plat_t *p, int argc, char **argv)
                 else if (y >= 'a' && y <= 'f') b = (unsigned)(y-'a'+10); else goto bad;
                 q.admitted_manifest_sha256[j] = (uint8_t)(a*16+b);
             }
+        } else if (!strcmp(argv[i], "/whole-id")) {
+            bit = 64; if (strlen(s) != 32) goto bad;
+            for (j = 0; j < 16; ++j) {
+                unsigned a, b; char x=s[2*j], y=s[2*j+1];
+                if (x>='0'&&x<='9') a=(unsigned)(x-'0');
+                else if (x>='a'&&x<='f') a=(unsigned)(x-'a'+10); else goto bad;
+                if (y>='0'&&y<='9') b=(unsigned)(y-'0');
+                else if (y>='a'&&y<='f') b=(unsigned)(y-'a'+10); else goto bad;
+                q.reviewed_target.whole_id[j]=(uint8_t)(a*16+b);
+            }
+        } else if (!strcmp(argv[i], "/index")) {
+            uint64_t n=0;bit=256;if(!*s)goto bad;
+            for(j=0;s[j];++j){unsigned d;if(s[j]<'0'||s[j]>'9')goto bad;
+                d=(unsigned)(s[j]-'0');if(n>(UINT32_MAX-d)/10)goto bad;n=n*10+d;}
+            q.reviewed_target.index=(unsigned)n;
+        } else if (!strcmp(argv[i], "/generation")) {
+            uint64_t n=0;bit=128;if(!*s)goto bad;
+            for(j=0;s[j];++j){unsigned d;if(s[j]<'0'||s[j]>'9')goto bad;
+                d=(unsigned)(s[j]-'0');if(n>(UINT64_MAX-d)/10)goto bad;n=n*10+d;}
+            if(!n)goto bad;
+            q.reviewed_target.generation=n;
         } else if (!strcmp(argv[i], "/target")) {
             bit = 4; if (!*s || strlen(s) >= sizeof q.reviewed_target.disk.name) goto bad;
             strcpy(q.reviewed_target.disk.name, s);
@@ -150,8 +173,24 @@ static int native_cli(const plat_t *p, int argc, char **argv)
         if (seen & bit) goto bad;
         seen |= bit;
     }
-    if (seen != 63) goto bad;
-    setup_run_native(p, 0, &q, &r);
+    if ((seen & 63) != 63 || ((seen & 192) && (seen & 192) != 192)) goto bad;
+    memset(&runtime, 0, sizeof runtime);
+    provider_rc=shz_native_runtime_init(&runtime,p);
+    if (!provider_rc) {
+        if (seen != 511) {
+            shz_puts("NATIVE-SETUP-RESULT: FAIL actual reviewed index, whole ID and generation required (no disk writes)\n");
+            return 1;
+        }
+        if (blkio_init()) {
+            shz_puts("NATIVE-SETUP-RESULT: FAIL actual disk enumeration failed (no disk writes)\n");
+            return 1;
+        }
+        shz_native_provider_run(&runtime.provider,&q,&r);
+    } else {
+        shz_puts(provider_rc == -2 ? "NATIVE-PROVIDER: independent producer admission absent\n" :
+                 "NATIVE-PROVIDER: process-owned backend unavailable\n");
+        setup_run_native(p, 0, &q, &r);
+    }
     return r.ok ? 0 : 1;
 bad:
     shz_puts("NATIVE-SETUP-RESULT: FAIL invalid explicit native command line (no disk writes)\n");

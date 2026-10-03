@@ -6,6 +6,7 @@
 #include "fs.h"
 #include "blk_compat.h"
 #include "setup_abi.h"
+#include "setup_native_sys.h"
 
 extern int32_t ldr_create_process(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
                                   process_t **out_proc, thread_t **out_thread);
@@ -48,7 +49,12 @@ static int32_t blk_query(process_t *p, uint64_t index, uint64_t out, uint64_t si
                  (d->flags & BLK_F_READONLY || !d->write || blk_user_write_busy(d) ? SHZ_SETUP_BLK_READONLY : 0) |
                  (d->flags & BLK_F_REMOVABLE ? SHZ_SETUP_BLK_REMOVABLE : 0);
     memcpy(info.name, d->name, sizeof info.name - 1);
-    if (blk_ram_serial(d, info.serial, sizeof info.serial)) info.serial[0] = 0;
+    if (blk_ram_serial(d, info.serial, sizeof info.serial)) {
+        /* Actual driver-observed serial, when present; never fabricate one for
+         * devices whose IDENTIFY path has not supplied a serial. */
+        memcpy(info.serial,d->serial,sizeof d->serial < sizeof info.serial ? sizeof d->serial : sizeof info.serial - 1);
+        info.serial[sizeof info.serial-1]=0;
+    }
     info.sectors = d->sectors;
     info.sector_size = d->sector_size;
     info.parent = parent;
@@ -91,6 +97,7 @@ int32_t sys_ext_setup(process_t *cur, struct regs *r, uint32_t num, uint64_t a1,
 {
     (void)r;
     switch (num) {
+    case 0xb5: return setup_native_syscall(cur,a1,a2);
     case SYS_NtShzSetupBlkQuery: return blk_query(cur, a1, a2, a3);
     case SYS_NtShzSetupBlkRead: return blk_io(cur, 0, a1, a2, a3, a4);
     case SYS_NtShzSetupBlkWrite: return blk_io(cur, 1, a1, a2, a3, a4);

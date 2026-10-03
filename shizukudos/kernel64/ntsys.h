@@ -106,7 +106,7 @@
  * storage track's raw-sector syscalls (0xf0-0xff) are merged, plus the post-setup power request. See setup_abi.h. */
 #define SYSCALL_LIST_SETUP(X) \
     X(NtShzSetupBlkQuery, 0xb0) X(NtShzSetupBlkRead, 0xb1) X(NtShzSetupBlkWrite, 0xb2) X(NtShzSetupBlkFlush, 0xb3) \
-    X(NtShzSetupPower, 0xb4)
+    X(NtShzSetupPower, 0xb4) X(NtShzSetupNative, 0xb5)
 
 /* Raw block devices 0xf0-0xff (kernel64/sysblk.c) */
 #define SYSCALL_LIST_BLK(X) \
