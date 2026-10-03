@@ -9,6 +9,7 @@
 #include "../boot_profile/win98_foundation.h"
 #include "cpu_bringup.h"
 #include "boot_storage.h"
+#include "laptop_firmware.h"
 
 static shz_bootinfo_t bootinfo;
 int initrd_files = -1;                          /* -1: none or rejected; read by the Win64 self-test */
@@ -292,6 +293,15 @@ void kmain(uint64_t bootinfo_pa)
             (bootinfo.flags & SHZ_BIF_UEFI_DIRECT) ? ", started directly by the UEFI boot manager (no Supervisor)" : "");
     if (bootinfo.cmdline[0])
         kprintf("%s: command line \"%s\"\n", KVER, bootinfo.cmdline);
+    if(k64_cmdline_has("shz.laptop=probe")) {
+        const int result=k64_laptop_firmware_init(&bootinfo);
+        const struct shz_laptop_firmware *laptop=k64_laptop_firmware_snapshot();
+        if(laptop)
+            kprintf("LAPTOP-FIRMWARE: result=%d rsdp=%llx root=%llx fadt=%llx ecdt=%llx tables=%u register_access=0\n",
+                    result,laptop->rsdp_pa,laptop->root_pa,laptop->fadt_pa,laptop->ecdt_pa,laptop->entry_count);
+        else
+            kprintf("LAPTOP-FIRMWARE: result=%d snapshot=absent register_access=0\n",result);
+    }
     if (!k64_boot_framebuffer(&fb))
         kprintf("%s: UEFI GOP framebuffer %ux%u, pitch %u, %s, at %llx (%llu KiB): available through "
                 "k64_boot_framebuffer(); the GOP display backend (gfx_gop.c) drives it unless a virtio-gpu is present\n", KVER, fb.width, fb.height, fb.pitch,
