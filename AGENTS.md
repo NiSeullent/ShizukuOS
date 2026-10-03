@@ -27,6 +27,10 @@ not a request for duplicate executables. The shell owns the Slade (default),
 Flute and Jade theme system. Implement theme data and propagation for metrics,
 painting, effects, typography, icons, controls, taskbar/start, animation,
 sounds, wallpaper and cursors; a hardcoded palette is an intermediate component.
+The user requires Noto Sans or Pretendard for UI typography. Ship the actual
+licensed font and use its glyphs and metrics; renaming another bitmap face does
+not satisfy this rule. The official website self-hosts Pretendard. Native GUI
+font replacement requires its own build and actual ShizukuOS verification.
 
 ShizukuVM is a native kernel virtualization subsystem with its own ShizukuOS
 API. Reuse suitable VM foundations. `chkrnl /mode linux` and `/mode msdos`
