@@ -66,9 +66,22 @@ speedup remains unmeasured. Detailed evidence is in
 
 DOS review found the current path tests omit the inherited full-dispatcher
 FLAGS behavior. The underlying FreeDOS handler clears CF before 1611/1613/1614
-dispatch; RBIL defines no expected CF answer. A small, separate observer is
-being prepared for real original-versus-Shiz comparisons before any behavior
-change. It does not register a pathname or execute Windows.
+dispatch; RBIL defines no expected CF answer. The separate source-written
+`mux_frame.asm` observer is ready for original-versus-Shiz comparisons before
+changing that behavior. Its four 1611/1613 calls vary input CF0/CF1 and report
+all input/returned registers and FLAGS plus owned-buffer canaries. It performs
+no pathname registration, Windows execution, file creation or vector change.
+The first implementation used a sentinel DX for 1611; independent review caught
+the mismatch with the selected DX0 probe policy. The corrected actual COM and
+its input assertions now use DX0 for 1611, explicitly distinguished from RBIL's
+AX-only definition. Original and corrected binaries are separately preserved.
+
+Root freshly ran all seven actual NASM/Unicorn observer controls with no skips
+(0.094s) and verified all three source hashes before and after execution. The
+independently rebuilt current COM is 1,444 bytes, SHA256
+`ffe02a85d627e87a1956c2ae4733bb13433d8f0d2b624efad278835d95570189`.
+These are modeled interrupt responses, not actual DOS-handler or Windows tests.
+Root validation for the two changes totals 51 distinct host/model controls.
 
 No guest boot, ISO installation, default GOP, x64 application or release
 success is claimed by this lane.
