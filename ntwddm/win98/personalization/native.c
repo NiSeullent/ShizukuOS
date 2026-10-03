@@ -18,10 +18,12 @@
 #include "store.h"
 #include "profile.h"
 #include "../adapter.h"
+#include "../theme_selector/native_backend.h"
 
 #define PREVIEW_W 320u
 #define PREVIEW_H 180u
-enum { ID_SCENE=100,ID_RATE,ID_LANGUAGE,ID_PAUSE,ID_BATTERY,ID_SAVE,ID_ANIMATE,ID_STATIC,ID_STATUS };
+enum { ID_SCENE=100,ID_RATE,ID_LANGUAGE,ID_PAUSE,ID_BATTERY,ID_SAVE,ID_ANIMATE,ID_STATIC,ID_STATUS,ID_CLASSIC,ID_SHIZUKUOS };
+#define REFRESH_THEME (WM_APP+42u)
 typedef struct backend { HWND window;HDC memory,painting;HBITMAP bitmap;HGDIOBJ previous; } backend;
 static backend native;
 static ntwg98_view view;
@@ -29,6 +31,11 @@ static pz98_preferences preferences;
 static HWND main_window,scene_box,rate_box,language_box,pause_box,battery_box,status_box;
 static HWND scene_label,rate_label,language_label,save_button,animate_button,static_button;
 static HWND companion_label;
+static HWND theme_label,classic_button,shizuku_button,theme_status;
+static shz_theme_native theme;
+static int theme_ready,theme_blocked,theme_busy,theme_refresh_pending;
+static DWORD last_theme_retry;
+static uint32_t theme_error;
 static HINSTANCE instance;
 static char prefs_path[MAX_PATH],bmp_path[MAX_PATH],html_path[MAX_PATH];
 static uint32_t phase,last_frame,last_power;
@@ -62,6 +69,44 @@ static void failure(const char *operation,DWORD error)
 {
     char value[240];wsprintfA(value,"%s failed (0x%08lx). No success was reported.",operation,error);
     SetWindowTextA(status_box,value);
+}
+static void refresh_theme(void)
+{
+    shz_theme_snapshot snapshot;shz_theme_result result;
+    theme_blocked=1;theme_refresh_pending=0;
+    if(!theme_ready) {
+        char value[180];wsprintfA(value,"Theme unavailable (0x%08lx).",(unsigned long)theme_error);
+        SetWindowTextA(theme_status,value);
+    } else if(!shz_theme_native_snapshot(&theme,&snapshot,&result)) {
+        if(result.phase==SHZ_THEME_PHASE_PROFILE_SNAPSHOT && result.error==ERROR_TIMEOUT){
+            theme_refresh_pending=1;last_theme_retry=GetTickCount();
+            caption(theme_status,"Theme busy. Checking again shortly.","테마 변경 중입니다. 곧 다시 확인합니다.");
+        }else caption(theme_status,"Theme invalid or unreadable.","테마 설정을 확인할 수 없습니다.");
+    } else {
+        theme_blocked=0;
+        if(snapshot.current==SHZ_THEME_CURRENT_CUSTOM)
+            caption(theme_status,"Current: custom system colors.","현재: 사용자 지정 색상");
+        else if(snapshot.current==SHZ_THEME_CURRENT_SHIZUKUOS)
+            caption(theme_status,"Current: ShizukuOS.","현재: ShizukuOS");
+        else caption(theme_status,"Current: Classic.","현재: 클래식");
+    }
+    EnableWindow(classic_button,!theme_blocked && !theme_busy);
+    EnableWindow(shizuku_button,!theme_blocked && !theme_busy);
+}
+static void choose_theme(uint32_t style)
+{
+    shz_theme_result result;char value[240];int applied;
+    if(theme_busy || theme_blocked || !theme_ready)return;
+    theme_busy=1;EnableWindow(classic_button,FALSE);EnableWindow(shizuku_button,FALSE);
+    applied=shz_theme_native_apply(&theme,style,&result);
+    theme_busy=0;refresh_theme();
+    if(applied)status("Theme applied, verified and saved for Windows startup.","테마를 적용하고 확인했습니다. Windows 시작 시 복원됩니다.");
+    else {
+        wsprintfA(value,"Theme failed: phase %u, error %lu, rollback mask %u, rollback error %lu.",
+            (unsigned)result.phase,(unsigned long)result.error,result.rollback_failed,(unsigned long)result.rollback_error);
+        SetWindowTextA(status_box,value);OutputDebugStringA(value);
+        MessageBoxA(main_window,value,"ShizukuOS theme change failed",MB_OK|MB_ICONERROR);
+    }
 }
 static int initialize_paths(void)
 {
@@ -212,11 +257,14 @@ static void labels(void)
     caption(scene_label,"Scene","배경");caption(rate_label,"Frames per second","초당 프레임");caption(language_label,"Language","언어");
     caption(pause_box,"Pause animation","애니메이션 일시정지");caption(battery_box,"Pause on battery or unknown power","배터리 사용 또는 전원 확인 불가 시 정지");
     caption(save_button,"Save settings","설정 저장");caption(animate_button,"Apply animated","움직이는 배경 적용");caption(static_button,"Apply static","정적 배경 적용");
+    caption(theme_label,"Windows theme","Windows 테마");caption(classic_button,"Classic","클래식");
+    caption(shizuku_button,"ShizukuOS","ShizukuOS");
     caption(companion_label,"Accounts / elevation: NTW64 bridge is not configured.","계정 / 권한 상승: NTW64 연결이 아직 설정되지 않았습니다.");
     SendMessageA(scene_box,CB_RESETCONTENT,0,0);
     ansi_text(text("Aurora","오로라"),value,sizeof value);SendMessageA(scene_box,CB_ADDSTRING,0,(LPARAM)value);
     ansi_text(text("Starlight","별빛"),value,sizeof value);SendMessageA(scene_box,CB_ADDSTRING,0,(LPARAM)value);
     SendMessageA(scene_box,CB_SETCURSEL,preferences.scene,0);
+    refresh_theme();
     if(preferences.language && !korean_available)status("Korean needs a Korean system code page. English is used on this system.","");
 }
 static HWND control(const char *class_name,DWORD style,int x,int y,int width,int height,unsigned id)
@@ -230,15 +278,20 @@ static int create_controls(void)
     scene_label=control("STATIC",0,374,48,230,20,0);scene_box=control("COMBOBOX",CBS_DROPDOWNLIST|WS_VSCROLL|WS_TABSTOP,374,72,230,120,ID_SCENE);
     rate_label=control("STATIC",0,374,110,230,20,0);rate_box=control("COMBOBOX",CBS_DROPDOWNLIST|WS_TABSTOP,374,134,100,90,ID_RATE);
     language_label=control("STATIC",0,374,170,230,20,0);language_box=control("COMBOBOX",CBS_DROPDOWNLIST|WS_TABSTOP,374,194,230,90,ID_LANGUAGE);
-    pause_box=control("BUTTON",BS_AUTOCHECKBOX|WS_TABSTOP,24,256,290,24,ID_PAUSE);
-    battery_box=control("BUTTON",BS_AUTOCHECKBOX|WS_TABSTOP,24,290,580,24,ID_BATTERY);
+    pause_box=control("BUTTON",BS_AUTOCHECKBOX|WS_TABSTOP,24,256,320,24,ID_PAUSE);
+    battery_box=control("BUTTON",BS_AUTOCHECKBOX|BS_MULTILINE|WS_TABSTOP,24,290,320,40,ID_BATTERY);
     save_button=control("BUTTON",BS_PUSHBUTTON|WS_TABSTOP,24,340,170,32,ID_SAVE);
     animate_button=control("BUTTON",BS_PUSHBUTTON|WS_TABSTOP,210,340,190,32,ID_ANIMATE);
     static_button=control("BUTTON",BS_PUSHBUTTON|WS_TABSTOP,416,340,190,32,ID_STATIC);
+    theme_label=control("STATIC",0,374,234,230,20,0);
+    classic_button=control("BUTTON",BS_PUSHBUTTON|WS_TABSTOP,374,256,108,30,ID_CLASSIC);
+    shizuku_button=control("BUTTON",BS_PUSHBUTTON|WS_TABSTOP,494,256,110,30,ID_SHIZUKUOS);
+    theme_status=control("STATIC",0,374,294,230,38,0);
     companion_label=control("STATIC",0,24,380,585,20,0);
     status_box=control("STATIC",0,24,400,585,68,ID_STATUS);
     if(!scene_label || !scene_box || !rate_label || !rate_box || !language_label || !language_box ||
-       !pause_box || !battery_box || !save_button || !animate_button || !static_button || !companion_label || !status_box)return 0;
+       !pause_box || !battery_box || !save_button || !animate_button || !static_button || !companion_label || !status_box ||
+       !theme_label || !classic_button || !shizuku_button || !theme_status)return 0;
     SendMessageA(rate_box,CB_ADDSTRING,0,(LPARAM)"5");SendMessageA(rate_box,CB_ADDSTRING,0,(LPARAM)"10");SendMessageA(rate_box,CB_ADDSTRING,0,(LPARAM)"20");
     SendMessageA(rate_box,CB_SETCURSEL,preferences.fps==5?0:preferences.fps==10?1:2,0);
     SendMessageA(language_box,CB_ADDSTRING,0,(LPARAM)"English");
@@ -256,6 +309,9 @@ static LRESULT CALLBACK window_proc(HWND window,UINT message,WPARAM wparam,LPARA
         native.painting=NULL;return 0;
     }
     case WM_COMMAND:
+        if(HIWORD(wparam)==BN_CLICKED && (LOWORD(wparam)==ID_CLASSIC || LOWORD(wparam)==ID_SHIZUKUOS)) {
+            choose_theme(LOWORD(wparam)==ID_CLASSIC?SHZ_THEME_CLASSIC:SHZ_THEME_SHIZUKUOS);return 0;
+        }
         read_controls();
         if(LOWORD(wparam)==ID_LANGUAGE && HIWORD(wparam)==CBN_SELCHANGE)labels();
         if(LOWORD(wparam)==ID_SAVE) {
@@ -272,8 +328,16 @@ static LRESULT CALLBACK window_proc(HWND window,UINT message,WPARAM wparam,LPARA
             desktop_requested=0;if(apply_static())status("Static wallpaper applied.","정적 배경화면을 적용했습니다.");
         }
         update_policy();render_preview();return 0;
+    case WM_SYSCOLORCHANGE:
+        /* SetSysColors broadcasts synchronously while another instance holds
+         * the shared mutex. Queue this read after its transaction completes. */
+        PostMessageA(window,REFRESH_THEME,0,0);break;
+    case REFRESH_THEME:
+        if(!theme_busy && theme_status)refresh_theme();
+        return 0;
     case WM_TIMER: {
         DWORD now=GetTickCount();unsigned interval;
+        if(theme_refresh_pending && !theme_busy && (DWORD)(now-last_theme_retry)>=250u)refresh_theme();
         if((DWORD)(now-last_power)>=1000u){last_power=now;update_power();update_policy();}
         interval=pz98_interval(&preferences,ac,suspended,!IsIconic(window));
         if(interval && (DWORD)(now-last_frame)>=interval) { last_frame=now;++phase;if(!render_preview())failure("Preview rendering",GetLastError()); }
@@ -294,8 +358,20 @@ static LRESULT CALLBACK window_proc(HWND window,UINT message,WPARAM wparam,LPARA
 }
 void __attribute__((stdcall)) WinMainCRTStartup(void)
 {
-    WNDCLASSA window_class={0};MSG message;RECT rect={0,0,640,490};char converted[64];int opened=0,code=1;
+    WNDCLASSA window_class={0};MSG message;RECT rect={0,0,640,490};char converted[64];int opened=0,code=1,mode;
+    const char *command=GetCommandLineA();size_t command_bytes=0;
     HRESULT initialized;
+    while(command && command_bytes<1024 && command[command_bytes])++command_bytes;
+    mode=shz_theme_command_mode(command,command_bytes);
+    if(mode<0){OutputDebugStringA("Shizuku Personalization: only no arguments or exact /restore are accepted.");ExitProcess(1);}
+    theme_ready=shz_theme_native_open(&theme,&theme_error);
+    if(mode==1) {
+        shz_theme_result result;
+        if(theme_ready && shz_theme_native_restore(&theme,&result))code=0;
+        else OutputDebugStringA("Shizuku Personalization: startup theme restore failed; no UI or wallpaper operation performed.");
+        if(!shz_theme_native_close(&theme))code=1;
+        ExitProcess((UINT)code); /* Before COM, profile-folder, wallpaper or UI initialization. */
+    }
     instance=GetModuleHandleA(NULL);pz98_defaults(&preferences);
     korean_available=ansi_text("한국어",converted,sizeof converted);
     if((GetUserDefaultLangID()&0x3ff)==LANG_KOREAN)preferences.language=1;
@@ -332,5 +408,6 @@ cleanup:
     if(opened && ntwg98_close(&view)!=NTWG_OK)code=1;
     if(main_window && IsWindow(main_window))DestroyWindow(main_window);
     if(com_ready)CoUninitialize();
+    if(!shz_theme_native_close(&theme))code=1;
     ExitProcess((UINT)code);
 }
