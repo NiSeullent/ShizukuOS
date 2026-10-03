@@ -65,7 +65,7 @@ def source_hashes():
     paths = {p for directory in directories for p in directory.rglob("*")
              if p.is_file() and p.suffix in (".c", ".h", ".asm", ".ld")}
     paths.update(SHZ / "install" / name for name in
-                 ("native_release_admission.py", "native_release_policy.py", "native_payload_ingest.py"))
+                 ("native_release_admission.py", "native_release_policy.py", "native_payload_ingest.py", "private_installer_package.py"))
     paths.update([Path(__file__).resolve(), SHZ / "tools/shzlib.py", SHZ / "win64/pe_parse.c",
                   SHZ / "win64/pe_parse.h",
                   SHZ / "supervisor/src/font8x8_basic.h"])
@@ -113,7 +113,9 @@ def build_kernel(name, directory, cflags, nasm_fmt, ld_emul, out_name, extra_c=(
             "sha256": sha256_file(binary), "elf_sha256": sha256_file(elf)}
 
 
-def build_all(args, stack):
+def build_all(args, stack, private_finalize=None):
+    if private_finalize is not None and args.native_release_manifest is None:
+        raise ValueError("private packaging requires independent release admission")
     global BUILD
     if args.out is not None:
         output = args.out
@@ -181,6 +183,9 @@ def build_all(args, stack):
     results["kernel32-standalone"] = {"bytes": k32s["bytes"], "sha256": k32s["sha256"], "elf_sha256": k32s["elf_sha256"],
                                       "stub_sha256": stub32["sha256"],
                                       "commands": [[str(x) for x in c] for c in k32s["commands"]]}
+    packaged = None
+    if private_finalize is not None:
+        packaged = private_finalize(release, BUILD, results)
     if source_hashes() != built_sources:
         raise RuntimeError("kernel sources changed during build; no verified receipt written")
     if any(sha256_file(Path(row["path"])) != row["sha256"] for row in tools.values()):
@@ -192,8 +197,9 @@ def build_all(args, stack):
         "kernel32_machine": "EM_386 ELF32", "kernel64_machine": "EM_X86_64 ELF64",
         "sources_sha256": built_sources, "tools_sha256": tools,
         "private": release is not None, "public_artifact": release is None,
+        "private_installer": packaged,
         "native_release": None if release is None else
-            {k: v for k, v in release.items() if k != "source"}})
+            {k: v for k, v in release.items() if k not in ("source", "custody")}})
     print(json.dumps({k: {"bytes": v["bytes"], "sha256": v["sha256"]} for k, v in results.items()}, indent=2))
 
 

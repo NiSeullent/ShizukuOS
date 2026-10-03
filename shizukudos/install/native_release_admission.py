@@ -90,6 +90,48 @@ def file_pin(ingest, value):
     return {'path': str(p), 'bytes': size, 'sha256': sha}
 
 
+_CUSTODY_KEY = object()
+
+
+class BuildCustody:
+    """Ephemeral build capability, never serialized or issued by caller JSON."""
+    def __init__(self, key, ingest, held, roles):
+        require(key is _CUSTODY_KEY, 'generator-owned custody required')
+        self._ingest, self._held, self._roles = ingest, held, roles
+        self._active = True
+
+    def check(self):
+        require(self._active, 'build custody closed')
+        self._held.check()
+
+    def pin(self, role):
+        self.check()
+        require(role in self._roles and self._roles[role] is not None,
+                'independent producer component absent: ' + role)
+        return dict(self._roles[role])
+
+    def read(self, role, offset, size):
+        row = self.pin(role)
+        require(type(offset) is int and type(size) is int and
+                0 <= offset <= row['bytes'] and 0 <= size <= min(1 << 20, row['bytes']-offset),
+                'bounded custody read required')
+        entry = self._held.entries[self._ingest.path(row['path'])]
+        return self._ingest.read_exact(entry['fd'], size, offset,
+                                      lambda: self._held.io_check(entry))
+
+    def finish(self):
+        self.check()
+        self._held.finish()
+
+    def retain_output(self, row, identity):
+        self.check()
+        self._held.add(row, written_identity=identity)
+
+    def guard(self, callback):
+        self.check()
+        self._held.guards.append(callback)
+
+
 @contextmanager
 def admit_for_build(manifest_path, output, build_pins=()):
     require(policy.NATIVE_SOURCE_MAP_SHA is not None and policy.NATIVE_ARTIFACTS is not None,
@@ -178,7 +220,10 @@ def admit_for_build(manifest_path, output, build_pins=()):
         record = {'path': str(generated), 'bytes': len(raw), 'sha256': digest(raw)}
         held.add(record, written_identity=written)
         held.finish()
-        yield {'source': generated, 'record': record, 'manifest': mrow, 'sim': sim,
+        custody = BuildCustody(_CUSTODY_KEY, ingest, held,
+                               {'manifest': mrow, 'sim': sim, 'runtime': actual.get('WIN64.IMG')})
+        try:
+            yield {'custody': custody, 'source': generated, 'record': record, 'manifest': mrow, 'sim': sim,
                'evidence_sha256': evidence, 'private': True, 'public_artifact': False,
                'producer_anchors': {'DOS_receipt': policy.DOS_RECEIPT,
                                    'native_source_map_sha256': policy.NATIVE_SOURCE_MAP_SHA,
@@ -186,6 +231,8 @@ def admit_for_build(manifest_path, output, build_pins=()):
                'generator_sources': [held.entries[p]['pin'] for p in source_files],
                'independent_source_custody': source_custody,
                'held_producer_and_build_inputs': [held.entries[p]['pin'] for p in sorted(held.entries)]}
-        held.finish()
+            held.finish()
+        finally:
+            custody._active = False
     # All lease releases and closes have succeeded before kbuild finalizes its
     # receipt. On any error the build has no successful admission receipt.
