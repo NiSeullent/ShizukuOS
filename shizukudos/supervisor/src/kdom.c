@@ -261,7 +261,9 @@ int ipc_channels_create(shz_info_t *info)
             const uint64_t gpa = SHZ_IPC_GPA_BASE + (uint64_t)c * SHZ_IPC_REGION_SIZE;
             if (peers[i] == SHZ_DOM_DOS16)
                 continue;                       /* real mode cannot address this window; see docs */
-            if (ept_map(&d->ept, gpa, hpa, SHZ_IPC_REGION_SIZE, EPT_RWX | EPT_WB, 1)) {
+            /* IPC headers, rings and payloads are shared data. Keep them writable
+             * by their peers without allowing instruction fetches from the window. */
+            if (ept_map(&d->ept, gpa, hpa, SHZ_IPC_REGION_SIZE, EPT_R | EPT_W | EPT_WB, 1)) {
                 log_capture(info->last_error, sizeof info->last_error, "channel %u EPT map failed", c);
                 return -1;
             }
