@@ -63,6 +63,10 @@ jobs:
         # Static Linux ELF32 executes original DLL instructions; this is not Windows.
         run: python3 platform/abi32/build.py
 
+      - name: Preserve native runner failures and complete output writes
+        # Compiler fault models and an actual i486 PE32/import audit; no guest.
+        run: python3 ntwin32/win64/tests/test_runner_result.py --out build/ntw64run-ci
+
       - name: Build and test the original LE VxD bridge
         run: |
           python3 ntwrapper/vxd/build.py
@@ -264,6 +268,7 @@ jobs:
         run: |
           python3 shizukudos/win64/tests/test_pe_parse.py
           python3 shizukudos/abi/test_abi.py
+          python3 shizukudos/win64/tests/test_wer_sdk_host.py
 
       - name: Build Kernel32, Kernel64 (Supervisor + standalone) and the Win64 runtime
         run: |
