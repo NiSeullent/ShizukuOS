@@ -49,6 +49,20 @@ class VmPreparationTests(unittest.TestCase):
             args += ["--" + name, str(path), "--" + name + "-sha256", PREPARE.BUILDER.file_sha(path)]
         return args
 
+    def test_current_owner_recipe_pauses_and_binds_exact_fd_com2(self):
+        out=self.root/'fresh'
+        original=PREPARE.recipe(self.files['qemu'],out)
+        bound=PREPARE.recipe(self.files['qemu'],out,epoch_binding={'policy_fd':57,'listener_path':str(out/'epoch.sock')})
+        self.assertEqual(bound[:len(original)],original)
+        self.assertEqual(bound[len(original):],['-S','-fw_cfg','name=opt/shizuku/native-device-epoch,file=/proc/self/fd/57',
+            '-chardev',f'socket,id=shz-epoch,path={out / "epoch.sock"},server=off','-serial','chardev:shz-epoch'])
+        for binding in ({'policy_fd':True,'listener_path':str(out/'epoch.sock')},
+                        {'policy_fd':2,'listener_path':str(out/'epoch.sock')},
+                        {'policy_fd':57,'listener_path':str(self.root/'other.sock')},
+                        {'policy_fd':57,'listener_path':str(out/'epoch.sock'),'HostGrant':True}):
+            with self.subTest(binding=binding),self.assertRaises(ValueError):
+                PREPARE.recipe(self.files['qemu'],out,epoch_binding=binding)
+
     def test_actual_distinct_copies_and_exact_no_launch_plan(self):
         output = self.root / "fresh"
         returned_receipts = []
