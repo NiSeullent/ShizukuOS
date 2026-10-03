@@ -65,7 +65,7 @@ def source_hashes():
     paths = {p for directory in directories for p in directory.rglob("*")
              if p.is_file() and p.suffix in (".c", ".h", ".asm", ".ld")}
     paths.update(SHZ / "install" / name for name in
-                 ("native_release_admission.py", "native_release_policy.py", "native_payload_ingest.py", "private_installer_package.py", "native_capacity_profile.py", "private_installer_iso.py"))
+                 ("native_release_admission.py", "native_release_policy.py", "native_payload_ingest.py", "private_installer_package.py", "native_capacity_profile.py", "private_installer_iso.py", "native_build_tool_custody.py"))
     paths.update([Path(__file__).resolve(), SHZ / "tools/shzlib.py", SHZ / "win64/pe_parse.c",
                   SHZ / "win64/pe_parse.h",
                   SHZ / "supervisor/src/font8x8_basic.h", SHZ / "supervisor/build.py",
@@ -157,7 +157,7 @@ def build_all(args, stack, private_finalize=None):
             raise RuntimeError("private installer requires actual MinGW EFI compiler")
         actual = Path(compiler).resolve()
         tools["private-efi-gcc"] = {"path": str(actual), "sha256": sha256_file(actual)}
-        for program in ("cc1", "as", "ld"):
+        for program in ("cc1", "as", "collect2", "ld"):
             selected = run([compiler, "-print-prog-name=" + program], capture=True).stdout.strip()
             actual = Path(selected) if Path(selected).is_absolute() else Path(shutil.which(selected) or "")
             if not actual.is_file():
@@ -172,9 +172,10 @@ def build_all(args, stack, private_finalize=None):
         release = stack.enter_context(native_release_admission.admit_for_build(
             args.native_release_manifest, BUILD / "private-release",
             [{"path": str(REPO / name), "bytes": (REPO / name).stat().st_size, "sha256": sha}
-             for name, sha in built_sources.items()] +
-            [{"path": row["path"], "bytes": Path(row["path"]).stat().st_size, "sha256": row["sha256"]}
-             for row in tools.values()]))
+             for name, sha in built_sources.items()],
+            build_tool_pins={role: {"path": row["path"], "bytes": Path(row["path"]).stat().st_size,
+                                   "sha256": row["sha256"]}
+                             for role, row in tools.items()}))
     private_flags = [] if release is None or release.get('profile') is None else release['profile'].flags()
     k32 = build_kernel("kernel32", "kernel32", K32_FLAGS, "elf32", "elf_i386", "KERNEL32.BIN")
     # The PE32+ parser is shared with the host tests; Kernel64 links the same source freestanding.

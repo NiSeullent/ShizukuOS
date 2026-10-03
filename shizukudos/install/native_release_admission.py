@@ -16,6 +16,7 @@ from pathlib import Path
 import stat
 
 import native_release_policy as policy
+import native_build_tool_custody
 
 ROOT = Path(__file__).resolve().parent
 MAX_ENCODED = 512 << 20
@@ -133,7 +134,7 @@ class BuildCustody:
 
 
 @contextmanager
-def admit_for_build(manifest_path, output, build_pins=()):
+def admit_for_build(manifest_path, output, build_pins=(), *, build_tool_pins=None):
     require(policy.NATIVE_SOURCE_MAP_SHA is not None and policy.NATIVE_ARTIFACTS is not None,
             'independently approved native producer anchors absent; admission refused')
     ingest = load_ingester()
@@ -147,7 +148,8 @@ def admit_for_build(manifest_path, output, build_pins=()):
     # including a failed compiler/finalizer or an admission exception.
     with ingest.Union() as held, ExitStack() as source_owners:
         source_files = [Path(__file__).resolve(), ROOT / 'native_release_policy.py',
-                        ROOT / 'native_payload_ingest.py', ROOT / 'native_capacity_profile.py']
+                        ROOT / 'native_payload_ingest.py', ROOT / 'native_capacity_profile.py',
+                        ROOT / 'native_build_tool_custody.py']
         for source in source_files:
             held.add(file_pin(ingest, source))
         held.add({'path': str(ROOT / 'native_payload_ingest.py'),
@@ -155,6 +157,12 @@ def admit_for_build(manifest_path, output, build_pins=()):
                   'sha256': policy.INGEST_SHA})
         for row in build_pins:
             held.add(row)
+        compiler_tools = source_owners.enter_context(
+            native_build_tool_custody.BuildToolLeases(ingest, held))
+        require(build_tool_pins is None or type(build_tool_pins) is dict,
+                'separate compiler tool role pins required')
+        for role, row in (build_tool_pins or {}).items():
+            compiler_tools.add_build_tool(role, row)
         mrow = file_pin(ingest, manifest_path)
         require(mrow['bytes'] <= ingest.MAX_JSON, 'bounded saved manifest required')
         saved = held.json(mrow)
@@ -240,7 +248,8 @@ def admit_for_build(manifest_path, output, build_pins=()):
                                    'native_artifacts': policy.NATIVE_ARTIFACTS},
                'generator_sources': [held.entries[p]['pin'] for p in source_files],
                'independent_source_custody': source_custody,
-               'held_producer_and_build_inputs': [held.entries[p]['pin'] for p in sorted(held.entries)]}
+               'held_producer_and_build_inputs': [held.entries[p]['pin'] for p in sorted(held.entries)] +
+                                                compiler_tools.pins()}
             held.finish()
         finally:
             custody._active = False
