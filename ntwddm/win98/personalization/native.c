@@ -16,6 +16,7 @@
 #include <string.h>
 #include "core.h"
 #include "store.h"
+#include "profile.h"
 #include "../adapter.h"
 
 #define PREVIEW_W 320u
@@ -62,25 +63,13 @@ static void failure(const char *operation,DWORD error)
     char value[240];wsprintfA(value,"%s failed (0x%08lx). No success was reported.",operation,error);
     SetWindowTextA(status_box,value);
 }
-static int join_path(char *out,const char *directory,const char *leaf)
-{
-    unsigned a=(unsigned)lstrlenA(directory),b=(unsigned)lstrlenA(leaf);
-    if(a+b+2>MAX_PATH)return 0;
-    memcpy(out,directory,a);out[a]='\\';memcpy(out+a+1,leaf,b+1);return 1;
-}
 static int initialize_paths(void)
 {
-    char module[MAX_PATH],directory[MAX_PATH];unsigned length,i;
-    length=GetModuleFileNameA(NULL,module,sizeof module);
-    if(!length || length>=sizeof module)return 0;
-    for(i=length;i && module[i-1]!='\\';i--) {}
-    if(!i)return 0;
-    module[i-1]=0;
-    if(!join_path(directory,module,"Shizuku-Personalization"))return 0;
-    if(!CreateDirectoryA(directory,NULL) && GetLastError()!=ERROR_ALREADY_EXISTS)return 0;
-    { DWORD attributes=GetFileAttributesA(directory);if(attributes==INVALID_FILE_ATTRIBUTES || !(attributes&FILE_ATTRIBUTE_DIRECTORY))return 0; }
-    return join_path(prefs_path,directory,"preferences.pz") &&
-           join_path(bmp_path,directory,"wallpaper.bmp") && join_path(html_path,directory,"wallpaper.htm");
+    pz98_paths paths;
+    if(!pz98_profile_paths(&paths))return 0;
+    memcpy(prefs_path,paths.preferences,sizeof prefs_path);
+    memcpy(bmp_path,paths.bitmap,sizeof bmp_path);
+    memcpy(html_path,paths.html,sizeof html_path);return 1;
 }
 static void *allocate(void *u,size_t bytes) { (void)u;return HeapAlloc(GetProcessHeap(),0,bytes); }
 static void deallocate(void *u,void *p,size_t bytes) { (void)u;(void)bytes;HeapFree(GetProcessHeap(),0,p); }

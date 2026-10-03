@@ -34,8 +34,22 @@ not monitored. The native preview is 320×180 and a static BMP is limited to
 1920×1080 / 8 MiB of pixel data.
 
 The application stores `preferences.pz`, `wallpaper.bmp` and `wallpaper.htm` in
-`Shizuku-Personalization` beside the executable. Install it in a writable local
-directory. Settings are a versioned 16-byte validated record. Saves hold an
+`Shizuku-Personalization` under the current Windows shell's Application Data
+folder. Windows profile selection supplies this folder through native
+`SHGetSpecialFolderPathA(CSIDL_APPDATA)`, independently of the executable location
+or inherited environment variables. Enabled Windows user profiles therefore
+keep their settings and wallpapers separate when launching the same installed
+application. Lookup, local-path, length, creation or directory-validation errors
+disable writes; mapped network drives and unavailable/unknown drive types also
+fail before directory creation. Paths reserve space for the store's temporary,
+backup and lock suffixes. There is no fallback to a shared application directory. Existing
+settings beside the executable are not automatically imported into every user.
+The executable may reside in a read-only installation directory.
+
+Windows98 without enabled user profiles can return a common Application Data
+folder. Profile paths provide preference separation, not NT-style ACL protection,
+a secure login system or protection from other legacy Windows98 processes.
+Settings are a versioned 16-byte validated record. Saves hold an
 exclusive Windows file handle, write and flush a temporary, close and read it
 back byte for byte, and publish with `MoveFileA` using a backup and rollback.
 Interrupted saves recover on the next operation. Empty `.lck` files persist;
@@ -59,11 +73,11 @@ gives each child a 60-second deadline, reaps its own children, records commands,
 hashes and project include dependencies, and builds `SHZPERS.EXE` as an i486
 PE32 GUI application with subsystem/OS 4.10. Its imports are checked against
 the repository's actual Win98 native export inventory and limited to KERNEL32,
-USER32, GDI32 and OLE32. Compiler stack probes remain enabled, with the pinned
+USER32, GDI32, OLE32 and SHELL32. Compiler stack probes remain enabled, with the pinned
 installed libgcc archive supplying the helper. No Microsoft binary is supplied.
 
 Host tests execute production preferences/render/power-policy code and the
-production storage module with file-boundary mocks, under GCC and Clang
+production storage and profile-path modules with file/shell-boundary mocks, under GCC and Clang
 ASan/UBSan. Node executes the actual generated HTML script with DOM, timer and
 clock boundaries modeled. The existing adapter regression also runs separately.
 The receipt explicitly records that Windows 98, ActiveDesktop, wallpaper
@@ -72,14 +86,17 @@ executed**. Export presence proves a link boundary, not API behavior. Installed
 SDK headers, import libraries and all internal compiler/runtime dependencies
 are not a fully sealed toolchain closure.
 
-Native acceptance still needs Windows 98 booted on ShizukuDOS: open the settings
+Native acceptance still needs Windows 98 booted on ShizukuDOS: launch the shared
+application from two enabled Windows profiles, verify independent preferences
+and wallpaper files without executable-directory writes; open the settings
 window beside Explorer; verify both languages and persistence across restart;
 apply both animated scenes and static fallback; inspect API failure status,
 local pause, five-minute stop and battery/suspend/minimize/close behavior; verify
 Explorer icons/taskbar and unrelated ActiveDesktop components remain usable.
 No VM, private Windows media or ISO is created by this component's build.
 
-The API contract follows Microsoft's [Active Desktop interface description](https://learn.microsoft.com/en-us/windows/win32/lwef/active-desktop-interface),
+The API contract follows Microsoft's [shell profile-folder lookup](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shgetspecialfolderpatha),
+[Active Desktop interface description](https://learn.microsoft.com/en-us/windows/win32/lwef/active-desktop-interface),
 [SetWallpaper method](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-iactivedesktop-setwallpaper),
 [ApplyChanges method](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-iactivedesktop-applychanges),
 [SystemParametersInfoA](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-systemparametersinfoa)

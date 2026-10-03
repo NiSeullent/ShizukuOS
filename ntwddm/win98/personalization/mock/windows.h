@@ -7,6 +7,7 @@
 #include <stddef.h>
 typedef uint32_t DWORD;
 typedef int BOOL;
+#define TRUE 1
 typedef void *HANDLE;
 #define INVALID_HANDLE_VALUE ((HANDLE)(intptr_t)-1)
 #define MAX_PATH 260
@@ -25,6 +26,14 @@ typedef void *HANDLE;
 #define ERROR_ACCESS_DENIED 5u
 #define ERROR_INVALID_HANDLE 6u
 #define ERROR_INVALID_DATA 13u
+#define ERROR_NOT_SUPPORTED 50u
+#define DRIVE_UNKNOWN 0u
+#define DRIVE_NO_ROOT_DIR 1u
+#define DRIVE_REMOVABLE 2u
+#define DRIVE_FIXED 3u
+#define DRIVE_REMOTE 4u
+#define DRIVE_CDROM 5u
+#define DRIVE_RAMDISK 6u
 #define ERROR_WRITE_FAULT 29u
 #define ERROR_READ_FAULT 30u
 #define ERROR_SHARING_VIOLATION 32u
@@ -43,4 +52,6 @@ DWORD GetFileSize(HANDLE,DWORD *);
 DWORD GetFileAttributesA(const char *);
 BOOL DeleteFileA(const char *);
 BOOL MoveFileA(const char *,const char *);
+BOOL CreateDirectoryA(const char *,void *);
+DWORD GetDriveTypeA(const char *);
 #endif
