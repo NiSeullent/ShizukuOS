@@ -74,8 +74,8 @@ int32_t setup_native_syscall(process_t *p,uint64_t user,uint64_t bytes)
   return STATUS_INVALID_PARAMETER;
  acquire();if(p->teardown)goto done;
  if(r.operation==SHZ_NATIVE_CAPS){
-  r.max_source_bytes=SHZ_NATIVE_SYS_SOURCE_MAX;r.max_io_bytes=SHZ_NATIVE_SYS_IO_MAX;
-  r.producer_admission_available=setup_native_release_available();status=STATUS_SUCCESS;goto publish;
+  r.max_source_bytes=SHZ_NATIVE_KERNEL_SOURCE_MAX;r.max_io_bytes=SHZ_NATIVE_SYS_IO_MAX;
+  r.producer_admission_available=setup_native_release_state();status=STATUS_SUCCESS;goto publish;
  }
  if(r.operation==SHZ_NATIVE_RELEASE_INFO){
   unsigned role=r.index;

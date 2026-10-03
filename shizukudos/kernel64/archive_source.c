@@ -2,7 +2,7 @@
 #include "archive_source.h"
 #include "../accounts/sha256.h"
 #define ARCHIVE_SOURCE_SLOTS 8u
-#define ARCHIVE_SOURCE_MAX_BYTES (256ull<<20)
+#define ARCHIVE_SOURCE_MAX_BYTES SHZ_NATIVE_KERNEL_SOURCE_MAX
 struct archive_source {
  void *owner;uint64_t *pages;unsigned page_count,refs;
  archive_source_info_t info;

@@ -16,9 +16,10 @@ int setup_native_release_available(void)
  const setup_native_release_record_v1 *r=&shz_installer_release_v1;
  return r->magic==0x31524e53u&&r->version==1&&r->bytes==128&&!r->reserved&&
   r->manifest_bytes&&r->manifest_bytes<=((uint64_t)4<<20)&&
-  r->sim_bytes&&r->sim_bytes<=((uint64_t)256<<20)&&
+  r->sim_bytes&&r->sim_bytes<=SHZ_NATIVE_KERNEL_SOURCE_MAX&&
   nonzero(r->manifest_sha256)&&nonzero(r->sim_sha256)&&nonzero(r->evidence_sha256);
 }
+unsigned setup_native_release_state(void) { return setup_native_release_available()?1u:2u; }
 int setup_native_release_info(unsigned role,uint64_t *bytes,uint8_t sha256[32])
 {
  const setup_native_release_record_v1 *r=&shz_installer_release_v1;
@@ -39,6 +40,7 @@ int setup_native_release_pair(const archive_source_info_t p[2])
 #else
 /* Public development builds have no private release or producer authority. */
 int setup_native_release_available(void) { return 0; }
+unsigned setup_native_release_state(void) { return 0; }
 int setup_native_release_info(unsigned role,uint64_t *bytes,uint8_t sha256[32])
 { (void)role;(void)bytes;(void)sha256;return -1; }
 int setup_native_release_source(const archive_source_info_t *s,unsigned role)

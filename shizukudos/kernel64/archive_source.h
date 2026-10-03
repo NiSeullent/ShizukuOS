@@ -2,6 +2,7 @@
 #ifndef SHZ_K64_ARCHIVE_SOURCE_H
 #define SHZ_K64_ARCHIVE_SOURCE_H
 #include "fs.h"
+#include "../boot_profile/native_installer_capacity.h"
 #include "../boot_profile/storage/provenance.h"
 typedef struct archive_source archive_source_t;
 typedef struct {

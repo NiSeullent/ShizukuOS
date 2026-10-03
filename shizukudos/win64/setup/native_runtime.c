@@ -15,6 +15,7 @@ static int source_check(void *ctx,void *h)
  shz_native_call_init(&r,SHZ_NATIVE_ADMIT);r.handle=s->token;r.index=s->role;
  return call(&r)||memcmp(&r.source,&s->identity,sizeof r.source)?-1:0;
 }
+static int source_close(void *ctx,void *h);
 static int source_open(void *ctx,const char *path,void **h,uint64_t *bytes)
 {
  shz_native_runtime *v=ctx;shz_native_runtime_source *s;shz_native_call_v1 r;size_t n;
@@ -27,6 +28,7 @@ static int source_open(void *ctx,const char *path,void **h,uint64_t *bytes)
  s=&v->source[v->opened];shz_native_call_init(&r,SHZ_NATIVE_OPEN);memcpy(r.path,path,n+1);
  if(call(&r)||!r.handle||!r.source.bytes)return -1;
  s->token=r.handle;s->identity=r.source;s->role=v->opened;s->live=1;memcpy(s->path,path,n+1);
+ if(s->identity.bytes>v->max_source_bytes){(void)source_close(v,s);return -1;}
  v->opened++;*h=s;*bytes=s->identity.bytes;return 0;
 }
 static int source_admit(void *ctx,void *h,const char *path,uint64_t bytes,const uint8_t digest[32])
@@ -149,8 +151,10 @@ int shz_native_runtime_init(shz_native_runtime *v,const plat_t *base)
  for(i=0;i<sizeof *v;i++)if(((const uint8_t *)v)[i])return -1;
  shz_native_call_init(&caps,SHZ_NATIVE_CAPS);
  if(call(&caps))return -1;
- if(caps.producer_admission_available!=1)return -2;
- if(caps.max_source_bytes!=SHZ_NATIVE_SYS_SOURCE_MAX||caps.max_io_bytes!=SHZ_NATIVE_SYS_IO_MAX)return -1;
+ if(!caps.producer_admission_available)return -2;
+ if(caps.producer_admission_available!=1)return -1;
+ if(!caps.max_source_bytes||caps.max_source_bytes>SHZ_NATIVE_SYS_SOURCE_PROTOCOL_MAX||
+ caps.max_io_bytes!=SHZ_NATIVE_SYS_IO_MAX)return -1;
  v->original=*base;memset(&adapted,0,sizeof adapted);memset(&backend,0,sizeof backend);
  adapted.ctx=v;adapted.out=output;adapted.alloc=alloc;adapted.free=dealloc;adapted.file_open=source_open;adapted.file_read=source_read;
  adapted.random=platform_random;adapted.now=now;adapted.disk_count=count;adapted.disk_info=info;adapted.max_io_sectors=SHZ_NATIVE_SYS_IO_MAX/512;
@@ -160,7 +164,7 @@ int shz_native_runtime_init(shz_native_runtime *v,const plat_t *base)
  backend.authority.review_target=review;backend.authority.claim_target=claim;backend.authority.check_target=check;backend.authority.release_target=release;
  backend.target_info=target_info;backend.target_read=target_read;backend.target_write=target_write;backend.target_flush=target_flush;
  if(shz_native_provider_init(&v->provider,&adapted,&backend)){memset(v,0,sizeof *v);return -1;}
- v->initialized=1;return 0;
+ v->max_source_bytes=caps.max_source_bytes;v->initialized=1;return 0;
 }
 
 int shz_native_runtime_preview_close(shz_native_runtime *v)
@@ -175,7 +179,7 @@ int shz_native_runtime_preview(shz_native_runtime *v,const char *manifest,const 
  if(!v||!v->initialized||v->opened||!digest)return -1;
  for(unsigned i=0;i<2;i++){
   shz_native_call_init(&pins[i],SHZ_NATIVE_RELEASE_INFO);pins[i].index=i;
-  if(call(&pins[i])||!pins[i].source.bytes||pins[i].source.bytes>SHZ_NATIVE_SYS_SOURCE_MAX)goto bad;
+  if(call(&pins[i])||!pins[i].source.bytes||pins[i].source.bytes>v->max_source_bytes)goto bad;
  }
  for(unsigned i=0;i<2;i++){
   void *h=0;uint64_t bytes=0;
