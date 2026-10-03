@@ -1581,7 +1581,7 @@ done:
 int32_t gfx_syscall_present(process_t *cur, uint64_t arg)
 {
     shz_present_t p;
-    shz_present_layout_t layout;
+    shz_present_layout_t layout = {0};
     gwin_t *w = 0;
     uint32_t *pixels = 0;
     int32_t st = STATUS_SUCCESS;

@@ -196,6 +196,69 @@ jobs:
           Native Windows compatibility requires separate guest evidence.
           SUMMARY
 
+  public-website:
+    name: Public nginx website from an external runner
+    # Check the published source after main intake, independently of the origin host.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Check out the published source without retaining credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          lfs: false
+          submodules: false
+
+      - name: Verify public TLS, homepage bodies and the old VNC redirect
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, ssl, urllib.error, urllib.parse, urllib.request
+          from pathlib import Path
+          host = 'm98.nyase.kr'
+          class SameOrigin(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  url = urllib.parse.urlsplit(newurl)
+                  if url.scheme != 'https' or url.hostname != host or url.port not in (None, 443):
+                      raise RuntimeError('public website redirected outside its HTTPS origin')
+                  return super().redirect_request(req, fp, code, msg, headers, newurl)
+          opener = urllib.request.build_opener(SameOrigin(), urllib.request.HTTPSHandler(context=ssl.create_default_context()))
+          routes = [('/', 'index.html', '/'), ('/en/', 'en/index.html', '/en/'),
+                    ('/downloads.html', 'downloads.html', '/downloads.html'),
+                    ('/preview.html', 'preview.html', '/preview.html'), ('/vnc.html', 'index.html', '/')]
+          results = []
+          try:
+              for route, source, final_path in routes:
+                  expected = Path('site', source).read_bytes()
+                  request = urllib.request.Request('https://' + host + route,
+                      headers={'User-Agent': 'ShizukuPublicWebsiteVerifier/1.0', 'Accept-Encoding': 'identity'})
+                  with opener.open(request, timeout=20) as response:
+                      body = response.read((2 << 20) + 1)
+                      url = urllib.parse.urlsplit(response.geturl())
+                      if response.status != 200 or response.headers.get_content_type() != 'text/html' or url.path != final_path or body != expected:
+                          raise RuntimeError('published HTML, status, type or redirect differs: ' + route)
+                      results.append({'route': route, 'final_path': url.path, 'status': response.status,
+                                      'bytes': len(body), 'sha256': hashlib.sha256(body).hexdigest(), 'PASS': True})
+          finally:
+              out = Path('build/public-website-ci'); out.mkdir(parents=True, exist_ok=True)
+              (out / 'result.json').write_text(json.dumps({'schema': 'shizukuos.public-website-readback.v1',
+                  'scope': 'EXTERNAL_PUBLIC_HTTPS_HTML_ONLY', 'certificate_validation_enabled': True,
+                  'all_public_TLS_routes_verified': len(results) == len(routes),
+                  'routes': results, 'PASS': len(results) == len(routes), 'Windows98_boot_verified': False,
+                  'native_apps_verified': False, 'ISO_qualified': False}, indent=2) + '\n')
+          print('PASS: five public HTTPS routes match the official Korean/English source; VNC redirects to the homepage')
+          PY
+
+      - name: Keep public website readback
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: public-website-readback
+          path: build/public-website-ci/
+          if-no-files-found: warn
+
   original-userland-host:
     name: Original userland source observation with synthetic FAT and real file descriptors
     runs-on: ubuntu-24.04
