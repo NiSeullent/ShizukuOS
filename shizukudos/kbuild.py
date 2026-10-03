@@ -61,7 +61,9 @@ def sources(directory, suffix):
 
 def source_hashes():
     directories = [SHZ / name for name in ("kernel32", "kernel64", "accounts", "kcommon", "abi", "pma_bridge", "win64/include", "dead_screen", "boot_profile", "supervisor/loader", "supervisor/src", "supervisor/guest", "supervisor/native_win98", "uefi", "csmwrap/video")]
-    directories += [REPO / "shizukufs/v1/libsfs", REPO / "drivers/ahci_native"]
+    # Kernel64's laptop_protocols.c imports the shared driver C and headers.
+    directories += [REPO / "shizukufs/v1/libsfs", REPO / "drivers/ahci_native",
+                    REPO / "drivers/common", REPO / "drivers/shz_laptop"]
     paths = {p for directory in directories for p in directory.rglob("*")
              if p.is_file() and p.suffix in (".c", ".h", ".asm", ".ld")}
     paths.update(SHZ / "install" / name for name in
