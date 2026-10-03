@@ -33,7 +33,8 @@ static HWND scene_label,rate_label,language_label,save_button,animate_button,sta
 static HWND companion_label;
 static HWND theme_label,classic_button,shizuku_button,theme_status;
 static shz_theme_native theme;
-static int theme_ready,theme_blocked,theme_busy;
+static int theme_ready,theme_blocked,theme_busy,theme_refresh_pending;
+static DWORD last_theme_retry;
 static uint32_t theme_error;
 static HINSTANCE instance;
 static char prefs_path[MAX_PATH],bmp_path[MAX_PATH],html_path[MAX_PATH];
@@ -72,13 +73,16 @@ static void failure(const char *operation,DWORD error)
 static void refresh_theme(void)
 {
     shz_theme_snapshot snapshot;shz_theme_result result;
-    theme_blocked=1;
+    theme_blocked=1;theme_refresh_pending=0;
     if(!theme_ready) {
         char value[180];wsprintfA(value,"Theme unavailable (0x%08lx).",(unsigned long)theme_error);
         SetWindowTextA(theme_status,value);
-    } else if(!shz_theme_native_snapshot(&theme,&snapshot,&result))
-        caption(theme_status,"Theme invalid, unreadable or busy.","테마 설정을 확인할 수 없습니다.");
-    else {
+    } else if(!shz_theme_native_snapshot(&theme,&snapshot,&result)) {
+        if(result.phase==SHZ_THEME_PHASE_PROFILE_SNAPSHOT && result.error==ERROR_TIMEOUT){
+            theme_refresh_pending=1;last_theme_retry=GetTickCount();
+            caption(theme_status,"Theme busy. Checking again shortly.","테마 변경 중입니다. 곧 다시 확인합니다.");
+        }else caption(theme_status,"Theme invalid or unreadable.","테마 설정을 확인할 수 없습니다.");
+    } else {
         theme_blocked=0;
         if(snapshot.current==SHZ_THEME_CURRENT_CUSTOM)
             caption(theme_status,"Current: custom system colors.","현재: 사용자 지정 색상");
@@ -333,6 +337,7 @@ static LRESULT CALLBACK window_proc(HWND window,UINT message,WPARAM wparam,LPARA
         return 0;
     case WM_TIMER: {
         DWORD now=GetTickCount();unsigned interval;
+        if(theme_refresh_pending && !theme_busy && (DWORD)(now-last_theme_retry)>=250u)refresh_theme();
         if((DWORD)(now-last_power)>=1000u){last_power=now;update_power();update_policy();}
         interval=pz98_interval(&preferences,ac,suspended,!IsIconic(window));
         if(interval && (DWORD)(now-last_frame)>=interval) { last_frame=now;++phase;if(!render_preview())failure("Preview rendering",GetLastError()); }

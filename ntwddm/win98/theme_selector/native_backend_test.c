@@ -206,7 +206,11 @@ static void locking_failures(void)
     reset();CHECK(shz_theme_native_open(&n,&error));f.wait=WAIT_TIMEOUT;
     CHECK(!shz_theme_native_snapshot(&n,&s,&r) && r.error==ERROR_TIMEOUT);
     CHECK(f.last_timeout==0);
-    CHECK(!f.reads && !f.writes && !f.sets && !f.releases);CHECK(shz_theme_native_close(&n));
+    CHECK(!f.reads && !f.writes && !f.sets && !f.releases);
+    f.wait=WAIT_OBJECT_0;
+    CHECK(shz_theme_native_snapshot(&n,&s,&r) && n.baseline_captured && !n.poisoned);
+    CHECK(!f.writes && !f.sets && !f.locked && f.last_timeout==0);
+    CHECK(shz_theme_native_close(&n));
     reset();CHECK(shz_theme_native_open(&n,&error));f.wait=WAIT_FAILED;
     CHECK(!shz_theme_native_restore(&n,&r) && r.error==5 && !f.reads && f.last_timeout==5000);CHECK(shz_theme_native_close(&n));
     reset();CHECK(shz_theme_native_open(&n,&error));f.wait=WAIT_ABANDONED;
