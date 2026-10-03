@@ -53,6 +53,26 @@ return `SHZ_NOT_FOUND`, distinct from an unsupported evaluator. Raw HID sensor
 values retain their usage identifiers; this component does not invent physical
 units from unknown descriptors.
 
+`firmware.h` supplies `shz_laptop_firmware_probe(read, context, rsdp_pa, out)`
+for a trusted native firmware owner. It resolves revision0 RSDT or revision2+
+XSDT/RSDT, validates the complete directory and calls the actual FADT/ECDT
+parsers on retained, checksummed snapshots. Revision1 is unsupported. FADT is
+required; absent ECDT succeeds with `has_ecdt=0`. Duplicate addresses and
+duplicate FADT/ECDT signatures, malformed checksums/lengths and overflowing
+physical ranges fail without changing any byte of `out`. A nonzero invalid
+XSDT never falls back to RSDT. Other valid table signatures may repeat.
+
+Discovery is bounded to128 root entries,4096-byte RSDP and FADT/ECDT snapshots,
+and1MiB per unrelated table. Unrelated tables and RSDP extensions use128-byte
+checksum chunks, so ordinary SSDTs larger than4096 bytes are supported. The4MiB
+aggregate read budget counts every byte requested from the reader, including
+header rereads and failed callbacks; an over-budget request is refused before
+the callback. Negative `SHZ_*` reader errors propagate; positive failures map
+to `SHZ_IO`. Exact-length zero-return reads must validate real ownership and
+mapping before and after copying, remain synchronous and bounded, and retain
+one stable firmware snapshot throughout discovery. This API does not acquire
+hardware resources, enumerate AML devices, route interrupts or enable power.
+
 Verification uses the actual production C, an asynchronous EC/I2C hardware
 model, the existing complete native AHCI/xHCI models, ownership revocation,
 timeout/recovery and malformed input cases:
