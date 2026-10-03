@@ -5,7 +5,10 @@ It does not replace Windows98 VMM, USER, GDI or Explorer. The account store
 is volatile kernel memory; it is not a persistent Windows98 login system.
 
 Registration uses a kernel-only first-enrollment grant or an authenticated
-high-integrity administrator. Passwords are8..128 UTF-8 bytes, with independently
+high-integrity administrator. First enrollment requires an administrator account;
+refusing an ordinary first account leaves the grant and authority unchanged.
+An elevated administrator can create ordinary accounts after enrollment.
+Passwords are8..128 UTF-8 bytes, with independently
 generated32-byte salts and PBKDF2-HMAC-SHA256 at600000 rounds. Five failed
 attempts lock the named account for30 seconds. The finite store holds16 users;
 usernames are case-insensitive ASCII letters, digits, underscore and hyphen.

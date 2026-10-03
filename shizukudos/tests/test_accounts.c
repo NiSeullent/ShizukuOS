@@ -19,6 +19,13 @@ int main(void) {
     assert(shz_pbkdf2("password",8,"salt",4,0,key));
     shz_accounts_init(&db,entropy,&seed);
     assert(shz_account_register(&db,&guest,0,"admin","correct horse",13,SHZ_ROLE_ADMIN)==SHZ_AUTH_DENIED);
+    {
+        shz_accounts before=db;
+        unsigned entropy_before=seed;
+        assert(shz_account_register(&db,&guest,1,"alice","alice pass",10,0)==SHZ_AUTH_DENIED);
+        assert(!memcmp(&db,&before,sizeof db));
+        assert(seed==entropy_before);
+    }
     assert(!shz_account_register(&db,&guest,1,"admin","correct horse",13,SHZ_ROLE_ADMIN));
     assert(shz_account_register(&db,&guest,1,"evil","correct horse",13,SHZ_ROLE_ADMIN)==SHZ_AUTH_DENIED);
     assert(shz_account_login(&db,"admin","wrong wrong",11,1,&admin)==SHZ_AUTH_DENIED);
