@@ -56,7 +56,7 @@ class Controls(unittest.TestCase):
                     nonce=bytes(range(32));original_boot=(os.pread(f.fileno(),512,0),os.pread(f.fileno(),512,16384))
                     for name,data in [('BASEOBS.EXE',b'MZ synthetic only'),('BASENONC.BIN',nonce),('BASEOBS.JSON',json.dumps(self.observed()).encode())]:
                         src=root/name;src.write_bytes(data)
-                        subprocess.run(['mcopy','-i','/proc/self/fd/%d@@16384'%f.fileno(),str(src),'::'+name],pass_fds=(f.fileno(),),env={**os.environ,'MTOOLSRC':'/dev/null'},check=True,capture_output=True)
+                        subprocess.run(['mcopy','-i','/proc/self/fd/%d@@16384'%f.fileno(),str(src),'::'+name],executable=str(Path('/usr/bin/mcopy').resolve()),pass_fds=(f.fileno(),),env={**os.environ,'MTOOLSRC':'/dev/null'},check=True,capture_output=True)
                     after=m.replacement.inventory(f.fileno(),g)
                     self.assertEqual(after['KEEP.TXT'],before['KEEP.TXT'])
                     self.assertEqual(original_boot,(os.pread(f.fileno(),512,0),os.pread(f.fileno(),512,16384)))

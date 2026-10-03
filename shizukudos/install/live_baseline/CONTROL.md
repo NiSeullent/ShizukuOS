@@ -8,7 +8,8 @@ exact source/request/tool/artifact pins and loan the one VM slot before executio
 
 A private `shizukuos.private-baseline-control.v1` request has exactly `source`,
 `observer`, `observer_receipt`, `qemu`, `mcopy` pins (absolute path/bytes/SHA256),
-`lock`, `output`, and integer `guest_seconds` 1..600. Source must be the independently
+The `mcopy` pin names the canonical regular multicall mtools executable; its
+argv0 is mcopy and no symlink is leased. `lock`, `output`, and integer `guest_seconds` 1..600. Source must be the independently
 reviewed powered-off owned0400 original2GiB image, not a report or caller assertion.
 The output must not exist; its owned parent is0700. Original paths and private
 image hashes stay outside public Git. Root independently checks the build receipt

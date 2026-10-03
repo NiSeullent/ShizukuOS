@@ -158,7 +158,7 @@ def run(request):
         for name,data in (('BASEOBS.EXE',pe),('BASENONC.BIN',nonce)):
             with (stage/name).open('xb') as f:need(f.write(data)==len(data),'complete staged input required')
             env={**os.environ,'MTOOLSRC':'/dev/null'}
-            subprocess.run([request['mcopy']['path'],'-i','/proc/self/fd/%d@@%d'%(clone_fd,g['start_lba']*512),str(stage/name),'::'+name],pass_fds=(clone_fd,),env=env,check=True,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,timeout=30)
+            subprocess.run(['mcopy','-i','/proc/self/fd/%d@@%d'%(clone_fd,g['start_lba']*512),str(stage/name),'::'+name],executable=request['mcopy']['path'],pass_fds=(clone_fd,),env=env,check=True,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,timeout=30)
             check()
         after=replacement.inventory(clone_fd,g,check)
         need(set(after)==set(before)|{'BASEOBS.EXE','BASENONC.BIN'} and all(after[k]==v for k,v in before.items()),'only appended payloads may change FAT inventory')
