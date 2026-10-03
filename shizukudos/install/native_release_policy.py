@@ -4,6 +4,8 @@
 Missing native anchors deliberately refuse issuance. Updates require independent
 actual build readback; neither a runtime request nor a receipt can extend these.
 """
+from contextlib import contextmanager
+
 INGEST_SHA = '31bdb8bb82e586af6aefc5d496a7c8f8cea36ff3ae35afc9cf628fd39a5e15c4'
 DOS_RECEIPT = (17294, '1205ca7575ce30e17a71f2f1c707a0c571cd09c6c60c77f1fd0e924c2fc03104')
 DOS_ARTIFACTS = {
@@ -40,3 +42,14 @@ def verify_private_source_custody(request, held):
     """
     del request, held
     raise ValueError('independent actual installed-source custody absent; admission refused')
+
+
+@contextmanager
+def hold_private_source_custody(request, held):
+    """Default refusal, with a build lifetime for a reviewed private owner.
+
+    An independently admitted private bootstrap may supply a managed live
+    verifier. Its keeper must finish and reap while this same input Union is
+    still open. A dict or saved receipt never supplies that managed lifetime.
+    """
+    yield verify_private_source_custody(request, held)

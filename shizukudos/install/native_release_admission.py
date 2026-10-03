@@ -7,7 +7,7 @@ Only kbuild's private installer profile consumes the generated record. All
 original producer inputs, saved manifest/SIM and generated C remain leased
 through compilation and final receipt validation. No large image is created.
 """
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 import hashlib
 import importlib.util
 import json
@@ -143,7 +143,9 @@ def admit_for_build(manifest_path, output, build_pins=()):
             'fresh private admission directory outside Git required')
     # A single Union avoids nested SIGIO handlers and maintains every input's
     # actual read lease until the compiler and receipt have finished.
-    with ingest.Union() as held:
+    # Managed private keepers close before their borrowed input descriptors,
+    # including a failed compiler/finalizer or an admission exception.
+    with ingest.Union() as held, ExitStack() as source_owners:
         source_files = [Path(__file__).resolve(), ROOT / 'native_release_policy.py',
                         ROOT / 'native_payload_ingest.py', ROOT / 'native_capacity_profile.py']
         for source in source_files:
@@ -158,7 +160,8 @@ def admit_for_build(manifest_path, output, build_pins=()):
         saved = held.json(mrow)
         request_pin = saved.get('source_request')
         request = held.json(request_pin)
-        source_custody = policy.verify_private_source_custody(request, held)
+        source_custody = source_owners.enter_context(
+            policy.hold_private_source_custody(request, held))
         require(type(source_custody) is dict and source_custody,
                 'independent installed-source custody did not provide typed evidence')
         anchored(request['dos_build_receipt'], policy.DOS_RECEIPT, 'original DOS receipt')
