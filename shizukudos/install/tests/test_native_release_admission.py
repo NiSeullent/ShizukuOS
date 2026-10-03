@@ -23,9 +23,10 @@ import native_release_admission as release
 
 class AdmissionTests(unittest.TestCase):
     def test_absent_independent_anchors_refuse_before_open(self):
-        with self.assertRaisesRegex(ValueError, 'anchors absent'):
-            with release.admit_for_build('/definitely/absent.json', '/definitely/out'):
-                self.fail('no authority exists')
+        with patch.object(release.policy, 'NATIVE_SOURCE_MAP_SHA', None):
+            with self.assertRaisesRegex(ValueError, 'anchors absent'):
+                with release.admit_for_build('/definitely/absent.json', '/definitely/out'):
+                    self.fail('no authority exists')
 
     def test_no_runtime_receipt_can_extend_policy(self):
         with self.assertRaisesRegex(ValueError, 'anchor differs'):
