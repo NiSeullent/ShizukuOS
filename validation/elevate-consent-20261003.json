@@ -1,0 +1,98 @@
+{
+  "base_commit": "8825950d9d3c19a83a4b23836a6418235ad12d57",
+  "source_sha256": {
+    "shizukudos/win64/apps/elevate/consent.c": "181b22a47e33ee67fdc2d8d6c9a4e5bb0fe5f37a476377efadd6f8e4d0883515",
+    "shizukudos/win64/apps/elevate/consent.h": "4c1c661c9747260707d9c9a20607967f277e95673df254a60a086c22349fc9e2",
+    "shizukudos/win64/apps/elevate/main.c": "9b205366f0e70f186fbc90cd1bd5b342329257f56becdee5648d547e7835970c",
+    "shizukudos/win64/apps/elevate/prompt.c": "7a5a29a5707bc13f3de64bbe4bd6b2477fb05ae8086be07694b4e062bb542618",
+    "shizukudos/win64/apps/elevate/prompt.h": "12a3ff7612e077cb84ea560538207a517c2948c884d7e60194b1f350767187af",
+    "shizukudos/win64/apps/elevate/secret.c": "db370bf0922d1edffc84e399894b35d87c9d38f2f6b441833c887dfcef61b0a7",
+    "shizukudos/win64/apps/elevate/secret.h": "271965aa7df628d8a6423cf9ade6f1255b171e51d63a9a1436142493744bbfdd",
+    "shizukudos/tests/host/elevate_consent/nt.h": "e9418d1ae5cdcca215b20c12e9f8a6d5dff74394fffa41eaf79ac0d0b6d2c32b",
+    "shizukudos/tests/host/elevate_consent/shzcrt.h": "399d4f710db6ab69ffaa0ba68ab372c293af7affef96b2447a8882c01616755b",
+    "shizukudos/tests/host/elevate_consent/windows.h": "4d471acc888e877f0bc540a3b8ed497ed471b3fb756191a08b5acc7480ef64df",
+    "shizukudos/tests/test_elevate_consent.c": "73ad56c7bfc9704b6b54a43181577a14aab07fb7e1581659c143d1e4cb7a396f",
+    "shizukudos/tests/run_elevate_consent_host.py": "51b08dbb938bb10e09e375f1c8d38a880bef62ce81e5bacec53ae8d1e4dfe305",
+    "shizukudos/abi/shz_auth.h": "6270cae24fb2af0a6196be75a418190dc15fc5a501e9e8c79dd7b3865f21d255",
+    "shizukudos/accounts/account.h": "b92df63f9b3d9ccc00fd0e8efebe5a2eb6de65144e8075ff875e0b07ab5e76b1"
+  },
+  "baseline_source_sha256": {
+    "shizukudos/win64/apps/elevate/main.c": "162b5553e0c8633f7896d50a7aa6773ed40d30a4cc8d75b33cbf748f11b61e5b",
+    "shizukudos/win64/apps/elevate/prompt.c": "9a414e43faac1b0ff53dd83b53009c4b7794e5e5bb26cf6a76f96aa109068bab",
+    "shizukudos/win64/apps/elevate/prompt.h": "12a3ff7612e077cb84ea560538207a517c2948c884d7e60194b1f350767187af",
+    "shizukudos/win64/apps/elevate/secret.h": "271965aa7df628d8a6423cf9ade6f1255b171e51d63a9a1436142493744bbfdd",
+    "shizukudos/abi/shz_auth.h": "6270cae24fb2af0a6196be75a418190dc15fc5a501e9e8c79dd7b3865f21d255",
+    "shizukudos/accounts/account.h": "b92df63f9b3d9ccc00fd0e8efebe5a2eb6de65144e8075ff875e0b07ab5e76b1"
+  },
+  "source_stable": true,
+  "baseline_stable": true,
+  "controls": [
+    {
+      "cohort": "baseline",
+      "compiler": "gcc",
+      "compile_exit": 0,
+      "run_exit": 2,
+      "controls": 154,
+      "failed_controls": 34,
+      "binary_sha256": "d57af92151f9f25f6e953eaf6570fae960e7886c0a2ce36e269d67d14d521275",
+      "pass": true
+    },
+    {
+      "cohort": "baseline",
+      "compiler": "clang",
+      "compile_exit": 0,
+      "run_exit": 2,
+      "controls": 154,
+      "failed_controls": 34,
+      "binary_sha256": "b5d0631191e3bf917198f4183ea4aa17e9d22fde90396b286a579d8a1fec77cf",
+      "pass": true
+    },
+    {
+      "cohort": "fixed",
+      "compiler": "gcc",
+      "compile_exit": 0,
+      "run_exit": 0,
+      "controls": 154,
+      "failed_controls": 0,
+      "binary_sha256": "a3733ed9e9197e5300133d20cdee507b1ae8c21d50417c07ee9396270f094045",
+      "pass": true
+    },
+    {
+      "cohort": "fixed",
+      "compiler": "clang",
+      "compile_exit": 0,
+      "run_exit": 0,
+      "controls": 154,
+      "failed_controls": 0,
+      "binary_sha256": "b4d3bcf50d1712e89dc96a617c95b071160dc51ad8a3658e3caae4dab6b33d39",
+      "pass": true
+    }
+  ],
+  "existing_secret_controls": [
+    {
+      "compiler": "gcc",
+      "test": "test_auth_secret",
+      "exit": 0,
+      "sha256": "682903cd1e07800de5c93ba9c070197de5c10d6384cf07564a60f5dbbec8d6b0"
+    },
+    {
+      "compiler": "clang",
+      "test": "test_auth_secret",
+      "exit": 0,
+      "sha256": "6168a9cd5ec53f747e160aeb2e197ea0c24b0860cb51be6e4293ae1fb0ff9e85"
+    }
+  ],
+  "pe64": {
+    "exe_sha256": "3bc4af43eca75473ba888e9053c4d40a31e6a0c0737a1beb11e3eee1c822c095",
+    "import_count": 33,
+    "missing_import_providers": []
+  },
+  "scope": "literal production main/prompt/consent/secret C bodies; modeled USER/GDI/event and ASCII conversion adapters; IPC always ACCESS_DENIED; no credential verification, native Win98 GUI or VM execution",
+  "pe64_scope": "real PE64 companion compile/import audit; GUI/native Windows98 not run",
+  "unperformed": [
+    "Native Windows98 UI/VM execution",
+    "secure credential desktop qualification",
+    "credential validation by host IPC adapter",
+    "backend password lifetime edits (reserved owner seam)"
+  ]
+}
