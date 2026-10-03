@@ -16,6 +16,77 @@ class Controls(unittest.TestCase):
             with m.replacement.leased_inputs([self.pin]) as held:self.assertTrue(client.match_held_source(held[self.pin['path']]))
             client.finish();self.assertEqual(client.child.returncode,0)
             with self.assertRaises(ValueError):client.query()
+    def test_finish_reads_queued_response_after_actual_clean_service_exit(self):
+        # Actual source-only exec child and AF_UNIX response; only the parent's
+        # receive timing is controlled. Its FINISH packet is queued before exit.
+        with self.client() as client:
+            client.wait_ready();receive=m.receive
+            def after_exit(peer,deadline,guard):
+                self.assertEqual(client.child.wait(timeout=5),0)
+                return receive(peer,deadline,guard)
+            with patch.object(m,'receive',side_effect=after_exit):client.finish()
+            self.assertEqual(client.child.returncode,0)
+            self.assertFalse(client.active)
+            with self.assertRaises(ValueError):client.query()
+    def test_finish_refuses_actual_nonzero_service_exit(self):
+        # Corrupt only the outgoing FINISH token. The exact exec child actually
+        # refuses it and exits nonzero before the parent reads the peer socket.
+        with self.client() as client:
+            client.wait_ready();send=m.send;receive=m.receive
+            def bad_token(peer,row):send(peer,{**row,'token':'00'*32})
+            def after_exit(peer,deadline,guard):
+                self.assertNotEqual(client.child.wait(timeout=5),0)
+                return receive(peer,deadline,guard)
+            with patch.object(m,'send',side_effect=bad_token),patch.object(m,'receive',side_effect=after_exit):
+                with self.assertRaisesRegex(ValueError,'actual owned service final cleanup failed'):client.finish()
+            self.assertNotEqual(client.child.returncode,0)
+    def test_finish_refuses_tampered_queued_response(self):
+        # Read the actual source-only child's complete response after clean
+        # exit, then model in-memory tampering of every bound response field.
+        for field in ('token','sequence','challenge','state','summary'):
+            message='actual source hold changed' if field in ('state','summary') else 'live challenge response differs'
+            with self.subTest(field=field),m.Client(self.pin,self.root/('service-'+field)) as client:
+                client.wait_ready();receive=m.receive
+                def tampered(peer,deadline,guard):
+                    self.assertEqual(client.child.wait(timeout=5),0)
+                    row=receive(peer,deadline,guard)
+                    if field in ('token','challenge'):row[field]='00'*32
+                    elif field=='sequence':row[field]+=1
+                    elif field=='state':row[field]='CHECK'
+                    else:row[field]={**row[field],'source_approval':True}
+                    return row
+                with patch.object(m,'receive',side_effect=tampered):
+                    with self.assertRaisesRegex(ValueError,message):client.finish()
+                self.assertEqual(client.child.returncode,0)
+                self.assertFalse(client.summary['source_approval'])
+    def test_check_refuses_queued_response_after_actual_service_death(self):
+        # An actual CHECK response is readable before killing/reaping the
+        # service. Only FINISH may consume a response after clean keeper exit.
+        with self.client() as client:
+            client.wait_ready();receive=m.receive
+            def after_death(peer,deadline,guard):
+                self.assertTrue(m.select.select([peer],[],[],5)[0])
+                os.kill(client.child.pid,signal.SIGKILL);client.child.wait(timeout=5)
+                return receive(peer,deadline,guard)
+            with patch.object(m,'receive',side_effect=after_death):
+                with self.assertRaisesRegex(ValueError,'actual owned service exited'):client.query()
+            self.assertEqual(client.child.returncode,-signal.SIGKILL)
+    def test_finish_retains_launcher_lease_refusal_after_clean_service_exit(self):
+        # Parent-owned configuration lease survives the actual keeper exit.
+        # A real nonblocking conflicting writer revokes FINISH and must also
+        # fail the mandatory parent lease teardown check.
+        with self.assertRaisesRegex((ValueError,RuntimeError),'lease'):
+            with self.client() as client:
+                client.wait_ready();receive=m.receive
+                def after_writer(peer,deadline,guard):
+                    self.assertEqual(client.child.wait(timeout=5),0)
+                    writer=subprocess.run(['/usr/bin/python3','-I','-c',
+                        'import os,sys;os.open(sys.argv[1],os.O_WRONLY|os.O_NONBLOCK)',
+                        str(client.output/'configuration.json')],capture_output=True,timeout=5)
+                    self.assertNotEqual(writer.returncode,0)
+                    return receive(peer,deadline,guard)
+                with patch.object(m,'receive',side_effect=after_writer):
+                    with self.assertRaisesRegex((ValueError,RuntimeError),'lease'):client.finish()
     def test_saved_response_and_serialization_cannot_authorize(self):
         with self.client() as client:
             client.wait_ready();saved=client.query();self.assertFalse(saved['summary']['source_approval'])
