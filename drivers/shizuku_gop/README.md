@@ -41,3 +41,16 @@ The package includes complete frozen compiled source inputs, source adaptations
 and copyright/license notices. Windows DIBENG.DLL and other Microsoft operating
 system files must come from the user's own Windows installation; none are
 included. See NOTICE.txt and the build receipt for source lineage and hashes.
+
+
+The additive read-only PM16 `OP_SHZGOP_CURRENT_BOOT` service (0x4f10, native
+VxD device 0x4353) exposes a bounded 288-byte current-boot observation. It
+requires this backend to be initialized and rechecks the actual physical
+locator/descriptor, native HDA and PCI identity/BAR under the VMM critical
+section. It restores CF8 and never switches a mode or loads a driver. The
+snapshot includes an implementation identity derived from the actual public
+backend/parser/query contract/build sources. Consumers must compare it with
+the actual producer receipt, validate a live unique F-segment locator and
+acquire two stable current queries; a saved file or INI flag cannot admit it.
+The existing descriptor ABI has no Supervisor epoch, so this query does not
+assert guardian/Supervisor epoch admission. Native execution remains pending.

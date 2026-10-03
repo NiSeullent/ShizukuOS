@@ -12,9 +12,14 @@
 #include "wram.h"
 #include "async.h"
 #include "gop_contract.h"
+#include "gop_live_contract.h"
+#include "gop_provider_identity.h"
+typedef char shzgop_hda_layout[(sizeof(FBHDA_t)==SHZGOP_HDA_BYTES && offsetof(FBHDA_t,vxdname)==64)?1:-1];
 extern FBHDA_t *hda;
 extern LONG fb_lock_cnt;
 static shzgop_mode native_mode;
+static unsigned char *native_rom=NULL,*native_descriptor=NULL;
+static DWORD native_descriptor_address=0;
 static blit_t frame;
 static BOOL ready=FALSE, hires=FALSE;
 static BOOL timer_running=FALSE;
@@ -85,11 +90,71 @@ BOOL VESA_init_hw(void) {
     frame.dst_pitch=native_mode.pitch; frame.dst_mode=MODE_32; frame.dst_scans=1;
     wram->regs.s.width=native_mode.width; wram->regs.s.height=native_mode.height;
     wram->regs.s.pitch=native_mode.pitch; wram->regs.s.mode=MODE_32;
+    native_rom=rom;native_descriptor=descriptor;native_descriptor_address=address;
     ready=TRUE;
     timer_running=async_blit_init(&frame,draw);
     dbg_printf("SHZGOP READY base=%lX aperture=%ld width=%ld height=%ld pitch=%ld\n",
        native_mode.base,native_mode.aperture,native_mode.width,native_mode.height,native_mode.pitch);
     return TRUE;
+}
+/* This query only reads current native state. It never sets a mode, loads a
+ * driver, allocates WRAM, changes PCI ownership, or writes the framebuffer. */
+static unsigned char current_probe[SHZGOP_PROBE_BYTES];
+static void probe_u32(unsigned char *p,DWORD v) {
+    p[0]=(BYTE)v;p[1]=(BYTE)(v>>8);p[2]=(BYTE)(v>>16);p[3]=(BYTE)(v>>24);
+}
+static DWORD current_boot_probe_inner(void) {
+    unsigned char *rom,*descriptor;shzgop_locator locator,again;
+    shzgop_mode observed;DWORD i,saved,port,identity,bar;BOOL matching=FALSE;
+    memset(current_probe,0,sizeof(current_probe));
+    if(!ready || !hda) return 0;
+    /* Re-read the actual physical mappings retained by successful native init.
+       No new mapping allocation occurs on each observation. */
+    rom=native_rom;descriptor=native_descriptor;
+    if(!rom || !descriptor || (DWORD)rom==0xffffffffUL || (DWORD)descriptor==0xffffffffUL ||
+       !shzgop_locator_scan(rom,SHZGOP_LOCATOR_REGION_BYTES,&locator) ||
+       locator.descriptor_address!=native_descriptor_address) return 0;
+    memcpy(current_probe+64,rom+locator.address-SHZGOP_LOCATOR_BASE,48);
+    memcpy(current_probe+112,descriptor,96);memcpy(current_probe+208,hda,80);
+    memcpy(current_probe,"SHZGPB1",8);current_probe[8]=1;
+    probe_u32(current_probe+12,SHZGOP_PROBE_BYTES);
+    memcpy(current_probe+16,shzgop_provider_identity,32);
+    probe_u32(current_probe+48,locator.address);
+    probe_u32(current_probe+52,locator.descriptor_address);
+    probe_u32(current_probe+56,locator.descriptor_checksum);
+    if(!shzgop_probe_admit(current_probe,sizeof(current_probe),shzgop_provider_identity,&observed) ||
+       observed.base!=native_mode.base || observed.aperture!=native_mode.aperture ||
+       observed.visible!=native_mode.visible || observed.width!=native_mode.width ||
+       observed.height!=native_mode.height || observed.pitch!=native_mode.pitch ||
+       observed.bus!=native_mode.bus || observed.devfn!=native_mode.devfn ||
+       observed.vendor!=native_mode.vendor || observed.device!=native_mode.device) return 0;
+    port=0x80000000UL|((DWORD)observed.bus<<16)|((DWORD)observed.devfn<<8);
+    saved=cfg_in(0xcf8);cfg_out(0xcf8,port);identity=cfg_in(0xcfc);
+    if(identity==((DWORD)observed.vendor|((DWORD)observed.device<<16))) {
+        for(i=0;i<6;i++) {
+            cfg_out(0xcf8,port+0x10+i*4);bar=cfg_in(0xcfc);
+            if(!(bar&1u) && bar && (bar&~15UL)==observed.base) {
+                if((bar&6u)==0) matching=TRUE;
+                else if((bar&6u)==4 && i<5) {cfg_out(0xcf8,port+0x14+i*4);
+                    if(!cfg_in(0xcfc)) matching=TRUE;}
+            }
+            if(!(bar&1u) && (bar&6u)==4) i++;
+        }
+    }
+    cfg_out(0xcf8,saved);
+    if(!matching || !ready || !shzgop_locator_scan(rom,SHZGOP_LOCATOR_REGION_BYTES,&again) ||
+       again.address!=locator.address || again.descriptor_address!=locator.descriptor_address ||
+       again.descriptor_checksum!=locator.descriptor_checksum ||
+       memcmp(current_probe+64,rom+locator.address-SHZGOP_LOCATOR_BASE,48) ||
+       memcmp(current_probe+112,descriptor,96) || memcmp(current_probe+208,hda,80)) return 0;
+    return (DWORD)current_probe;
+}
+DWORD SHZGOP_current_boot_probe(void) {
+    DWORD result;
+    /* Keep CF8 selection and the captured native state together. Restore the
+       prior selector before leaving the same VMM critical section. */
+    critical_section_enter();result=current_boot_probe_inner();critical_section_leave();
+    return result;
 }
 BOOL VESA_valid(void) { return ready; }
 BOOL VESA_validmode(DWORD w,DWORD h,DWORD bpp) {
