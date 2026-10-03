@@ -68,6 +68,10 @@ int main(void){
     assert(call(&caller,SHZ_AUTH_REGISTER,&req,&out)==STATUS_ACCESS_DENIED);
     assert(!shz_auth_bootstrap_prepare(&broker,0));
     assert(!shz_auth_process_access(&caller,&broker));
+    req.roles=0;
+    assert(call(&broker,SHZ_AUTH_REGISTER,&req,&out)==STATUS_ACCESS_DENIED);
+    assert(!call(&broker,SHZ_AUTH_QUERY,0,&out));assert(!out.accounts);
+    req.roles=SHZ_ROLE_ADMIN;
     assert(!call(&broker,SHZ_AUTH_REGISTER,&req,&out));
     assert(call(&broker,SHZ_AUTH_REGISTER,&req,&out)==STATUS_ACCESS_DENIED);
     assert(!call(&caller,SHZ_AUTH_QUERY,0,&out));assert(out.accounts==1&&out.flags==SHZ_AUTH_VOLATILE&&!out.subject.uid);

@@ -11,6 +11,9 @@ int shz_account_register(shz_accounts *d,const shz_subject *who,int bootstrap,co
  char n[32]; shz_account a;unsigned i;
  if(!d||!who||!pw||pn<8||pn>128||roles&~SHZ_ROLE_ADMIN||name_copy(n,name))return SHZ_AUTH_INVALID;
  if(!((!d->count&&bootstrap)||(d->count&&who->uid&&who->roles==SHZ_ROLE_ADMIN&&who->integrity>=0x3000&&!who->flags)))return SHZ_AUTH_DENIED;
+ /* A first ordinary account would consume enrollment with no administrator
+  * able to authorize later registrations. Refuse before entropy or mutation. */
+ if(!d->count&&roles!=SHZ_ROLE_ADMIN)return SHZ_AUTH_DENIED;
  if(d->count>=SHZ_ACCOUNT_LIMIT)return SHZ_AUTH_FULL;
  for(i=0;i<d->count;i++)if(!strcmp(n,d->accounts[i].name))return SHZ_AUTH_DENIED;
  memset(&a,0,sizeof a);memcpy(a.name,n,sizeof n);a.uid=1000+d->count;a.roles=roles;
