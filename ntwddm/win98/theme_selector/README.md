@@ -86,7 +86,10 @@ supported-platform table.
 ## Transaction and failure behavior
 
 A named Win98 mutex without a `Global\` prefix serializes this component's
-instances, with a 5-second acquisition limit. An abandoned mutex is refused.
+instances. UI reads/selections fail promptly if the mutex is busy; a windowless
+startup restore may wait up to five seconds. UI threads never wait on the mutex
+while a peer may be broadcasting to their windows. An abandoned mutex is refused
+and disables that instance until it closes.
 Synchronous `WM_SYSCOLORCHANGE` handling posts an asynchronous status refresh,
 avoiding a second selector waiting for that mutex during `SetSysColors`' broadcast.
 
@@ -108,15 +111,29 @@ registry editor are outside this component's mutex.
 ## Source, build and acceptance
 
 `selector_core.c` is the shared production codec/transaction; its callbacks are
-real OS side-effect boundaries. `selector_win98.c` supplies native ANSI USER32,
-ADVAPI32 and KERNEL32 calls and a freestanding `mainCRTStartup` entry. Link the
+real OS side-effect boundaries. `native_backend.c` supplies native ANSI USER32,
+ADVAPI32 and KERNEL32 calls, complete registry reads, platform/path admission,
+baseline capture and mutex coordination. Both `selector_win98.c` and installed
+personalization `SHZPERS.EXE` use that same backend. The latter has its own exact
+`/restore` entry, so selecting its theme needs no separate installed executable.
+The last successful explicit selection records the selecting executable's
+actual path in the shared Run value.
+
+A failed mutex release also disables that instance and reports failure even if
+changes were already made; mutation flags remain available and the UI does not
+call that situation a pre-write refusal. `selector_win98.c` retains its
+freestanding `mainCRTStartup` entry. Link the
 existing `platform/freestanding/memory.c` for compiler-emitted memory operations;
 no native CRT, heap allocation or stdio is required. `selector_core_test.c` uses
 host stdio only and never touches a host registry or system palette.
 
-The integration owner owns `build.py` and its resource admission. Source tests
-were written before the core implementation, but this source-only task did not
-compile or run them; there is **no RED/GREEN, native PE or runtime PASS claim**.
+Run `python3 -B ntwddm/win98/theme_selector/build.py` from the repository root
+with installed Clang, i686 MinGW and pefile. Its existing 20 GiB free-space
+reserve and 8 MiB owned output bound remain in effect. The build runs normal
+and ASan/UBSan tests for the real shared transaction and native backend,
+then compiles the actual i486 Win98 GUI executable and checks its OEM named
+imports and relocations. A source-bound receipt records the observed scope;
+none of these host or compiler results proves native Windows execution.
 Tests cover the real shared codec, unsafe commands and full Run boundary,
 unreadable/invalid snapshots with no writes, baseline retention, every mutation
 phase including partially effective failures, previous absent/present registry
