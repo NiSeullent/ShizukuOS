@@ -36,6 +36,17 @@ remains `ntwrapper/vxd/build/` for deliberately requested normal rebuilds.
 Commands do not install or load
 a driver, operate hardware, download dependencies, or alter a guest.
 
+The native link includes the project's original
+[`platform/freestanding/memory.c`](../../platform/freestanding/memory.c), compiled
+with the same i486 freestanding flags as the bridge. A compiler can lower an
+aggregate initialization or copy to `memset`/`memcpy` even with `-fno-builtin`;
+the helper object resolves these calls without a CRT or an external libc.
+The build manifest pins both `memory.c` and its `memory.h`. The existing host
+receipt checks all manifest sources before and after testing, and the Core
+clock component runner already pins these tracked files in its source closure.
+The independent helper regression is `python3 platform/freestanding/test.py`;
+its host and object checks do not establish native VMM execution.
+
 The build produces:
 
 | File | Purpose |

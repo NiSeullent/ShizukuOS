@@ -1,6 +1,8 @@
 """Exercise the actual receipt runner with private inputs and a modeled child.
 
-The child test-process boundary is substituted. A separate regression injects
+The compiler dependency and child test-process boundaries are substituted
+separately; real dependency discovery is covered by SourceStabilityTests.
+A separate regression injects
 a private manifest rewrite immediately after the runner reads its old bytes.
 Parsing, hashing, validation and receipt decisions execute the production runner.
 No compiler, VxD, Windows guest or real project header is modified or executed.
@@ -22,7 +24,9 @@ from unittest import mock
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 EXTERNAL_INPUTS = ("shizukudos/abi/shz_abi.h", "shizukudos/abi/shz_ipc.h",
-                   "shizukudos/abi/future_dependency.h")
+                   "shizukudos/abi/future_dependency.h",
+                   "shizukudos/boot_profile/storage/provenance.h",
+                   "platform/freestanding/memory.c", "platform/freestanding/memory.h")
 
 
 class ReceiptInputTests(unittest.TestCase):
@@ -50,6 +54,8 @@ class ReceiptInputTests(unittest.TestCase):
             for name in ("NTWRAP9X.VXD", "NTWRAP9X.elf", "NTWQUERY.EXE"):
                 (build / name).write_bytes(("private fixture " + name).encode())
             manifest = {"sources": hashes,
+                        "compiler_flags": ["--target=i386-unknown-none-elf", "-march=i486", "-std=c11",
+                                           "-ffreestanding", "-mno-sse", "-mno-mmx", "-msoft-float"],
                         "sha256": hashlib.sha256((build / "NTWRAP9X.VXD").read_bytes()).hexdigest(),
                         "probe": {"sha256": hashlib.sha256((build / "NTWQUERY.EXE").read_bytes()).hexdigest()}}
             (build / "manifest.json").write_text(json.dumps(manifest))
@@ -59,6 +65,7 @@ class ReceiptInputTests(unittest.TestCase):
             if stale:
                 (root / changed).write_bytes(b"changed before test admission\n")
             self.child_calls = 0
+            self.discovery_calls = 0
             self.manifest_changed = False
             manifest_path = build / "manifest.json"
             original_read_text, original_read_bytes = Path.read_text, Path.read_bytes
@@ -79,8 +86,16 @@ class ReceiptInputTests(unittest.TestCase):
             def read_bytes(path, *args, **kwargs):
                 return after_manifest_read(path, original_read_bytes(path, *args, **kwargs))
 
+            def discovery_boundary(actual_manifest):
+                self.discovery_calls += 1
+                self.assertEqual(actual_manifest["sources"], hashes)
+                self.assertEqual(actual_manifest["compiler_flags"], manifest["compiler_flags"])
+                return {"modeled_fixture_inputs": {root / name for name in sources}}, []
+
             def child_boundary(command, **kwargs):
                 del kwargs
+                self.assertEqual(command, [sys.executable, "-B", "-m", "unittest", "discover",
+                                           "-s", str(here / "tests"), "-v"])
                 self.child_calls += 1
                 if changed and not stale:
                     path = root / changed
@@ -91,7 +106,8 @@ class ReceiptInputTests(unittest.TestCase):
                 return subprocess.CompletedProcess(command, child_status,
                     "MODELED child boundary; no compiler or guest executed\n", "")
 
-            with mock.patch.object(runner.subprocess, "run", child_boundary), \
+            with mock.patch.object(runner, "dependency_closure", discovery_boundary), \
+                 mock.patch.object(runner.subprocess, "run", child_boundary), \
                  mock.patch.object(Path, "read_text", read_text), \
                  mock.patch.object(Path, "read_bytes", read_bytes), \
                  mock.patch.object(sys, "argv", [str(runner_path), "--out", str(build)]), \
@@ -108,6 +124,8 @@ class ReceiptInputTests(unittest.TestCase):
     def test_unchanged_inputs_preserve_success(self):
         status, report, _ = self.run_fixture()
         self.assertEqual(status, 0)
+        self.assertEqual(self.discovery_calls, 1)
+        self.assertEqual(self.child_calls, 1)
         self.assertTrue(report["passed"])
         self.assertTrue(report["inputs_unchanged_during_test"])
         self.assertFalse(report["guest_loaded"])
@@ -142,12 +160,16 @@ class ReceiptInputTests(unittest.TestCase):
         self.assertIsInstance(status, str)
         self.assertIn("Build inputs changed", status)
         self.assertIsNone(report)
+        self.assertEqual(self.discovery_calls, 0)
+        self.assertEqual(self.child_calls, 0)
 
     def test_child_failure_stays_failed_with_unchanged_inputs(self):
         status, report, _ = self.run_fixture(child_status=1)
         self.assertEqual(status, 1)
         self.assertFalse(report["passed"])
         self.assertTrue(report["inputs_unchanged_during_test"])
+        self.assertEqual(self.discovery_calls, 1)
+        self.assertEqual(self.child_calls, 1)
 
     def test_manifest_parse_capture_drift_is_refused_before_child(self):
         status, report, _ = self.run_fixture(manifest_drift=True)
@@ -155,6 +177,7 @@ class ReceiptInputTests(unittest.TestCase):
         self.assertIsInstance(status, str)
         self.assertIn("Build manifest changed", status)
         self.assertIsNone(report)
+        self.assertEqual(self.discovery_calls, 0)
         self.assertEqual(self.child_calls, 0)
 
 

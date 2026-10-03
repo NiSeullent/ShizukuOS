@@ -33,6 +33,8 @@ def main():
                   HERE/'link.ld',HERE/'le.py',HERE/'inspect_le.py',HERE/'build.py',HERE/'query_probe.c',
                   ROOT/'ntwin32/pma/client.c',ROOT/'ntwin32/pma/client.h',ROOT/'ntwin32/pma/probe.c',
                   HERE.parent/'core.c',HERE.parent/'include/ntwrapper.h',
+                  ROOT/'platform/freestanding/memory.c',ROOT/'platform/freestanding/memory.h',
+                  ROOT/'shizukudos/boot_profile/storage/provenance.h',
                   ROOT/'shizukudos/abi/shz_abi.h',ROOT/'shizukudos/abi/shz_clock.h',ROOT/'shizukudos/abi/shz_ipc.h',ROOT/'shizukudos/abi/shz_vmm_pma.h')
     source_hashes={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in source_paths}
     compiler = os.environ.get('CLANG', 'clang')
@@ -47,10 +49,13 @@ def main():
               '-Wall', '-Wextra', '-Werror', '-Wpedantic', '-Wconversion', '-Wshadow']
     for source in ('control', 'vmm_callbacks'):
         run(['nasm', '-f', 'elf32', HERE/(source+'.asm'), '-o', BUILD/(source+'.o')])
-    for source, name in ((HERE/'bridge.c','bridge'), (HERE/'native.c','native'), (HERE/'pma_endpoint.c','pma_endpoint'), (HERE.parent/'core.c','core')):
+    # Freestanding aggregate lowering can still emit memory calls. Resolve
+    # those with the project's original byte helpers, using the same ABI.
+    for source, name in ((HERE/'bridge.c','bridge'), (HERE/'native.c','native'), (HERE/'pma_endpoint.c','pma_endpoint'),
+                         (HERE.parent/'core.c','core'), (ROOT/'platform/freestanding/memory.c','memory')):
         run([compiler, *common, '-c', source, '-o', BUILD/(name+'.o')])
     run(['ld', '-m', 'elf_i386', '-T', HERE/'link.ld', '--emit-relocs', '--no-undefined',
-         '-o', BUILD/'NTWRAP9X.elf', *[BUILD/(n+'.o') for n in ('control','vmm_callbacks','bridge','native','pma_endpoint','core')]])
+         '-o', BUILD/'NTWRAP9X.elf', *[BUILD/(n+'.o') for n in ('control','vmm_callbacks','bridge','native','pma_endpoint','core','memory')]])
     binary, info = package((BUILD/'NTWRAP9X.elf').read_bytes())
     (BUILD/'NTWRAP9X.VXD').write_bytes(binary)
     run([mingw, '-std=c11', '-Os', '-Wall', '-Wextra', '-Werror', '-march=i486',

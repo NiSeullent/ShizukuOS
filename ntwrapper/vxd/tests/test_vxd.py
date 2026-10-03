@@ -43,6 +43,13 @@ class SourceStabilityTests(unittest.TestCase):
                         ignore=shutil.ignore_patterns('build','__pycache__'))
         shutil.copytree(HERE.parents[1]/'shizukudos/pma_bridge',root/'shizukudos/pma_bridge',
                         ignore=shutil.ignore_patterns('build','__pycache__'))
+        provenance=root/'shizukudos/boot_profile/storage/provenance.h'
+        provenance.parent.mkdir(parents=True)
+        shutil.copy2(HERE.parents[1]/'shizukudos/boot_profile/storage/provenance.h',provenance)
+        support=root/'platform/freestanding'
+        support.mkdir(parents=True)
+        for name in ('memory.c','memory.h'):
+            shutil.copy2(HERE.parents[1]/'platform/freestanding'/name,support/name)
         abi=root/'shizukudos/abi'
         shutil.copytree(HERE.parents[1]/'shizukudos/abi',abi,
                         ignore=shutil.ignore_patterns('build','__pycache__'))
@@ -82,7 +89,8 @@ class SourceStabilityTests(unittest.TestCase):
         return result,json.loads((out/'host-tests.json').read_text())
 
     def test_receipt_external_header_control_and_persistent_mutations(self):
-        for changed in (None,'shizukudos/abi/shz_ipc.h','shizukudos/abi/shz_abi.h'):
+        for changed in (None,'shizukudos/abi/shz_ipc.h','shizukudos/abi/shz_abi.h',
+                        'shizukudos/boot_profile/storage/provenance.h','platform/freestanding/memory.h'):
             with self.subTest(changed=changed),tempfile.TemporaryDirectory(prefix='ntwv receipt ') as folder:
                 root=Path(folder)
                 vxd,out=self.prepare_fixture(root,changed)
