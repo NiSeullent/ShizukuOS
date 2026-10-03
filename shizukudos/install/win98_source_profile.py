@@ -110,6 +110,27 @@ def locale_lines(config, auto, windows, files):
     return country,nls
 
 
+def biling_lines(config, windows, files):
+    """Retain an observed locale driver, never invent one from a language label."""
+    physical=dos_lines(config)
+    active=[v.strip() for v in physical if v.strip() and not re.match(r'REM\b|;',v.strip(),re.I)]
+    selected=[]
+    for line in active:
+        if 'BILING' not in line.upper():
+            continue
+        match=re.fullmatch(r'(DEVICE|DEVICEHIGH)\s*=\s*([^\s]+)',line,re.I)
+        need(match and match[2].upper()=='C:\\'+windows+'\\BILING.SYS',
+             'unambiguous observed BILING driver path without arguments required')
+        require_file(files,windows+'/BILING.SYS')
+        selected.append(line)
+    need(len(selected)<=1,'duplicate observed BILING driver refused')
+    if selected:
+        need(all(len(v)<=250 for v in physical),'observed CONFIG line exceeds supported FreeDOS physical-line bound')
+        need(not any(v.startswith('[') or re.match(r'(?:INCLUDE|MENUITEM|MENUDEFAULT|SUBMENU)\b',v,re.I) for v in active),
+             'conditional CONFIG BILING selection is not supported')
+    return selected
+
+
 def xms_sources(receipt, root, file_pin):
     need(receipt.get('schema')=='shizukudos-cb43-himemx-source-build-v1' and
          file_pin['bytes']==6100 and file_pin['sha256']==XMS_SHA,'known normal source-built HIMEMX required')
@@ -166,9 +187,15 @@ def generate(request_path, request_sha, out, capture_budget, *, large_output_roo
     replacement.capacity(out.parent,4<<20,capture_budget)
     request_pin=replacement.recorded_pin(request_path,request_sha)
     request=read_json(request_pin)
-    need(isinstance(request,dict) and set(request)=={'schema','replacement_profile','drive','windows_directory','boot_policy','xms'} and
+    need(isinstance(request,dict) and set(request) in ({'schema','replacement_profile','drive','windows_directory','boot_policy','xms'},
+                         {'schema','replacement_profile','drive','windows_directory','boot_policy','xms','initial_locale'}) and
          request['schema']=='shizukuos.win98-source-profile-request.v1','exact installed-source request required')
     need(request['drive']=='C' and request['boot_policy']=='shz.foundation=win98','C: native Win98 foundation policy required')
+    initial_locale=request.get('initial_locale')
+    if 'initial_locale' in request:
+        need(isinstance(initial_locale,dict) and set(initial_locale)=={'country','codepage'} and
+             type(initial_locale['country']) is int and type(initial_locale['codepage']) is int and
+             initial_locale=={'country':82,'codepage':949},'only explicit resident country82/codepage949 configuration is supported')
     windows=request['windows_directory']
     need(isinstance(windows,str) and re.fullmatch('[A-Z0-9_-]{1,8}',windows),'one explicit uppercase Windows short directory required')
     need(windows not in {'CON','PRN','AUX','NUL',*[v+str(n) for v in ('COM','LPT') for n in range(1,10)]},
@@ -215,10 +242,14 @@ def generate(request_path, request_sha, out, capture_budget, *, large_output_roo
         installed_paths(member_bytes(fd,geometry,files,'MSDOS.SYS',check),selected)
         original={name:member_bytes(fd,geometry,files,name,check) if name in files else None for name in ('CONFIG.SYS','AUTOEXEC.BAT')}
         country,nls=locale_lines(original['CONFIG.SYS'] or b'',original['AUTOEXEC.BAT'] or b'',windows,files)
+        biling=biling_lines(original['CONFIG.SYS'] or b'',windows,files)
+        if biling:observed[windows+'/BILING.SYS']=require_file(files,windows+'/BILING.SYS')
+        need(not(initial_locale and country),'explicit initial locale cannot override an observed COUNTRY command')
+        initial_country='COUNTRY=82,949\r\n' if initial_locale else ''
         if country or nls:
             for name in ('COUNTRY.SYS','COMMAND/NLSFUNC.EXE'):
                 observed[windows+'/'+name]=require_file(files,windows+'/'+name)
-        config=('DEVICE=C:\\HIMEMX.EXE /VERBOSE\r\nDEVICE='+selected+'\\IFSHLP.SYS\r\nDOS=HIGH\r\n'
+        config=(initial_country+'DEVICE=C:\\HIMEMX.EXE /VERBOSE\r\n'+''.join(v+'\r\n' for v in biling)+'DEVICE='+selected+'\\IFSHLP.SYS\r\nDOS=HIGH\r\n'
                 'FILES=30\r\nBUFFERS=20\r\nSHELL=C:\\COMMAND.COM C:\\ /E:512 /P\r\n'+''.join(v+'\r\n' for v in country)).encode('ascii')
         auto=('@ECHO OFF\r\nSET COMSPEC=C:\\COMMAND.COM\r\nSET windir='+selected+'\r\n'
               'SET PATH='+selected+';'+selected+'\\COMMAND;C:\\\r\nC:\r\nCD \\'+windows+'\r\n'+
@@ -255,10 +286,12 @@ def generate(request_path, request_sha, out, capture_budget, *, large_output_roo
                 'MSDOS.SYS_observation':files['MSDOS.SYS'],
                 'original_config':{name:{'present':data is not None,**({'bytes':len(data),'sha256':replacement.digest(data),
                     'source_metadata_sha256':files[name]['metadata_sha256']} if data is not None else {})} for name,data in original.items()},
-                'locale':{'country':country,'nls':nls},'xms_receipt':xms['build_receipt'],'xms_sources':xrows,
+                'locale':{'country':country,'nls':nls},'observed_biling_driver':biling,
+                'initial_locale_configuration':None if initial_locale is None else {**initial_locale,
+                    'origin':'explicit_request','runtime_verified':False,'observed_query_authority':False},'xms_receipt':xms['build_receipt'],'xms_sources':xrows,
                 'constructor_input_validation':validation,
                 'limitations':['Observed files/paths are not Windows version or native boot evidence.',
-                               'Original driver/startup commands are retained as backups, not executed or replayed.',
+                               'Only the observed BILING locale driver and admitted locale commands are replayed; other original commands remain backups.',
                                'This producer does not install an ESP or configure Supervisor/K32/K64 workers.']}
         need(replacement.hash_fd(fd,base['disk']['bytes'],check)==base['disk']['sha256'],'original disk changed')
         for name,data in original.items():

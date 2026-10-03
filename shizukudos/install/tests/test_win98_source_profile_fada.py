@@ -91,6 +91,8 @@ class InstalledSourceProfile(unittest.TestCase):
         self.assertEqual((out/'original-config/CONFIG.SYS').read_bytes(),self.source_config)
         self.assertEqual((out/'original-config/AUTOEXEC.BAT').read_bytes(),self.source_auto)
         config=(out/'payloads/CONFIG.SYS').read_bytes();auto=(out/'payloads/AUTOEXEC.BAT').read_bytes()
+        self.assertIsNone(result['initial_locale_configuration'])
+        self.assertNotIn(b'COUNTRY=',config)
         self.assertIn(b'DEVICE=C:\\HIMEMX.EXE /VERBOSE\r\n',config)
         self.assertIn(b'DEVICE=C:\\WINDOWS\\IFSHLP.SYS\r\n',config);self.assertIn(b'DOS=HIGH\r\n',config)
         self.assertEqual(auto.count(b'C:\\WINDOWS\\WIN.COM'),1)
@@ -104,6 +106,57 @@ class InstalledSourceProfile(unittest.TestCase):
         original=self.fixture.inventory(self.disk);after=self.fixture.inventory(owned/'replacement.img')
         for name,row in original.items():
             if name not in {'CONFIG.SYS','AUTOEXEC.BAT'}:self.assertEqual(row,after[name],name)
+
+    def test_observed_biling_driver_is_pinned_and_replayed_before_ifshlp(self):
+        driver=b'synthetic BILING device fixture, never executed'
+        line=b'device=C:\\WINDOWS\\biling.sys\r\n'
+        self.write_member('WINDOWS/BILING.SYS',driver)
+        self.write_member('CONFIG.SYS',line);self.refresh_disk()
+        result=self.generate()
+        config=(self.root/'profile/payloads/CONFIG.SYS').read_bytes()
+        self.assertIn(line,config)
+        self.assertLess(config.index(line),config.index(b'IFSHLP.SYS'))
+        self.assertEqual(result['observed_biling_driver'],[line.decode().strip()])
+        self.assertEqual(result['observed_members']['WINDOWS/BILING.SYS']['sha256'],hashlib.sha256(driver).hexdigest())
+        self.assertFalse(result['Windows98_boot_verified'])
+
+    def test_missing_ambiguous_or_injected_biling_is_refused_before_output(self):
+        bad=(b'DEVICE=C:\\WINDOWS\\BILING.SYS\r\n',
+             b'DEVICE=C:\\OTHER\\BILING.SYS\r\n',
+             b'DEVICE=C:\\WINDOWS\\BILING.SYS & C:\\OTHER.COM\r\n',
+             b'DEVICE=C:\\WINDOWS\\BILING.SYS /UNKNOWN\r\n',
+             b'DEVICE=C:\\WINDOWS\\BILING.SYS\r\nDEVICE=C:\\WINDOWS\\BILING.SYS\r\n',
+             b'[menu]\r\nDEVICE=C:\\WINDOWS\\BILING.SYS\r\n')
+        for index,line in enumerate(bad):
+            if index==1:self.write_member('WINDOWS/BILING.SYS',b'synthetic fixture')
+            self.write_member('CONFIG.SYS',line);self.refresh_disk()
+            with self.assertRaises(ValueError):self.generate()
+            self.assertFalse((self.root/'profile').exists())
+
+    def test_initial_locale_is_explicit_unverified_configuration_with_no_default(self):
+        self.request['initial_locale']={'country':82,'codepage':949}
+        result=self.generate()
+        config=(self.root/'profile/payloads/CONFIG.SYS').read_bytes()
+        self.assertTrue(config.startswith(b'COUNTRY=82,949\r\n'))
+        self.assertEqual(result['locale'],{'country':[],'nls':[]})
+        self.assertEqual(result['initial_locale_configuration'],{'country':82,'codepage':949,
+            'origin':'explicit_request','runtime_verified':False,'observed_query_authority':False})
+        self.assertFalse(result['Windows98_boot_verified'])
+
+    def test_bad_explicit_locale_types_extra_fields_and_country_conflict_refused(self):
+        for selection in (None,{'country':True,'codepage':949},{'country':82,'codepage':932},
+                          {'country':82,'codepage':949,'authority':'observed'},'82,949&OTHER'):
+            self.request['initial_locale']=selection
+            with self.assertRaises(ValueError):self.generate()
+            self.assertFalse((self.root/'profile').exists())
+        self.request['initial_locale']={'country':82,'codepage':949}
+        self.write_member('WINDOWS/COUNTRY.SYS',b'synthetic locale')
+        self.write_member('WINDOWS/COMMAND/NLSFUNC.EXE',b'synthetic NLS')
+        self.write_member('CONFIG.SYS',b'COUNTRY=82,949,C:\\WINDOWS\\COUNTRY.SYS\r\n')
+        self.write_member('AUTOEXEC.BAT',b'C:\\WINDOWS\\COMMAND\\NLSFUNC.EXE C:\\WINDOWS\\COUNTRY.SYS\r\n')
+        self.refresh_disk()
+        with self.assertRaises(ValueError):self.generate()
+        self.assertFalse((self.root/'profile').exists())
 
     def test_ambiguous_or_wrong_observed_windows_paths_refused_before_output(self):
         for data in (b'[Paths]\r\nWinDir=C:\\WINDOWS\r\nWinDir=C:\\OTHER\r\nWinBootDir=C:\\WINDOWS\r\nHostWinBootDrv=C\r\n',
