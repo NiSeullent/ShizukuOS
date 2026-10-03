@@ -1,0 +1,163 @@
+--- a/kernel/nls.c
++++ b/kernel/nls.c
+@@ -419,15 +419,37 @@
+   return muxLoadPkg(NLSFUNC_LOAD_PKG, cp, cntry);
+ }
+ 
++/* Preserve complete DBCS pairs, including ASCII-looking trail bytes. */
++STATIC BOOL nlsLeadByte(struct nlsPackage FAR * nls, UBYTE ch)
++{
++  UWORD FAR *t = ((struct nlsDBCS FAR *)getTable7(nls))->dbcsTbl;
++  if (ch < 128) return FALSE;
++  for (; *t; ++t)
++    if (ch >= (*t & 0xff) && ch <= (*t >> 8)) return TRUE;
++  return FALSE;
++}
++STATIC void nlsCaseMem(struct nlsPackage FAR *nls, UBYTE FAR *table,
++                      UBYTE FAR *str, unsigned len)
++{
++  while (len)
++  {
++    if (nlsLeadByte(nls, *str))
++    {
++      unsigned span = len > 1 ? 2 : 1;
++      str += span; len -= span;
++    }
++    else { upMMem(table, str, 1); ++str; --len; }
++  }
++}
+ STATIC void nlsUpMem(struct nlsPackage FAR * nls, VOID FAR * str, int len)
+ {
+   log(("NLS: nlsUpMem()\n"));
+-  upMMem(getCharTbl2(nls), (UBYTE FAR *) str, len);
++  nlsCaseMem(nls, getCharTbl2(nls), (UBYTE FAR *)str, len);
+ }
+ STATIC void nlsFUpMem(struct nlsPackage FAR * nls, VOID FAR * str, int len)
+ {
+   log(("NLS: nlsFUpMem()\n"));
+-  upMMem(getCharTbl4(nls), (UBYTE FAR *) str, len);
++  nlsCaseMem(nls, getCharTbl4(nls), (UBYTE FAR *)str, len);
+ }
+ 
+ STATIC VOID xUpMem(struct nlsPackage FAR * nls, VOID FAR * str,
+@@ -444,19 +466,7 @@
+ 
+ BOOL nlsIsDBCS(UBYTE ch)
+ {
+-
+-  if (ch < 128)
+-    return FALSE;              /* No leadbyte is smaller than that */
+-
+-  {
+-    UWORD FAR *t= ((struct nlsDBCS FAR*)getTable7(nlsInfo.actPkg))->dbcsTbl;
+-
+-    for (; *t != 0; ++t)
+-      if (ch >= (*t & 0xFF) && ch <= (*t >> 8))
+-        return TRUE;
+-  }
+-
+-  return FALSE;
++  return nlsLeadByte(nlsInfo.actPkg, ch);
+ }
+ 
+ STATIC int nlsYesNo(struct nlsPackage FAR * nls, UWORD ch)
+@@ -643,6 +653,17 @@
+  */
+ COUNT DosSetCodepage(UWORD actCP, UWORD sysCP)
+ {
++  struct nlsPackage FAR *nls;
++  /* Only fully resident packages can establish a new system CP. Unsupported
++     pages leave both the package and system CP untouched. WIN.COM uses BX=DX. */
++  if (actCP == sysCP && (actCP == 437 || actCP == 949))
++  {
++    nls = searchPackage(actCP, actCP == 949 ? 82 : 1);
++    if (nls == NULL) return DE_INVLDDATA;
++    nlsLoadPackage(nls);
++    nlsInfo.sysCodePage = sysCP;
++    return SUCCESS;
++  }
+   if (sysCP == NLS_DEFAULT || sysCP == nlsInfo.sysCodePage)
+     return DosSetPackage(actCP, NLS_DEFAULT);
+   return DE_INVLDDATA;
+--- a/kernel/nls_hc.asm
++++ b/kernel/nls_hc.asm
+@@ -11,7 +11,8 @@
+ 
+ 	GLOBAL _nlsPackageHardcoded
+ _nlsPackageHardcoded:
+-	DB  000h, 000h, 000h, 000h, 001h, 000h, 0b5h, 001h
++	DW ?koreanPackage, DGROUP
++	DW 1, 437
+ 	DB  00fh, 000h, 059h, 000h, 04eh, 000h, 006h, 000h
+ 	DB  002h
+ 	DW ?table2, DGROUP
+@@ -124,5 +125,49 @@
+ ?table7:
+ 	DB  000h, 000h, 000h, 000h, 000h, 000h, 000h, 000h
+ 	DB  000h, 000h
++
++; Source-written Korean OEM CP949 package. Unicode Consortium Microsoft CP949
++; mapping defines DBCS; Microsoft Learn documents 949 as ANSI/OEM Korean.
++; No Microsoft COUNTRY.SYS or driver bytes are incorporated here.
++?koreanPackage:
++ DW 0, 0, 82, 949, 0fh, 'Y', 'N', 6
++ DB 2
++ DW ?koreanUpcase, DGROUP
++ DB 4
++ DW ?koreanUpcase, DGROUP
++ DB 5
++ DW ?table5, DGROUP
++ DB 6
++ DW ?koreanCollate, DGROUP
++ DB 7
++ DW ?koreanDBCS, DGROUP
++ DB 1
++ ; extended country record: size,country,codepage,date-format
++ DW 28, 82, 949, 2
++ DB 05ch,0,0,0,0, ',',0, '.',0, '-',0, ':',0, 0,0,1
++ DW _CharMapSrvc, DGROUP
++ DB ',',0
++?koreanUpcase:
++ DW 128
++ %assign cp949byte 128
++ %rep 128
++ DB cp949byte
++ %assign cp949byte cp949byte+1
++ %endrep
++?koreanCollate:
++ DW 256
++ %assign cp949byte 0
++ %rep 256
++ %if cp949byte >= 'a' && cp949byte <= 'z'
++ DB cp949byte-32
++ %else
++ DB cp949byte
++ %endif
++ %assign cp949byte cp949byte+1
++ %endrep
++?koreanDBCS:
++ DW 2
++ DB 081h,0feh,0,0,0,0,0,0
++
+ 	GLOBAL _hcTablesEnd
+ _hcTablesEnd:
+--- a/kernel/config.c
++++ b/kernel/config.c
+@@ -1704,6 +1704,17 @@
+     }
+   }
+ 
++  /* Select only the explicit, resident Korean package before pass-2 devices.
++     A supplied COUNTRY.SYS pathname retains the ordinary file-loader contract. */
++  if (filename == NULL && ctryCode == 82 && codePage == 949)
++  {
++    iregs r;
++    memset(&r, 0, sizeof(r));
++    r.a.x = 0x6602; r.b.x = r.d.x = 949;
++    init_call_intr(0x21, &r);
++    if (!(r.flags & FLG_CARRY)) return;
++    goto error;
++  }
+   if (LoadCountryInfo(filename, ctryCode, codePage))
+     return;
+ 
