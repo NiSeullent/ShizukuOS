@@ -3,6 +3,7 @@
  */
 #include "proc_internal.h"
 #include "auth_policy.h"
+#include "ipc.h"
 
 extern void count_syscall(void);
 extern void check_kill(void);
@@ -35,50 +36,107 @@ static process_t *proc_from_handle(process_t *cur, uint64_t h)
     }
 }
 
+typedef struct { process_t *p; kobject_t *object; int pid; uint64_t pml4; } vm_target_ref;
+
+/* Caller holds the existing UP VAD/teardown guard. A process reference keeps
+ * its slot alive, but does not keep its address space from being torn down. */
+static int32_t vm_target_status(const vm_target_ref *ref)
+{
+    process_t *p = ref->p;
+    if (!p || !p->used || p->object != ref->object || ref->object->u.proc.p != p || p->pid != ref->pid)
+        return STATUS_INVALID_HANDLE;
+    if (p->terminated || p->teardown) return STATUS_PROCESS_IS_TERMINATING;
+    if (!p->pml4 || p->pml4 != ref->pml4) return STATUS_INVALID_HANDLE;
+    return STATUS_SUCCESS;
+}
+
+static int32_t vm_ref_target(process_t *cur, uint64_t h, vm_target_ref *ref)
+{
+    int32_t st;
+    const uint64_t f = irq_save();
+    memset(ref, 0, sizeof *ref);
+    /* ipc_ref_process's pseudo-current route assumes a valid caller object. */
+    if (h == CURRENT_PROCESS_HANDLE && (!cur || !cur->used || !cur->object ||
+        cur->object->type != OB_PROCESS || cur->object->u.proc.p != cur)) {
+        irq_restore(f); return STATUS_INVALID_HANDLE;
+    }
+    st = ipc_ref_process(cur, h, PROCESS_VM_OPERATION, &ref->p, &ref->object);
+    if (!st) {
+        if (ref->p) { ref->pid = ref->p->pid; ref->pml4 = ref->p->pml4; }
+        st = vm_target_status(ref);
+    }
+    irq_restore(f);
+    if (st && ref->object) { ob_deref(ref->object); ref->object = 0; }
+    return st;
+}
+
 /* NtAllocateVirtualMemory(ProcessHandle, PVOID *BaseAddress, ULONG_PTR ZeroBits, PSIZE_T RegionSize,
  *                         ULONG AllocationType, ULONG Protect) */
 static int32_t sys_allocate_vm(process_t *cur, uint64_t hproc, uint64_t pbase, uint64_t zero_bits, uint64_t psize,
                                uint64_t type, uint64_t prot)
 {
-    process_t *p = proc_from_handle(cur, hproc);
+    vm_target_ref ref;
     uint64_t base, size;
+    uint64_t f;
     int32_t st;
     (void)zero_bits;
-    if (!p) return STATUS_INVALID_HANDLE;
-    if (copy_from_user(cur, &base, pbase, 8) || copy_from_user(cur, &size, psize, 8)) return STATUS_ACCESS_VIOLATION;
-    st = vad_alloc(p, &base, &size, (uint32_t)type, (uint32_t)prot, VK_PRIVATE);
+    st = vm_ref_target(cur, hproc, &ref);
     if (st) return st;
-    if (copy_to_user(cur, pbase, &base, 8) || copy_to_user(cur, psize, &size, 8)) return STATUS_ACCESS_VIOLATION;
-    return STATUS_SUCCESS;
+    if (copy_from_user(cur, &base, pbase, 8) || copy_from_user(cur, &size, psize, 8)) { st = STATUS_ACCESS_VIOLATION; goto done; }
+    /* These VAD mutators already perform all descriptor/page-table work with
+     * IRQs off and never sleep. Keep admission and that work in one guard. */
+    f = irq_save();
+    st = vm_target_status(&ref);
+    if (!st) st = vad_alloc(ref.p, &base, &size, (uint32_t)type, (uint32_t)prot, VK_PRIVATE);
+    irq_restore(f);
+    if (st) goto done;
+    if (copy_to_user(cur, pbase, &base, 8) || copy_to_user(cur, psize, &size, 8)) st = STATUS_ACCESS_VIOLATION;
+done:
+    ob_deref(ref.object);
+    return st;
 }
 
 static int32_t sys_free_vm(process_t *cur, uint64_t hproc, uint64_t pbase, uint64_t psize, uint64_t type)
 {
-    process_t *p = proc_from_handle(cur, hproc);
+    vm_target_ref ref;
     uint64_t base, size;
+    uint64_t f;
     int32_t st;
-    if (!p) return STATUS_INVALID_HANDLE;
-    if (copy_from_user(cur, &base, pbase, 8) || copy_from_user(cur, &size, psize, 8)) return STATUS_ACCESS_VIOLATION;
-    st = vad_free(p, &base, &size, (uint32_t)type);
+    st = vm_ref_target(cur, hproc, &ref);
     if (st) return st;
-    if (copy_to_user(cur, pbase, &base, 8) || copy_to_user(cur, psize, &size, 8)) return STATUS_ACCESS_VIOLATION;
-    return STATUS_SUCCESS;
+    if (copy_from_user(cur, &base, pbase, 8) || copy_from_user(cur, &size, psize, 8)) { st = STATUS_ACCESS_VIOLATION; goto done; }
+    f = irq_save();
+    st = vm_target_status(&ref);
+    if (!st) st = vad_free(ref.p, &base, &size, (uint32_t)type);
+    irq_restore(f);
+    if (st) goto done;
+    if (copy_to_user(cur, pbase, &base, 8) || copy_to_user(cur, psize, &size, 8)) st = STATUS_ACCESS_VIOLATION;
+done:
+    ob_deref(ref.object);
+    return st;
 }
 
 static int32_t sys_protect_vm(process_t *cur, uint64_t hproc, uint64_t pbase, uint64_t psize, uint64_t prot,
                               uint64_t pold)
 {
-    process_t *p = proc_from_handle(cur, hproc);
+    vm_target_ref ref;
     uint64_t base, size;
+    uint64_t f;
     uint32_t old = 0;
     int32_t st;
-    if (!p) return STATUS_INVALID_HANDLE;
-    if (copy_from_user(cur, &base, pbase, 8) || copy_from_user(cur, &size, psize, 8)) return STATUS_ACCESS_VIOLATION;
-    st = vad_protect(p, &base, &size, (uint32_t)prot, &old);
+    st = vm_ref_target(cur, hproc, &ref);
     if (st) return st;
+    if (copy_from_user(cur, &base, pbase, 8) || copy_from_user(cur, &size, psize, 8)) { st = STATUS_ACCESS_VIOLATION; goto done; }
+    f = irq_save();
+    st = vm_target_status(&ref);
+    if (!st) st = vad_protect(ref.p, &base, &size, (uint32_t)prot, &old);
+    irq_restore(f);
+    if (st) goto done;
     if (copy_to_user(cur, pbase, &base, 8) || copy_to_user(cur, psize, &size, 8) || copy_to_user(cur, pold, &old, 4))
-        return STATUS_ACCESS_VIOLATION;
-    return STATUS_SUCCESS;
+        st = STATUS_ACCESS_VIOLATION;
+done:
+    ob_deref(ref.object);
+    return st;
 }
 
 /* MEMORY_BASIC_INFORMATION (class 0) */
