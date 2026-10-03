@@ -93,10 +93,54 @@ static void set_bits(uint8_t *map, uint32_t from, uint32_t n)
     while (n--) sfs_set_bit(map, from++);
 }
 
-/* Clears n bits; returns how many were already clear (double frees). */
+/* Portable SWAR count: no POPCNT ISA requirement or compiler runtime helper.
+ * Counting bits is byte-order independent, so unaligned memcpy loads are safe.
+ */
+static uint32_t bitmap_popcount64(uint64_t w)
+{
+    w -= (w >> 1) & 0x5555555555555555ull;
+    w = (w & 0x3333333333333333ull) + ((w >> 2) & 0x3333333333333333ull);
+    w = (w + (w >> 4)) & 0x0F0F0F0F0F0F0F0Full;
+    return (uint32_t)((w * 0x0101010101010101ull) >> 56);
+}
+
+/* Clears n bits; returns how many were already clear (double frees).
+ * Keep partial-byte edges bitwise; count and clear full words/bytes once.
+ */
 static uint32_t clear_bits(uint8_t *map, uint32_t from, uint32_t n)
 {
+    /* Return before word setup for single blocks and other small frees. */
+    if (n < 16) {
+        uint32_t bad = 0;
+        while (n--) {
+            if (!sfs_test_bit(map, from)) bad++;
+            sfs_clear_bit(map, from);
+            from++;
+        }
+        return bad;
+    }
     uint32_t bad = 0;
+    while (n && (from & 7)) {
+        if (!sfs_test_bit(map, from)) bad++;
+        sfs_clear_bit(map, from++);
+        n--;
+    }
+    while (n >= 64) {
+        uint64_t w;
+        uint8_t *p = map + (from >> 3);
+        memcpy(&w, p, sizeof w);
+        bad += 64u - bitmap_popcount64(w);
+        memset(p, 0, sizeof w);
+        from += 64;
+        n -= 64;
+    }
+    while (n >= 8) {
+        uint8_t *p = map + (from >> 3);
+        bad += 8u - bitmap_popcount64(*p);
+        *p = 0;
+        from += 8;
+        n -= 8;
+    }
     while (n--) {
         if (!sfs_test_bit(map, from)) bad++;
         sfs_clear_bit(map, from);
