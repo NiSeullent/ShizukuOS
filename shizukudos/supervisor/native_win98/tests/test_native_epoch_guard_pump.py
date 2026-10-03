@@ -36,7 +36,7 @@ class GuardedSelectTests(unittest.TestCase):
             return ready
 
         with mock.patch.object(pump.time, "monotonic_ns", side_effect=clock), \
-                mock.patch.object(pump.select, "select", side_effect=wait) as selected:
+                mock.patch.object(pump, "_poll_select", side_effect=wait) as selected:
             result = pump.checked_select([7], [8], 1_000_000_000,
                                          lambda: events.append("guard"))
         self.assertIs(result, ready)
@@ -46,7 +46,7 @@ class GuardedSelectTests(unittest.TestCase):
     def test_near_deadline_reduces_the_requested_slice(self):
         pump = self.pump()
         with mock.patch.object(pump.time, "monotonic_ns", side_effect=[100_000_000, 101_000_000]), \
-                mock.patch.object(pump.select, "select", return_value=([], [], [])) as selected:
+                mock.patch.object(pump, "_poll_select", return_value=([], [], [])) as selected:
             self.assertEqual(pump.checked_select([], [], 105_000_000, lambda: None), ([], [], []))
         selected.assert_called_once_with([], [], [], .005)
 
@@ -54,7 +54,7 @@ class GuardedSelectTests(unittest.TestCase):
         pump = self.pump()
         with mock.patch.object(pump.time, "monotonic_ns", side_effect=[100_000_000, 101_000_000,
                                                                     195_000_000, 196_000_000]), \
-                mock.patch.object(pump.select, "select", return_value=([], [], [])) as selected:
+                mock.patch.object(pump, "_poll_select", return_value=([], [], [])) as selected:
             for _ in range(2):
                 self.assertEqual(pump.checked_select([], [], 200_000_000, lambda: None), ([], [], []))
         self.assertEqual(selected.call_args_list, [mock.call([], [], [], .025),
@@ -64,7 +64,7 @@ class GuardedSelectTests(unittest.TestCase):
         pump = self.pump()
         guards = []
         with mock.patch.object(pump.time, "monotonic_ns", return_value=100), \
-                mock.patch.object(pump.select, "select") as selected:
+                mock.patch.object(pump, "_poll_select") as selected:
             with self.assertRaises(TimeoutError):
                 pump.checked_select([], [], 100, lambda: guards.append(1))
         self.assertEqual(guards, [1])
@@ -78,7 +78,7 @@ class GuardedSelectTests(unittest.TestCase):
             now[0] = 200
 
         with mock.patch.object(pump.time, "monotonic_ns", side_effect=lambda: now[0]), \
-                mock.patch.object(pump.select, "select") as selected:
+                mock.patch.object(pump, "_poll_select") as selected:
             with self.assertRaises(TimeoutError):
                 pump.checked_select([], [], 200, guard)
         selected.assert_not_called()
@@ -87,7 +87,7 @@ class GuardedSelectTests(unittest.TestCase):
         pump = self.pump()
         guards = []
         with mock.patch.object(pump.time, "monotonic_ns", side_effect=[100, 200]), \
-                mock.patch.object(pump.select, "select", return_value=([7], [], [])) as selected:
+                mock.patch.object(pump, "_poll_select", return_value=([7], [], [])) as selected:
             with self.assertRaises(TimeoutError):
                 pump.checked_select([7], [], 200, lambda: guards.append(1))
         self.assertEqual(guards, [1, 1])
@@ -100,7 +100,7 @@ class GuardedSelectTests(unittest.TestCase):
         def guard():
             raise refusal
 
-        with mock.patch.object(pump.select, "select") as selected:
+        with mock.patch.object(pump, "_poll_select") as selected:
             with self.assertRaises(RuntimeError) as observed:
                 pump.checked_select([], [], time.monotonic_ns() + 1_000_000_000, guard)
         self.assertIs(observed.exception, refusal)
@@ -110,7 +110,7 @@ class GuardedSelectTests(unittest.TestCase):
         pump = self.pump()
         failure = OSError(errno.EBADF, "selected descriptor is invalid")
         guards = []
-        with mock.patch.object(pump.select, "select", side_effect=failure) as selected:
+        with mock.patch.object(pump, "_poll_select", side_effect=failure) as selected:
             with self.assertRaises(OSError) as observed:
                 pump.checked_select([], [], time.monotonic_ns() + 1_000_000_000,
                                     lambda: guards.append(1))
@@ -129,7 +129,7 @@ class GuardedSelectTests(unittest.TestCase):
             if len(calls) == 2:
                 raise later
 
-        with mock.patch.object(pump.select, "select", side_effect=first):
+        with mock.patch.object(pump, "_poll_select", side_effect=first):
             with self.assertRaises(OSError) as observed:
                 pump.checked_select([], [], time.monotonic_ns() + 1_000_000_000, guard)
         self.assertIs(observed.exception, first)
@@ -139,7 +139,7 @@ class GuardedSelectTests(unittest.TestCase):
 
     def test_invalid_deadline_or_missing_owner_guard_is_refused_before_wait(self):
         pump = self.pump()
-        with mock.patch.object(pump.select, "select") as selected:
+        with mock.patch.object(pump, "_poll_select") as selected:
             for value in (True, 100.0, None):
                 with self.subTest(deadline=value), self.assertRaises(TypeError):
                     pump.checked_select([], [], value, lambda: None)

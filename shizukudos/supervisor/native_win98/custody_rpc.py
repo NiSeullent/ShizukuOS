@@ -9,7 +9,7 @@ import importlib.machinery
 import importlib.util
 import json
 import math
-import select
+import selectors
 import os
 from pathlib import Path
 import socket
@@ -119,9 +119,14 @@ class Client:
             if pump is not None:pump()
             remaining=stop-time.monotonic()
             if remaining<=0:raise TimeoutError('original custody RPC deadline expired')
-            readers=[] if writing else [self.channel.socket]
-            writers=[self.channel.socket] if writing else []
-            try:ready=select.select(readers,writers,[],min(.025,remaining))
+            event=selectors.EVENT_WRITE if writing else selectors.EVENT_READ
+            try:
+                fd=self.channel.socket.fileno()
+                with selectors.PollSelector() as waiter:
+                    os.fstat(fd)
+                    waiter.register(fd,event)
+                    ready=waiter.select(min(.025,remaining))
+                    os.fstat(fd)
             except BaseException as first:
                 if pump is not None:
                     try:pump()
@@ -129,7 +134,7 @@ class Client:
                 raise
             if pump is not None:pump()
             if time.monotonic()>=stop:raise TimeoutError('original custody RPC deadline expired')
-            if ready[1] if writing else ready[0]:return
+            if ready:return
     def call(self,operation,parameters=None,fds=(),timeout=5,pump=None):
         need(not self._calling,'nested custody RPC is forbidden')
         need(not self._failed,'custody RPC has an unresolved response; guardian recovery required')

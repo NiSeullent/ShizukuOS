@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import select
+import selectors
 import socket
 import stat
 import struct
@@ -47,15 +48,38 @@ def frame(kind, extent, count):
     return struct.pack('<IHHII', 0x31454457, 1, kind, extent, count)
 
 
-# Local copy of the reviewed native_epoch_guard_pump.py checked_select function.
+# Local copy of the reviewed native_epoch_guard_pump.py readiness functions.
 # Original source SHA256:
-# 74a5fc3fad170e370dbd39e2b8fea23bd2fad5c8bc1bfa49dfd86975e6642c3a
+# 90784436e4442545733f5c8f5b3f7e32a9782fbb64e32f9331e89f92eda65888
 # Keep this in the admitted epoch source; no unpinned helper import is required.
+def _poll_select(readers, writers, errors, timeout):
+    """Poll original descriptors; never duplicate, consume or close them."""
+    if errors:
+        raise ValueError('exceptional readiness is not used by this transport')
+    read_rows = [(item, item if isinstance(item, int) else item.fileno()) for item in readers]
+    write_rows = [(item, item if isinstance(item, int) else item.fileno()) for item in writers]
+    requests = {}
+    for rows, event in ((read_rows, selectors.EVENT_READ), (write_rows, selectors.EVENT_WRITE)):
+        for _, fd in rows:
+            requests[fd] = requests.get(fd, 0) | event
+    with selectors.PollSelector() as waiter:
+        for fd, event in requests.items():
+            # PollSelector maps POLLNVAL to readiness; retain select's EBADF refusal.
+            os.fstat(fd)
+            waiter.register(fd, event)
+        events = waiter.select(timeout)
+        for fd in requests:
+            os.fstat(fd)
+    ready = {key.fd: event for key, event in events}
+    return ([item for item, fd in read_rows if ready.get(fd, 0) & selectors.EVENT_READ],
+            [item for item, fd in write_rows if ready.get(fd, 0) & selectors.EVENT_WRITE], [])
+
+
 def checked_select(readers, writers, deadline_ns, guard):
-    """Check the owner guard around one <=25ms select under an absolute deadline.
+    """Check the owner guard around one <=25ms poll under an absolute deadline.
 
     Readiness is refused if the deadline expires during the wait or postguard.
-    A select exception remains primary if postguard also fails; that later
+    A readiness exception remains primary if postguard also fails; that later
     refusal is retained as its explicit cause. No wait is retried or renewed.
     """
     if type(deadline_ns) is not int:
@@ -68,7 +92,7 @@ def checked_select(readers, writers, deadline_ns, guard):
         raise TimeoutError("the original wait deadline expired")
     timeout = min(25_000_000, remaining_ns) / 1_000_000_000
     try:
-        ready = select.select(readers, writers, [], timeout)
+        ready = _poll_select(readers, writers, [], timeout)
     except BaseException as first_error:
         try:
             guard()

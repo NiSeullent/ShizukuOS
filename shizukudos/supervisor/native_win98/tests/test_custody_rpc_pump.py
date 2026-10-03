@@ -255,7 +255,7 @@ class PumpTests(unittest.TestCase):
             if len(calls) == 2:
                 raise later
         try:
-            with mock.patch.object(rpc.select, 'select', side_effect=first):
+            with mock.patch.object(rpc.selectors, 'PollSelector', side_effect=first):
                 with self.assertRaises(OSError) as caught:
                     client.call('no-write', pump=pump)
             self.assertIs(caught.exception, first)
