@@ -38,8 +38,8 @@ static int transfer(void *p,uint16_t address,const uint8_t *tx,size_t nt,uint8_t
     if(b->fail)return b->fail;
     if(nt==2 && tx[0]==0x20){C(nr==30);memcpy(rx,b->desc,30);}
     else if(nt==2 && tx[0]==0x30){C(nr==sizeof(mouse));memcpy(rx,mouse,nr);}
-    else if(nt==4 && tx[0]==0x50 && tx[3]==8){C(nr==0 && tx[2]<=1);b->awake=tx[2]==0;}
-    else if(nt==4 && tx[0]==0x50 && tx[3]==1){C(b->awake);if(b->reset)b->new_pending=1;else b->reset=1;b->interrupt=1;}
+    else if(nt==4 && tx[0]==b->desc[16] && tx[1]==b->desc[17] && tx[3]==8){C(nr==0 && tx[2]<=1);b->awake=tx[2]==0;}
+    else if(nt==4 && tx[0]==b->desc[16] && tx[1]==b->desc[17] && tx[3]==1){C(b->awake);if(b->reset)b->new_pending=1;else b->reset=1;b->interrupt=1;}
     else if(!nt && b->reset){C(nr==2 || nr==8);memset(rx,0,nr);b->reset=b->new_pending;b->new_pending=0;b->interrupt=b->reset;}
     else if(!nt){C(nr==8 && b->awake);memcpy(rx,b->input,nr);b->interrupt=0;}
     else return SHZ_IO;
@@ -51,6 +51,38 @@ static int irq(void *p,int *level){struct bus *b=p;*level=b->never_irq ? 0:b->in
 static int drain(void *p,uint32_t timeout){struct bus *b=p;C(timeout==100);++b->drains;return b->drain_error;}
 static uint64_t now(void *p){return ((struct bus *)p)->time;}
 static void relax(void *p){((struct bus *)p)->time+=10;}
+static void resume_command_authority(void) {
+    const int errors[]={SHZ_MALFORMED,SHZ_IO,SHZ_TIMEOUT};unsigned i;
+    for(i=0;i<3;i++) {
+        struct bus b={0};struct shz_hidi2c h={0};
+        struct shz_i2c_ops ops={&b,valid,transfer,irq,drain,now,relax};
+        unsigned transfers,drains;
+        b.valid=1;descriptor(b.desc);
+        C(shz_hidi2c_open(&h,&ops,19,4,0x15,0x20,100)==SHZ_DRIVER_OK);
+        C(h.command_known && h.descriptor.command_register==0x50);
+        C(shz_hidi2c_stop(&h,1)==SHZ_DRIVER_OK && h.state==SHZ_I2C_SUSPENDED);
+        if(i==0)b.desc[0]=29;
+        if(i==1)b.fail=SHZ_IO;
+        if(i==2)b.transfer_ticks=101;
+        C(shz_hidi2c_resume(&h)==errors[i] && h.state==SHZ_I2C_QUARANTINED);
+        C(!h.command_known); /* The pre-suspend register is no longer trusted. */
+        b.fail=0;b.transfer_ticks=0;transfers=b.transfers;drains=b.drains;
+        C(shz_hidi2c_stop(&h,0)==SHZ_DRIVER_OK && h.state==SHZ_I2C_CLOSED);
+        C(b.transfers==transfers && b.drains==drains+2u);
+    }
+    {
+        struct bus b={0};struct shz_hidi2c h={0};
+        struct shz_i2c_ops ops={&b,valid,transfer,irq,drain,now,relax};
+        b.valid=1;descriptor(b.desc);
+        C(shz_hidi2c_open(&h,&ops,19,4,0x15,0x20,100)==SHZ_DRIVER_OK);
+        C(shz_hidi2c_stop(&h,1)==SHZ_DRIVER_OK);
+        /* Valid re-enumeration authorizes the new command register, not 0x50. */
+        put16(b.desc+16,0x170);
+        C(shz_hidi2c_resume(&h)==SHZ_DRIVER_OK && h.command_known &&
+          h.descriptor.command_register==0x170 && b.awake);
+        C(shz_hidi2c_stop(&h,0)==SHZ_DRIVER_OK && !b.awake);
+    }
+}
 int main(void) {
     struct shz_hid_layout l,old;struct shz_hid_descriptor hd,ho;struct shz_pointer point,po;
     struct shz_hid_value values[8];size_t n=99;uint8_t d[30],data[]={5,0xfe,7};
@@ -131,5 +163,6 @@ int main(void) {
     memset(&h,0,sizeof(h));descriptor(b.desc);b.transfer_ticks=101;
     C(shz_hidi2c_open(&h,&ops,19,4,0x15,0x20,100)==SHZ_TIMEOUT && !h.command_known);
     b.transfer_ticks=0;C(shz_hidi2c_stop(&h,0)==SHZ_DRIVER_OK);
+    resume_command_authority();
     printf("HID descriptors/input/I2C lifecycle: %u assertions PASS\n",checks);return 0;
 }

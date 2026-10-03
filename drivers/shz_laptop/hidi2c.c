@@ -122,7 +122,9 @@ int shz_hidi2c_resume(struct shz_hidi2c *h) {
     int r;
     if(!h)return SHZ_INVALID;
     if(h->state!=SHZ_I2C_SUSPENDED)return SHZ_BUSY;
-    h->state=SHZ_I2C_STARTING;r=enumerate(h);
+    /* The resumed device must validate a fresh descriptor before any command.
+     * Failed enumeration must not authorize cleanup through its old register. */
+    h->state=SHZ_I2C_STARTING;h->command_known=0;r=enumerate(h);
     if(r){h->last_error=r;h->state=SHZ_I2C_QUARANTINED;return r;}
     h->state=SHZ_I2C_READY;return SHZ_DRIVER_OK;
 }
