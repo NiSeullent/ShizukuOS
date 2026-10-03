@@ -63,6 +63,85 @@ def unverified(row,names):
     need(all(row.get(name) is False for name in names),'every runtime/publication assertion must be exactly false')
 
 
+ORIGINAL_FLAGS = (*RUNTIME_FLAGS, 'public_artifact', 'installed_Windows98_version_verified',
+                  'drive_mapping_verified', 'native_bootability_verified', 'persistence_verified',
+                  'ShizukuCore_userland_verified')
+ORIGINAL_SCHEMA = 'shizukuos.private-original-userland-profile.v1'
+ORIGINAL_REQUEST_SCHEMA = 'shizukuos.original-userland-profile-request.v1'
+
+
+def admit_original(raw, pins, selected_disk, expected_producers, *, request_raw):
+    """Check an explicitly selected original-userland observation phase.
+
+    This is not DOS replacement or genuine Windows authentication. The caller
+    retains and hashes the actual disk, request, profile and producer FDs; its
+    unchanged task guardian owns the fresh mutable ESP and QEMU lifetime.
+    """
+    need(type(raw) in (list, tuple) and type(pins) in (list, tuple) and
+         len(raw) == len(pins) == 1, 'one explicit original-userland observation required')
+    profile, profile_pin = snapshot(raw[0], pins[0], 4 << 20)
+    fields = {'schema', 'status', 'phase', 'source_disk', 'request', 'producer_inputs',
+              'boot_policy', 'observed_windows_path', 'observed_members', 'boot_sectors',
+              'source_before_after_match', *ORIGINAL_FLAGS}
+    need(set(profile) == fields and profile['schema'] == ORIGINAL_SCHEMA and
+         profile['status'] == 'ORIGINAL_USERLAND_SOURCE_OBSERVED_NOT_BOOTED' and
+         profile['phase'] == 'original-userland-legacy-adapter',
+         'exact original-userland phase schema required')
+    unverified(profile, ORIGINAL_FLAGS)
+    need(profile['source_before_after_match'] is True, 'observed immutable source required')
+    disk = pin(selected_disk)
+    need(disk['bytes'] == DISK_BYTES and pin(profile['source_disk']) == disk,
+         'original phase must select the exact observed original 2GiB disk')
+    need(type(expected_producers) in (list, tuple) and len(expected_producers) == 2,
+         'two independently held original-phase producer pins required')
+    producers = [pin(row, 1 << 20) for row in expected_producers]
+    need([PurePosixPath(row['path']).name for row in producers] ==
+         ['native_original_userland.py', 'prepare_replacement.py'] and
+         profile['producer_inputs'] == producers,
+         'original-phase observation producer closure differs')
+    request, request_pin = snapshot(request_raw, profile['request'], 1 << 20)
+    need(set(request) == {'schema', 'source_disk', 'windows_directory', 'boot_policy', 'producer_inputs'} and
+         request['schema'] == ORIGINAL_REQUEST_SCHEMA and request['source_disk'] == disk and
+         request['producer_inputs'] == producers and
+         request['boot_policy'] == profile['boot_policy'] == 'shz.foundation=win98',
+         'original-phase request/source/producer/policy crosslinks differ')
+    directory = request['windows_directory']
+    need(type(directory) is str and re.fullmatch('[A-Z0-9_-]{1,8}', directory) and
+         directory not in {'CON', 'PRN', 'AUX', 'NUL',
+                          *[name + str(n) for name in ('COM', 'LPT') for n in range(1, 10)]} and
+         profile['observed_windows_path'] == 'C:\\' + directory,
+         'explicit observed C: short Windows path required')
+    members = profile['observed_members']
+    required = {'IO.SYS', 'MSDOS.SYS', 'COMMAND.COM',
+                *[directory + '/' + name for name in
+                  ('WIN.COM', 'SYSTEM.INI', 'SYSTEM/VMM32.VXD', 'IFSHLP.SYS')]}
+    need(type(members) is dict and set(members) == required,
+         'exact original boot and Windows member observations required')
+    for row in members.values():
+        need(type(row) is dict and set(row) == {'bytes', 'sha256', 'metadata_sha256', 'cluster'} and
+             type(row['bytes']) is int and 0 < row['bytes'] <= DISK_BYTES and
+             type(row['cluster']) is int and 2 <= row['cluster'] < DISK_BYTES // 512,
+             'exact nonempty regular FAT member observation required')
+        sha(row['sha256']); sha(row['metadata_sha256'])
+    sectors = profile['boot_sectors']
+    need(type(sectors) is dict and set(sectors) == {'mbr', 'vbr'}, 'both original boot-sector observations required')
+    for row in sectors.values():
+        need(type(row) is dict and set(row) == {'bytes', 'sha256'} and
+             type(row['bytes']) is int and row['bytes'] == 512,
+             'one exact boot-sector observation required')
+        sha(row['sha256'])
+    paths = [disk['path'], profile_pin['path'], request_pin['path'], *[row['path'] for row in producers]]
+    need(len(set(paths)) == len(paths), 'distinct original-phase source/metadata/producer paths required')
+    return {'schema': 'shizukuos.private-native-original-userland-lineage.v1',
+            'disk_origin': 'private-original-userland-observed-not-booted',
+            'phase': profile['phase'], 'source_disk': disk, 'selected_disk': disk,
+            'observation_profile': profile_pin, 'request': request_pin,
+            'producer_source_pins': producers, 'boot_policy': profile['boot_policy'],
+            'observed_windows_path': profile['observed_windows_path'],
+            'boot_sectors': copy.deepcopy(sectors), **{name: False for name in ORIGINAL_FLAGS},
+            'scope': 'Source observation only; no genuine Windows, boot, replacement, hybrid service or release acceptance.'}
+
+
 BASE_PAYLOADS = frozenset(('KERNEL.SYS','COMMAND.COM','HIMEMX.EXE','CONFIG.SYS','AUTOEXEC.BAT'))
 GOP_PAYLOADS = BASE_PAYLOADS | frozenset(('SHZGOP.DRV','SHZGOP.VXD','SHZGOP.INF'))
 CALLER_PAYLOADS = GOP_PAYLOADS | frozenset(('GOPINST.EXE','GPREQ.INI'))

@@ -49,6 +49,7 @@ NATIVE_EPOCH_SOURCE='shizukudos/supervisor/native_win98/native_epoch_host.py'
 PCI_PREPARATION_SOURCE='tools/native_pci_preparation.py'
 GOP_NONCE_SOURCE='shizukudos/supervisor/native_win98/gop_nonce_staging.py'
 GOP_CONSTRUCTOR_SOURCE='shizukudos/win98_boot/prepare_replacement.py'
+ORIGINAL_MANIFEST_SCHEMA='shizukuos.native-original-userland-custody-manifest.v1'
 
 def identity(s):return s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns
 
@@ -785,11 +786,35 @@ def admit_pci_preparation(manifest,plan,sources,union):
     union.check();return result
 
 
+def check_original_observation(profile,proof,producers,union):
+    """Re-derive the phase observations from the guardian's held disk FD.
+
+    Both the observer and FAT reader execute their independently pinned held
+    source bytes. These observations authenticate the metadata-to-disk link,
+    not Windows licensing, product version, boot or a Shizuku service result.
+    """
+    observer=admitted_module('admitted_original_observer',producers[0],union)
+    constructor=admitted_module('admitted_original_fat',producers[1],union)
+    need(callable(getattr(observer,'observe',None)),'source-admitted original observer required')
+    entry=union.add(proof['source_disk']);union.check()
+    observed=observer.observe(entry['fd'],proof['source_disk']['bytes'],
+                              proof['observed_windows_path'][3:],constructor,union.check)
+    union.check()
+    fields={'observed_windows_path','observed_members','boot_sectors'}
+    need(type(observed) is dict and set(observed)==fields and
+         observed=={name:profile[name] for name in fields},
+         'original phase observations differ from actual held disk bytes')
+
+
 def admit_manifest(manifest,union,*,epoch_context=None):
     fields={'schema','plan','repo','sources','lineage','producers','limits','timeout'}
     need(type(manifest) is dict and fields<=set(manifest) and
          set(manifest)<=fields|{'preparation_receipt','optional_native_inputs','optional_native_provenance','pci_preparation','gop_cohort'} and
-         manifest['schema']=='shizukuos.native-custody-manifest.v1','exact task manifest')
+         manifest['schema'] in ('shizukuos.native-custody-manifest.v1',ORIGINAL_MANIFEST_SCHEMA),'exact task manifest')
+    original_phase=manifest['schema']==ORIGINAL_MANIFEST_SCHEMA
+    if original_phase:
+        need('gop_cohort' not in manifest and epoch_context is None,
+             'original observation phase has no DOS-replacement GOP cohort or live epoch grant')
     need(type(manifest['timeout']) is int and 20<=manifest['timeout']<=900,'existing observation timeout')
     repo=Path(manifest['repo']);need(repo.is_absolute() and repo.resolve()==repo,'canonical source root')
     sources=admit_runtime_sources(repo,manifest['sources'],union)
@@ -812,11 +837,13 @@ def admit_manifest(manifest,union,*,epoch_context=None):
         union.add({'path':str(source),'bytes':source.stat().st_size,'sha256':sha})
     header='shizukudos/supervisor/include/shz_info.h';headerpath=Path(plan['input_pins']['build_receipt']['path']).parent/'source'/header
     headerrow={'path':str(headerpath),'bytes':headerpath.stat().st_size,'sha256':built['sources_sha256'][header]};union.add(headerrow);sources=dict(sources);sources[header]=headerrow
-    lineage=manifest['lineage'];need(type(lineage) is list and len(lineage)==3,'explicit ordered DOS3 lineage pins')
+    lineage=manifest['lineage']
+    need(type(lineage) is list and len(lineage)==(1 if original_phase else 3),
+         'explicit original observation pin required' if original_phase else 'explicit ordered DOS3 lineage pins')
     producers=manifest['producers'];need(type(producers) is list and len(producers)==2,'explicit two producer pins')
     for row in producers:union.add(row)
     parser=admitted_module('admitted_disk_lineage',manifest['sources'][SOURCES[-1]],union)
-    raw=[union.raw(row,maximum) for row,maximum in zip(lineage,(1<<20,4<<20,16<<20))]
+    raw=[union.raw(row,maximum) for row,maximum in zip(lineage,((4<<20,) if original_phase else (1<<20,4<<20,16<<20)))]
     cohort=None
     need(('gop_cohort' in manifest)==(epoch_context is not None),'GOP cohort requires internal retained live Attempt')
     if epoch_context is not None:
@@ -836,13 +863,20 @@ def admit_manifest(manifest,union,*,epoch_context=None):
         need(declared['producer_pins']['nonce_stage']==[sources[GOP_NONCE_SOURCE],sources[NATIVE_EPOCH_SOURCE],sources[GOP_CONSTRUCTOR_SOURCE]],'current retained nonce staging producer differs')
         cohort={'records':{name:{'raw':union.raw(row,4<<20),'pin':row} for name,row in declared['record_pins'].items()},
                 'producer_pins':declared['producer_pins'],'live_policy':actual}
-    proof=(parser.admit(raw,lineage,built['input_pins']['DISK.IMG'],producers) if cohort is None else
-           parser.admit(raw,lineage,built['input_pins']['DISK.IMG'],producers,gop_cohort=cohort))
-    profile=union.json(lineage[0],1<<20);prepared=union.json(lineage[2])
-    union.add(profile['disk']);union.add(profile['boot_template']['file']);union.add(profile['build_receipt'])
-    for item in profile['payloads']:union.add(item['file'])
-    need(type(prepared.get('build_source_pins')) is list and 0<len(prepared['build_source_pins'])<=30000,'actual retained DOS source closure required')
-    for row in prepared['build_source_pins']:union.add(row)
+    if original_phase:
+        profile=union.json(lineage[0],4<<20)
+        need(type(profile.get('request')) is dict,'explicit held original-phase request required')
+        request_raw=union.raw(profile['request'],1<<20)
+        proof=parser.admit_original(raw,lineage,built['input_pins']['DISK.IMG'],producers,request_raw=request_raw)
+        check_original_observation(profile,proof,producers,union)
+    else:
+        proof=(parser.admit(raw,lineage,built['input_pins']['DISK.IMG'],producers) if cohort is None else
+               parser.admit(raw,lineage,built['input_pins']['DISK.IMG'],producers,gop_cohort=cohort))
+        profile=union.json(lineage[0],1<<20);prepared=union.json(lineage[2])
+        union.add(profile['disk']);union.add(profile['boot_template']['file']);union.add(profile['build_receipt'])
+        for item in profile['payloads']:union.add(item['file'])
+        need(type(prepared.get('build_source_pins')) is list and 0<len(prepared['build_source_pins'])<=30000,'actual retained DOS source closure required')
+        for row in prepared['build_source_pins']:union.add(row)
     helpers={name:sources[name]['sha256'] for name in HELPERS}
     if 'preparation_runtime_helpers_sha256' in plan:need(plan['preparation_runtime_helpers_sha256']==helpers,'preparation helper epoch differs')
     if 'preparation_receipt' in manifest:
