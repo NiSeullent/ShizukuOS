@@ -13,6 +13,7 @@ import fcntl
 import hashlib
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -25,6 +26,7 @@ import subprocess
 import sys
 import time
 import threading
+import types
 
 HERE=Path(__file__).resolve().parent
 rpc=sys.modules.get('native_custody_rpc')
@@ -45,6 +47,8 @@ SOURCES=(*HELPERS,'shizukudos/supervisor/native_win98/run_vm.py',
          'shizukudos/supervisor/native_win98/disk_lineage.py')
 NATIVE_EPOCH_SOURCE='shizukudos/supervisor/native_win98/native_epoch_host.py'
 PCI_PREPARATION_SOURCE='tools/native_pci_preparation.py'
+GOP_NONCE_SOURCE='shizukudos/supervisor/native_win98/gop_nonce_staging.py'
+GOP_CONSTRUCTOR_SOURCE='shizukudos/win98_boot/prepare_replacement.py'
 
 def identity(s):return s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns
 
@@ -223,7 +227,7 @@ class Owner:
         source=self.union.add(self.executable_pin);gate_read,gate_write=os.pipe()
         try:
             launch=[str(Path(sys.executable).resolve()),'-B','-c',GATE_CODE,str(gate_read),str(source['fd']),json.dumps(args)]
-            self.process=subprocess.Popen(launch,cwd=self.output,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=rights[2],pass_fds=(rights[0],rights[1],gate_read,source['fd']),preexec_fn=self.group.place_before_exec)
+            self.process=subprocess.Popen(launch,cwd=self.output,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=rights[2],pass_fds=(rights[0],rights[1],gate_read,source['fd'],*(([self.epoch_context['attempt'].policy_fd]) if hasattr(self,'epoch_context') else [])),preexec_fn=self.group.place_before_exec)
             self.actual_args=args;self.record['owned_pid']=self.process.pid
             # Target exec remains gated even if pidfd allocation/ACK fails.
             self.pidfd=os.pidfd_open(self.process.pid,0)
@@ -246,6 +250,8 @@ class Owner:
             executable=module.PinnedFD(source['fd'],self.executable_pin)
             binding=module.ProcessBinding(self.process,self.pidfd,executable,tuple(args),'/'+str(self.group.path.relative_to('/sys/fs/cgroup')))
             self.admit_native_reaper(binding,module,row)
+            if hasattr(self,'epoch_context'):
+                self.epoch_context['attempt'].bind_child(binding,self.epoch_context['listener'])
         return {'pid':self.process.pid,'argv':args}
     def assert_owned(self):
         need(self.process is not None and self.pidfd is not None and not self.exited(),'owned live pidfd required')
@@ -413,9 +419,137 @@ class Owner:
         if self.pidfd is None:
             need(self.process is None or not self.target_released,'released target missing pidfd; custody must remain held');return
         if not self.exited():signal.pidfd_send_signal(self.pidfd,number)
+    def configure_epoch_context(self,attempt,listener,capture,guard):
+        """Attach internal pre-artifact live objects; no RPC or receipt can do it."""
+        configured = getattr(self,'_configured_native_reaper',None)
+        need(configured is not None and self.process is None and not self.attempted and
+             not hasattr(self,'epoch_context') and callable(guard),'fresh source-admitted guardian epoch context')
+        module,row = configured
+        need(type(attempt) is module.Attempt and type(listener) is module.PrivateListener and
+             attempt.owner is None and listener.owner is None and attempt.staging_claim is not None,
+             'original staged same-process Attempt/channel required')
+        attempt.check();listener.check();guard()
+        source = self.record['runtime_source_pins']['shizukudos/supervisor/native_win98/owned_capture.py']
+        need(capture.__file__ == source['path'] and getattr(capture,'__executed_sha256__',None) == source['sha256'],
+             'held original capture source module required')
+        self.epoch_context = {'module':module,'attempt':attempt,'listener':listener,'capture':capture,
+                              'guard':guard,'monitor':None,'grant':None,'resumed':False,'esp_fd':None}
+
+    def epoch_guard(self):
+        context = self.epoch_context;context['guard']();self.union.check();self.group.check()
+        attempt = context['attempt']
+        if context['resumed']:attempt.check_after_handoff()
+        else:attempt.check()
+        if self.process is not None:self.assert_owned()
+
+    def open_epoch_monitor(self):
+        context = self.epoch_context;module = context['module'];attempt = context['attempt']
+        need(context['monitor'] is None and self.qmp is None and self.process is not None,
+             'first and sole guardian QMP reader required')
+        self.epoch_guard();binding = self._native_identity()
+        need(attempt.owner is binding and context['listener'].owner is binding,'exact original child/policy/channel binding')
+        monitor = context['capture'].OwnedQMP(self.output/'qmp.sock',self.process.pid,
+                  attempt.original_deadline_ns/1e9,pump=self.epoch_guard)
+        context['monitor'] = monitor;self.qmp = monitor.socket
+        self.record['QMP_peer_admitted'] = True
+        self.epoch_guard();initial = monitor.call('query-status')
+        need(type(initial) is dict and initial.get('running') is False and
+             initial.get('status') in ('prelaunch','paused'), 'fresh -S child must be observed stopped before guest execution')
+        fd = os.open(self.output/'esp.img',os.O_RDWR|os.O_NOFOLLOW|os.O_CLOEXEC)
+        context['esp_fd'] = fd
+        esp = module.OwnedESP(fd,self.output/'esp.img')
+        source = self.record['runtime_source_pins']['shizukudos/supervisor/native_win98/owned_capture.py']
+        held = self.union.add(source);monitor_source = module.PinnedFD(held['fd'],source)
+        grant = module.HostGrant(attempt,binding,monitor,context['listener'],esp,monitor_source,guard=self.epoch_guard)
+        context['grant'] = grant
+        self.epoch_guard();monitor.call('cont');self.epoch_guard()
+        receipt = grant.exchange()
+        need(grant.handoff_monitor() is monitor,'same actual monitor/parser must be handed back')
+        # Complete exchange leaves QEMU paused. Resume within BOTH immutable
+        # bounds before any controller can request its first capture operation.
+        attempt.check();monitor.call('cont');attempt.check()
+        context['resumed'] = True;self.epoch_guard()
+        context['receipt'] = receipt;context['requests'] = 0
+        receipt.update(constructor_host_runtime_wiring_implemented=True,QEMU_remains_paused=False,
+                       actual_owner_resumed_within_exchange_deadline=True,
+                       same_guardian_Attempt_and_sole_monitor_retained=True)
+        persist(self.output/'native-host-grant.json',receipt)
+        self.record['actual_host_grant_transmitted'] = True
+        return {'host_grant_transmitted':True,'original_deadline_ns':attempt.original_deadline_ns,
+                'receipt_sha256':hashlib.sha256((json.dumps(receipt,indent=2,allow_nan=False)+'\n').encode()).hexdigest()},[]
+
+    def epoch_peer_facts(self):
+        self.epoch_guard()
+        context = self.epoch_context
+        need(context['resumed'] is True and context['monitor'] is not None,
+             'completed original HostGrant and sole monitor required')
+        peer = struct.unpack('3i',context['monitor'].socket.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12))
+        need(peer[:2] == (self.process.pid,os.getuid()),'current sole monitor peer differs from original child')
+        self.epoch_guard()
+        return list(peer),[]
+
+    def epoch_monitor_call(self,request):
+        need(type(request) is dict and set(request) == {'command','arguments','deadline'}, 'exact bounded epoch monitor request')
+        context = self.epoch_context;need(context['resumed'] is True and context['monitor'] is not None,
+                                         'actual completed HostGrant/owner resume required before controller observation')
+        command,arguments,deadline = (request[k] for k in ('command','arguments','deadline'))
+        need(type(deadline) in (int,float) and math.isfinite(deadline), 'finite controller operation deadline')
+        allowed = {'query-blockstats','query-status','query-block','query-named-block-nodes','query-pci','stop','quit','screendump','pmemsave','human-monitor-command'}
+        need(type(command) is str and command in allowed and (arguments is None or type(arguments) is dict),
+             'scoped post-grant capture or cleanup command required')
+        if command in {'query-blockstats','query-status','query-block','query-named-block-nodes','query-pci','stop','quit'}:
+            need(arguments is None,'no arguments for scoped query/pause/quit')
+        elif command == 'human-monitor-command':
+            need(type(arguments) is dict and set(arguments) == {'command-line'},'exact readonly HMP command')
+            line = arguments['command-line'];allowed_addresses = {
+                context['receipt']['observations']['FlatView']['ecam'][0]+device.bdf*4096
+                for device in context['attempt'].expected.devices}
+            match = re.fullmatch(r'xp /10wx 0x([0-9a-f]{1,16})',line) if type(line) is str else None
+            need(line in ('info registers','info mtree -f') or (match is not None and int(match[1],16) in allowed_addresses),
+                 'only current admitted ECAM or CPU/RAM description reads')
+        else:
+            need(type(arguments) is dict and type(arguments.get('filename')) is str,'exact private capture destination')
+            target = Path(arguments['filename'])
+            need(target.parent == self.output and target.resolve() == target and not target.exists() and
+                 re.fullmatch(r'native-[0-9]{3}(?:\.png|-info\.bin)',target.name) is not None,
+                 'fresh exact private capture filename required')
+            if command == 'screendump':need(set(arguments) == {'filename','format'} and arguments['format'] == 'png' and target.suffix == '.png','exact PNG capture')
+            else:need(set(arguments) == {'filename','val','size'} and type(arguments['val']) is int and arguments['val'] == 0x04000000 and
+                      type(arguments['size']) is int and arguments['size'] == 8192 and target.name.endswith('-info.bin'),'bounded actual native info memory capture')
+        self.epoch_guard();monitor = context['monitor']
+        monitor.deadline = min(deadline,context['attempt'].original_deadline_ns/1e9)
+        result = monitor.call(command,arguments)
+        if command == 'quit' and self.exited():
+            context['guard']();self.union.check();self.group.check();context['attempt']._check_sources_policy()
+        else:self.epoch_guard()
+        # Large readonly observations do not fit16KiB RPC. Pass one newly
+        # persisted/read-leased result FD, never a second monitor reader.
+        context['requests'] += 1
+        need(context['requests'] <= 4096,'finite postepoch QMP capture operation budget')
+        raw = (json.dumps({'command':command,'result':result},separators=(',',':'),allow_nan=False)+'\n').encode()
+        need(len(raw) <= 1<<20,'bounded full QMP result')
+        path = self.output/('qmp-return-%04d.json'%context['requests'])
+        persist(path,{'command':command,'result':result})
+        actual = path.read_bytes()
+        row = {'path':str(path),'bytes':len(actual),'sha256':hashlib.sha256(actual).hexdigest()}
+        entry = self.union.add(row)
+        return {'pin':row,'command':command},[entry['fd']]
+
+    def close_epoch_after_reap(self):
+        context = getattr(self,'epoch_context',None)
+        if context is None:return
+        need(self.confirm_reaped(),'original child must be exactly reaped before policy/channel release')
+        if context['grant'] is not None:context['grant'].close_after_reap()
+        else:
+            try:context['listener'].close()
+            finally:context['attempt'].close()
+        if context['monitor'] is not None:context['monitor'].close();self.qmp = None
+        if context['esp_fd'] is not None:os.close(context['esp_fd']);context['esp_fd'] = None
+
     def admit_qmp(self,fd):
         sock=None
         try:
+            need(not hasattr(self,'epoch_context'),'guardian-owned epoch monitor cannot adopt a controller reader')
             self.assert_owned();sock=socket.socket(fileno=fd)
             need(sock.family==socket.AF_UNIX and sock.type&15==socket.SOCK_STREAM,'actual Unix QMP stream')
             pid,uid,_=struct.unpack('3i',sock.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12))
@@ -439,6 +573,7 @@ class Owner:
         self.record['unresolved_owned_child']=not self.safe_to_release();return self.confirm_reaped()
     def release(self):
         need(self.safe_to_release(),'unreaped child forbids custody release')
+        self.close_epoch_after_reap()
         if self.qmp:self.qmp.close();self.qmp=None
         self.union.close(self)
         if self.pidfd is not None:os.close(self.pidfd);self.pidfd=None
@@ -536,8 +671,17 @@ class Server:
             item={**source,'path':str(target)};entry=self.owner.union.add(item);os.fsync(entry['fd']);self.frozen.add(p['relative'])
             return {'bytes':item['bytes'],'sha256':item['sha256']},[entry['fd']]
         if op=='spawn':
-            need(set(self.sources)-{'shizukudos/supervisor/native_win98/task_custody.py','shizukudos/supervisor/native_win98/custody_rpc.py','shizukudos/supervisor/native_win98/disk_lineage.py',NATIVE_EPOCH_SOURCE}<=self.frozen,'all executed snapshots must be admitted before launch')
+            need(set(self.sources)-{'shizukudos/supervisor/native_win98/task_custody.py','shizukudos/supervisor/native_win98/custody_rpc.py','shizukudos/supervisor/native_win98/disk_lineage.py',NATIVE_EPOCH_SOURCE,GOP_NONCE_SOURCE,GOP_CONSTRUCTOR_SOURCE}<=self.frozen,'all executed snapshots must be admitted before launch')
             return self.owner.spawn(p,rights),[]
+        if op=='epoch-monitor':
+            need(not p and not rights and hasattr(self.owner,'epoch_context'),'internal current epoch context required')
+            return self.owner.open_epoch_monitor()
+        if op=='epoch-peer-facts':
+            need(not p and not rights and hasattr(self.owner,'epoch_context'),'original guardian epoch peer query required')
+            return self.owner.epoch_peer_facts()
+        if op=='epoch-monitor-call':
+            need(not rights and hasattr(self.owner,'epoch_context'),'original guardian epoch monitor required')
+            return self.owner.epoch_monitor_call(p)
         if op=='qmp':
             need(not p and len(rights)==1,'one exact QMP descriptor');fd=rights.pop();return self.owner.admit_qmp(fd),[]
         need(not rights,'unexpected descriptor rights')
@@ -575,14 +719,19 @@ def admitted_module(name,row,union):
     module.__executed_sha256__=sha
     return module
 
-def configure_native_reaper(owner,sources,union):
+def configure_native_reaper(owner,sources,union,*,epoch_context=None):
     """Load the declared guardian-only source before its one gated launch."""
     need(type(owner) is Owner and owner.union is union and not owner.attempted and owner.process is None and
          getattr(owner,'_configured_native_reaper',None) is None,'fresh guardian native reaper configuration required')
     need(type(sources) is dict and sources==owner.record.get('runtime_source_pins'),'native configuration must use declared runtime sources')
     if NATIVE_EPOCH_SOURCE not in sources:return None
     row=sources[NATIVE_EPOCH_SOURCE]
-    module=admitted_module('admitted_native_epoch',row,union)
+    if epoch_context is None:module=admitted_module('admitted_native_epoch',row,union)
+    else:
+        module=epoch_context['module']
+        need(getattr(module,'__executed_sha256__',None)==row['sha256'] and module.__file__==row['path'] and
+             type(epoch_context['attempt']) is module.Attempt,'original retained epoch source/Attempt required')
+        epoch_context['attempt'].check()
     owner._configured_native_reaper=(module,dict(row))
     return None
 
@@ -618,7 +767,9 @@ def admit_runtime_sources(repo,sources,union):
     # Declaring the native module admits bytes only, never a device grant.
     need(isinstance(repo,Path) and repo.is_absolute() and repo.resolve()==repo,'canonical source root')
     legacy=set(SOURCES)
-    need(type(sources) is dict and legacy<=set(sources)<=legacy|{NATIVE_EPOCH_SOURCE,PCI_PREPARATION_SOURCE},'exact legacy or native runtime source closure')
+    need(type(sources) is dict and legacy<=set(sources)<=legacy|{NATIVE_EPOCH_SOURCE,PCI_PREPARATION_SOURCE,GOP_NONCE_SOURCE,GOP_CONSTRUCTOR_SOURCE},'exact legacy or native runtime source closure')
+    need((GOP_NONCE_SOURCE in sources)==(GOP_CONSTRUCTOR_SOURCE in sources),'paired original GOP staging/constructor sources required')
+    if GOP_NONCE_SOURCE in sources:need(NATIVE_EPOCH_SOURCE in sources,'GOP staging requires original epoch source')
     for relative,row in sources.items():need(pin(row,1<<20)==repo/relative,'approved source path differs');union.add(row)
     need(globals().get('__executed_sha256__')==sources[SOURCES[-2]]['sha256'] and getattr(rpc,'__executed_sha256__',None)==sources[SOURCES[-3]]['sha256'],'guardian and RPC must execute independently pinned held bytes')
     return sources
@@ -634,10 +785,10 @@ def admit_pci_preparation(manifest,plan,sources,union):
     union.check();return result
 
 
-def admit_manifest(manifest,union):
+def admit_manifest(manifest,union,*,epoch_context=None):
     fields={'schema','plan','repo','sources','lineage','producers','limits','timeout'}
     need(type(manifest) is dict and fields<=set(manifest) and
-         set(manifest)<=fields|{'preparation_receipt','optional_native_inputs','optional_native_provenance','pci_preparation'} and
+         set(manifest)<=fields|{'preparation_receipt','optional_native_inputs','optional_native_provenance','pci_preparation','gop_cohort'} and
          manifest['schema']=='shizukuos.native-custody-manifest.v1','exact task manifest')
     need(type(manifest['timeout']) is int and 20<=manifest['timeout']<=900,'existing observation timeout')
     repo=Path(manifest['repo']);need(repo.is_absolute() and repo.resolve()==repo,'canonical source root')
@@ -666,7 +817,27 @@ def admit_manifest(manifest,union):
     for row in producers:union.add(row)
     parser=admitted_module('admitted_disk_lineage',manifest['sources'][SOURCES[-1]],union)
     raw=[union.raw(row,maximum) for row,maximum in zip(lineage,(1<<20,4<<20,16<<20))]
-    proof=parser.admit(raw,lineage,built['input_pins']['DISK.IMG'],producers)
+    cohort=None
+    need(('gop_cohort' in manifest)==(epoch_context is not None),'GOP cohort requires internal retained live Attempt')
+    if epoch_context is not None:
+        need(GOP_NONCE_SOURCE in sources and GOP_CONSTRUCTOR_SOURCE in sources,'held GOP production source closure required')
+        epoch_context['guard']();attempt=epoch_context['attempt'];attempt.check()
+        actual={'policy_sha256':hashlib.sha256(attempt.policy).hexdigest(),
+                'nonce_sha256':hashlib.sha256(attempt.nonce).hexdigest(),
+                'original_host_deadline_ns':attempt.original_deadline_ns}
+        declared=manifest['gop_cohort']
+        need(type(declared) is dict and set(declared)=={'record_pins','producer_pins','live_policy'} and
+             declared['live_policy']==actual==epoch_context['live_policy'],'same original owner live policy required')
+        need(type(declared['record_pins']) is dict and set(declared['record_pins'])==parser.COHORT_RECORDS,'exact7 original cohort records required')
+        need(type(declared['producer_pins']) is dict and set(declared['producer_pins'])=={'gop_stage','caller_stage','nonce_stage'},'exact3 producer closures required')
+        for closure in declared['producer_pins'].values():
+            need(type(closure) is list,'explicit original producer closure required')
+            for row in closure:union.add(row)
+        need(declared['producer_pins']['nonce_stage']==[sources[GOP_NONCE_SOURCE],sources[NATIVE_EPOCH_SOURCE],sources[GOP_CONSTRUCTOR_SOURCE]],'current retained nonce staging producer differs')
+        cohort={'records':{name:{'raw':union.raw(row,4<<20),'pin':row} for name,row in declared['record_pins'].items()},
+                'producer_pins':declared['producer_pins'],'live_policy':actual}
+    proof=(parser.admit(raw,lineage,built['input_pins']['DISK.IMG'],producers) if cohort is None else
+           parser.admit(raw,lineage,built['input_pins']['DISK.IMG'],producers,gop_cohort=cohort))
     profile=union.json(lineage[0],1<<20);prepared=union.json(lineage[2])
     union.add(profile['disk']);union.add(profile['boot_template']['file']);union.add(profile['build_receipt'])
     for item in profile['payloads']:union.add(item['file'])
@@ -686,7 +857,11 @@ def admit_manifest(manifest,union):
         need(outer['frozen_header_pin']['bytes']==headerrow['bytes'] and outer['frozen_header_pin']['sha256']==headerrow['sha256'],'actual frozen layout header differs')
     helper_identity=hashlib.sha256(json.dumps(helpers,sort_keys=True,separators=(',',':')).encode()).hexdigest()
     prep=admitted_module('admitted_preparation',sources[HELPERS[1]],union)
-    argv=prep.recipe(Path(plan['input_pins']['qemu']['path']),out);need(argv==plan['qemu_argv'],'actual independently reconstructed recipe differs')
+    binding=None if epoch_context is None else epoch_context['recipe_binding']
+    need(plan.get('prospective_native_epoch_recipe')==binding,'same internal original policy/COM2 recipe required')
+    argv=(prep.recipe(Path(plan['input_pins']['qemu']['path']),out) if binding is None else
+          prep.recipe(Path(plan['input_pins']['qemu']['path']),out,epoch_binding=binding))
+    need(argv==plan['qemu_argv'],'actual independently reconstructed recipe differs')
     admit_pci_preparation(manifest,plan,sources,union)
     # Sender descriptor numbers are symbolic placeholders until SCM transport.
     argv=list(argv);argv[argv.index('-serial')+1]='file:/proc/self/fd/0';argv+=['-debugcon','file:/proc/self/fd/1','-global','isa-debugcon.iobase=0xe9']
@@ -758,19 +933,55 @@ def main():
     os.umask(0o077);union=LeaseUnion();owner=None;controller=None;group=None;server=None;failure=None
     size=args.manifest.stat().st_size;manifest_pin={'path':str(args.manifest),'bytes':size,'sha256':args.manifest_sha256}
     check_bootstrap=globals().get('__bootstrap_check__');need(callable(check_bootstrap),'independent held-byte bootstrap required');check_bootstrap()
-    manifest=union.json(manifest_pin,4<<20);plan,built,sources,proof,argv,helper_identity=admit_manifest(manifest,union);out=args.manifest.parent
-    out=Path(manifest['plan']['path']).parent
-    need(not (out/'custody-result.json').exists() and not (out/'native-result.json').exists(),'fresh one-shot native task')
+    manifest=union.json(manifest_pin,4<<20);epoch_context=None
     unit=subprocess.check_output(['systemctl','show',args.guardian_unit,'--property=MainPID,RuntimeMaxUSec,ActiveState,Delegate','--no-pager'],text=True,timeout=5)
     values=dict(line.split('=',1) for line in unit.splitlines());need(values.get('MainPID')==str(os.getpid()) and values.get('ActiveState')=='active' and values.get('RuntimeMaxUSec')=='infinity' and values.get('Delegate')=='yes','guardian must survive child timeout in actual delegated independent unit')
-    need(manifest['limits']['memory.high']>=4<<30 and manifest['limits']['memory.max']>=manifest['limits']['memory.high'] and manifest['limits']['pids.max']<=64,'explicit native child caps required')
+    limits=manifest.get('limits')
+    need(type(limits) is dict and set(limits)=={'memory.high','memory.max','pids.max','cpu.max'} and
+         all(type(limits[k]) is int and limits[k]>0 for k in ('memory.high','memory.max','pids.max')) and
+         limits['memory.high']>=4<<30 and limits['memory.max']>=limits['memory.high'] and limits['pids.max']<=64 and
+         type(limits['cpu.max']) is str and re.fullmatch('[0-9]+ [0-9]+',limits['cpu.max']) is not None,'explicit original native child caps required')
     parent=Path('/sys/fs/cgroup')/Path('/proc/self/cgroup').read_text().strip().split('::',1)[1].lstrip('/')
-    capture=admitted_module('admitted_capture',sources['shizukudos/supervisor/native_win98/owned_capture.py'],union)
-    need(capture.available_memory_bytes()>=6<<30,'existing6GiB host admission required')
-    import shutil
-    need(shutil.disk_usage(out).free>=(17<<30)+capture.PREFLIGHT_BUDGET,'existing17GiB plus capture budget required')
-    resource_guard(parent,manifest['limits'],None,capture,out,True)
-    group=TaskGroup(parent,'custody-native',manifest['limits']);owner=Owner(union,group,argv,plan['input_pins']['qemu'],manifest['timeout']);owner.output=out;owner.record['disk_lineage']=proof
+    try:
+        sources=admit_runtime_sources(Path(manifest['repo']),manifest['sources'],union)
+        capture=admitted_module('admitted_capture',sources['shizukudos/supervisor/native_win98/owned_capture.py'],union)
+        if manifest.get('schema')=='shizukuos.native-custody-gop-intent.v1':
+            need(GOP_NONCE_SOURCE in sources and GOP_CONSTRUCTOR_SOURCE in sources and NATIVE_EPOCH_SOURCE in sources,
+                 'original source-admitted GOP preparation closure required')
+            preparation_root=Path(manifest['private_root'])
+            def preparation_guard():
+                need(not stopped[0],'guardian cancellation requested')
+                check_bootstrap();union.check();resource_guard(parent,limits,group,capture,preparation_root,
+                    owner is None or owner.start is None)
+            preparation_guard()
+            producer=admitted_module('admitted_gop_nonce_production',sources[GOP_NONCE_SOURCE],union)
+            manifest,epoch_context=producer.prepare_intent(types.SimpleNamespace(**{name:globals()[name] for name in
+                ('admitted_module','persist','GOP_NONCE_SOURCE','GOP_CONSTRUCTOR_SOURCE','NATIVE_EPOCH_SOURCE','HELPERS')}),
+                manifest,union,sources,preparation_guard)
+        plan,built,sources,proof,argv,helper_identity=admit_manifest(manifest,union,epoch_context=epoch_context)
+        out=Path(manifest['plan']['path']).parent
+        need(not (out/'custody-result.json').exists() and not (out/'native-result.json').exists(),'fresh one-shot native task')
+        resource_guard(parent,manifest['limits'],None,capture,out,True)
+    except BaseException:
+        try:
+            if epoch_context is not None:
+                try:epoch_context['listener'].close()
+                finally:epoch_context['attempt'].close()
+        finally:union.close()
+        raise
+    try:
+        group=TaskGroup(parent,'custody-native',manifest['limits'])
+        owner=Owner(union,group,argv,plan['input_pins']['qemu'],manifest['timeout']);owner.output=out;owner.record['disk_lineage']=proof
+    except BaseException:
+        try:
+            if epoch_context is not None:
+                try:epoch_context['listener'].close()
+                finally:epoch_context['attempt'].close()
+        finally:
+            try:
+                if group is not None:group.close()
+            finally:union.close()
+        raise
     owner.record.update(manifest_pin=manifest_pin,plan_pin=manifest['plan'],builder_receipt_pin=plan['input_pins']['build_receipt'],runtime_source_pins=manifest['sources'],task_caps=manifest['limits'],observation_seconds=manifest['timeout'],cleanup_budget_seconds=16,guardian_unit_observation=values,preparation_helper_binding_verified=('preparation_receipt' in manifest or 'preparation_runtime_helpers_sha256' in plan))
     group.owner_pid=os.getpid()
     left,right=socket.socketpair(socket.AF_UNIX,socket.SOCK_SEQPACKET);left.setsockopt(socket.SOL_SOCKET,socket.SO_PASSCRED,1);right.setsockopt(socket.SOL_SOCKET,socket.SO_PASSCRED,1)
@@ -780,13 +991,16 @@ def main():
     runtime_pins=json.dumps({name:sources[name] for name in runtime_names},separators=(',',':'),allow_nan=False)
     need(len(runtime_pins.encode())<=rpc.MAX_PACKET,'bounded exact runtime original pin map')
     command=[sys.executable,'-B','-c',CONTROLLER_BOOTSTRAP,str(rpcfd),str(runfd),rpcrow['path'],runrow['path'],rpcrow['sha256'],runrow['sha256'],'--custody-fd',str(right.fileno()),'--repo',manifest['repo'],'--plan',manifest['plan']['path'],'--plan-sha256',manifest['plan']['sha256'],'--plan-bytes',str(manifest['plan']['bytes']),'--runtime-source-pins-json',runtime_pins,'--runtime-sources-sha256',helper_identity,'--timeout',str(manifest['timeout'])]
+    if epoch_context is not None:command+=['--guardian-epoch']
     if 'pci_preparation' in manifest:
         selected=json.dumps(manifest['pci_preparation'],separators=(',',':'),allow_nan=False)
         need(len(selected.encode())<=rpc.MAX_PACKET,'bounded explicit PCI preparation selection')
         command+=['--pci-preparation-json',selected]
     controller_status=None
     try:
-        configure_native_reaper(owner,manifest['sources'],union)
+        configure_native_reaper(owner,manifest['sources'],union,epoch_context=epoch_context)
+        if epoch_context is not None:
+            owner.configure_epoch_context(epoch_context['attempt'],epoch_context['listener'],capture,epoch_context['guard'])
         need(not stopped[0],'guardian cancellation requested')
         controller=subprocess.Popen(command,stdin=subprocess.DEVNULL,pass_fds=(rpcfd,runfd,right.fileno()),preexec_fn=group.place_before_exec)
         controller_status=ParentWait(controller);controller_status.pidfd=os.pidfd_open(controller.pid,0);right.close()

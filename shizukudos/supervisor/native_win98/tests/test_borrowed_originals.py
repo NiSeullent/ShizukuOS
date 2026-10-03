@@ -296,7 +296,9 @@ class BorrowedOriginalControls(unittest.TestCase):
             args.plan_bytes = args.plan.stat().st_size
             args.runtime_source_pins_json = json.dumps(sources)
             self.serve()
-            return actual_run(args, parser, custody, stack)
+            # The nested CLI fixture disables custody for its other controls.
+            # This wrapper intentionally exercises the real owned RPC client.
+            return actual_run(args, parser, self.client, stack)
 
         actual_borrow = self.client.borrow_original
         def borrow(row):

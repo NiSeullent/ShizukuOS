@@ -22,13 +22,13 @@ def firmware_geometry(code, variables):
         raise ValueError("the supported OVMF CODE/VARS pair must total exactly 4 MiB")
 
 
-def recipe(qemu, out):
+def recipe(qemu, out, epoch_binding=None):
     # Reject QEMU option delimiters, even though no shell is involved.
     if any("," in str(p) or "\n" in str(p) for p in (qemu, out)):
         raise ValueError("QEMU file option paths cannot contain commas or newlines")
     if len(os.fsencode(out / "qmp.sock")) >= 104:
         raise ValueError("use a shorter private output path for the Unix QMP socket")
-    return [str(qemu), "-name", "shz-native-installed-win98", "-machine", "q35", "-accel", "kvm",
+    result = [str(qemu), "-name", "shz-native-installed-win98", "-machine", "q35", "-accel", "kvm",
             "-cpu", "host,+vmx", "-m", "4096M", "-smp", "1", "-nodefaults", "-nic", "none",
             "-display", "none", "-device", "VGA", "-no-reboot",
             "-drive", f"if=pflash,format=raw,unit=0,readonly=on,file={out / 'OVMF_CODE.fd'}",
@@ -36,6 +36,16 @@ def recipe(qemu, out):
             "-drive", f"if=none,id=esp,format=raw,file={out / 'esp.img'}",
             "-device", "virtio-blk-pci,drive=esp,bootindex=1",
             "-serial", f"file:{out / 'serial.log'}", "-qmp", f"unix:{out / 'qmp.sock'},server=on,wait=off"]
+
+    if epoch_binding is not None:
+        if type(epoch_binding) is not dict or set(epoch_binding) != {'policy_fd','listener_path'}:
+            raise ValueError('exact live owner recipe binding required')
+        fd,path = epoch_binding['policy_fd'],Path(epoch_binding['listener_path'])
+        if type(fd) is not int or fd < 3 or path != out/'epoch.sock' or path.resolve() != path or len(os.fsencode(path)) >= 104:
+            raise ValueError('actual owner policy FD and exact private COM2 path required')
+        result += ['-S','-fw_cfg','name=opt/shizuku/native-device-epoch,file=/proc/self/fd/%d'%fd,
+                   '-chardev','socket,id=shz-epoch,path=%s,server=off'%path,'-serial','chardev:shz-epoch']
+    return result
 
 
 
@@ -49,7 +59,7 @@ def preparation_budget(inputs):
     return inputs["firmware_code"]["bytes"] + inputs["firmware_vars"]["bytes"] + (64 << 20)
 
 
-def main(argv=None, *, receipt_sink=None):
+def main(argv=None, *, receipt_sink=None, epoch_binding=None):
     if receipt_sink is not None and not callable(receipt_sink):
         raise TypeError("receipt_sink must be callable")
     parser = argparse.ArgumentParser(description=__doc__)
@@ -87,7 +97,7 @@ def main(argv=None, *, receipt_sink=None):
     if not os.access(inputs["qemu"]["path"], os.X_OK):
         raise ValueError("the pinned QEMU file must be executable")
     out = BUILDER.fresh_output(args.out)
-    command = recipe(inputs["qemu"]["path"], out)
+    command = recipe(inputs["qemu"]["path"], out, epoch_binding)
     budget = preparation_budget(inputs)
     BUILDER.space(out, budget)
     out.mkdir()
@@ -96,6 +106,7 @@ def main(argv=None, *, receipt_sink=None):
               "preparation_budget_bytes": budget, "retained_free_space_bytes": BUILDER.RESERVE, "copies": {},
               "input_pins": {k: {**v, "path": str(v["path"])} for k, v in inputs.items()},
               "native_members": {k: v for k, v in members.items() if k.startswith("SHZDOS/")}}
+    if epoch_binding is not None:result["prospective_native_epoch_recipe"] = dict(epoch_binding)
     try:
         for key, name in (("esp", "esp.img"), ("firmware_code", "OVMF_CODE.fd"), ("firmware_vars", "OVMF_VARS.fd")):
             item = inputs[key]

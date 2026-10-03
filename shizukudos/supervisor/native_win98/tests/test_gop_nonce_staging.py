@@ -30,6 +30,25 @@ class NonceStaging(unittest.TestCase):
         p=self.root/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(raw);p.chmod(0o600)
         return r.local_pin(p)
     def json(self,name,obj):return self.file(name,json.dumps(obj).encode())
+    def test_invalid_preparation_intent_refuses_before_loading_or_writing(self):
+        intent={'schema':'shizukuos.native-custody-gop-intent.v1','repo':str(REPO),'sources':{},'limits':{},'timeout':20,
+                'gop':{'live_stage':{},'firstload_build':{}},'cohort_producers':{'gop_stage':[{}]*3,'caller_stage':[{}]*5,'nonce_stage':[{}]*3},
+                'launch_profile':{},'producers':[{},{}],
+                'native_inputs':{n:{} for n in ('SEABIOS.BIN','WIN98CFG.BIN','KERNEL32.BIN','KERNEL64.BIN','WIN64.IMG')},
+                'optional_native_inputs':{n:{} for n in ('VGACFG.BIN','VGAROM.BIN','W98PERS.BIN')},
+                'optional_native_provenance':{'vga-build-receipt':{}},'raw_bars':{'1':[0]*6,'2':[0]*6},
+                'firmware':{n:{} for n in ('firmware_code','firmware_vars','qemu')},'private_root':str(self.root),'assembly_scratch':None}
+        cust=mock.Mock();cust.admitted_module.side_effect=AssertionError('invalid input reached source execution')
+        cases=[('timeout',True),('timeout',901),('raw_bars',{'1':[True]*6,'2':[0]*6}),
+               ('raw_bars',{'1':[0]*5,'2':[0]*6}),('cohort_producers',{}),('producers',[]),
+               ('optional_native_provenance',{}),('assembly_scratch',True)]
+        for field,value in cases:
+            altered=copy.deepcopy(intent);altered[field]=value
+            with self.subTest(field=field,value=value),self.assertRaises(ValueError):
+                stage.prepare_intent(cust,altered,mock.Mock(),{},lambda:None)
+        cust.admitted_module.assert_not_called()
+        self.assertEqual(list(self.root.iterdir()),[])
+
     def inputs(self):
         rom=b'R'*65536;vga=struct.pack('<6I2Q',0x41475657,1,136,1,16,0,0xe0000000,16<<20)
         vga+=hashlib.sha256(rom).digest()+b's'*32+b'c'*32

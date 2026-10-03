@@ -1,4 +1,4 @@
-"""Prospective owned host endpoint; existing guardian/controller wiring is absent.
+"""Owned host endpoint; task_custody can retain one live guardian exchange.
 
 Protocol syntax alone conveys no hardware authority. Borrowed descriptors and
 the actual sole QMP/Popen context stay owned by the caller through exact reap.
@@ -276,8 +276,38 @@ class Attempt:
         self.last_now = now
         if self.exchange_stop_ns is not None:
             need(self.exchange_stop_ns == self.original_exchange_stop_ns and now < self.exchange_stop_ns, 'additional immutable exchange bound expired')
+        self._check_sources_policy()
+
+    def _check_sources_policy(self):
         for source in self.sources: source.check()
         need(self.expected.policy(self.nonce, self._deadline) == self.policy and self.policy_fd is not None and identity(os.fstat(self.policy_fd)) == self.policy_identity and os.pread(self.policy_fd, 257, 0) == self.policy and fcntl.fcntl(self.policy_fd, fcntl.F_GET_SEALS) == SEALS, 'immutable sealed policy/source binding differs')
+
+    def bind_child(self,binding,listener):
+        self.check()
+        need(type(binding) is ProcessBinding and type(listener) is PrivateListener and
+             self.owner is None and listener.owner is None and not self.consumed,
+             'single actual child binding before first exchange required')
+        binding.check();listener.check()
+        self.owner = listener.owner = binding
+
+    def check_after_handoff(self):
+        """Retain original lifetime after exchange; never renew either deadline.
+
+        The10s exchange deadline has served transmission and the owner's
+        immediate resume. It is not a new deadline for Windows observation.
+        """
+        grant = getattr(self,'completed_host_grant',None)
+        need(type(grant) is HostGrant and grant.attempt is self and grant.binding is self.owner and
+             getattr(grant,'_monitor_handed_off',False) is True and grant.grant_bytes_written == 272 and
+             not hasattr(grant,'failure_after_grant_bytes') and not getattr(grant,'_handoff_failed',False),
+             'actual completed exchange/sole monitor handoff required')
+        need(self.origin_pid == os.getpid() and self.origin_thread == threading.get_ident(),
+             'original minting process/thread changed')
+        now = time.monotonic_ns()
+        need(self.original_deadline_ns == self._deadline and self.last_now <= now < self._deadline and
+             self.exchange_stop_ns == self.original_exchange_stop_ns,
+             'original overall lifetime or fixed exchange bound changed')
+        self.last_now = now;self.owner.check();self._check_sources_policy()
 
     def reserve_staging(self):
         """Reserve one pre-exec clone; its nonce is prospective, never a grant."""
@@ -641,7 +671,10 @@ class HostGrant:
     """
     def __init__(self, attempt, binding, monitor, listener, esp, monitor_source, guard=None):
         need(type(attempt) is Attempt and type(binding) is ProcessBinding and type(listener) is PrivateListener, 'concrete owned context required')
-        need(attempt.owner is None and listener.owner is None, 'fresh unbound policy/channel ownership required')
+        need(((attempt.owner is None and listener.owner is None) or
+              (attempt.owner is binding and listener.owner is binding)) and
+             not hasattr(attempt,'host_grant_claim'), 'fresh single child-bound policy/channel exchange required')
+        attempt.host_grant_claim = object()
         # Once associated with an already-created child, even constructor
         # refusal must preserve policy/channel custody until exact reap.
         attempt.owner = listener.owner = binding
@@ -765,6 +798,7 @@ class HostGrant:
             # would create an independently budgeted reader after this epoch.
             qmp.retired = True
             self._monitor_handed_off = True
+            self.attempt.completed_host_grant = self
             return monitor
         except BaseException:
             self._handoff_failed = True

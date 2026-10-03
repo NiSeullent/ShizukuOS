@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import struct
 import types
+import time
 
 BASE = frozenset(('KERNEL.SYS','COMMAND.COM','HIMEMX.EXE','CONFIG.SYS','AUTOEXEC.BAT',
                   'SHZGOP.DRV','SHZGOP.VXD','SHZGOP.INF','GOPINST.EXE','GPREQ.INI'))
@@ -200,4 +201,133 @@ def stage(attempt, epoch, replacement, held, live_pin, firstload_pin, repo, out,
         st = out.stat(follow_symlinks=False)
         if (st.st_dev,st.st_ino) == owned:
             for name in ('replacement-profile.json','stage-result.json'):(out/name).unlink(missing_ok=True)
+        raise
+
+
+def prepare_intent(custody, intent, union, sources, guard):
+    """Execute the authorized pre-artifact phase inside the sole guardian.
+
+    Returns internal live objects, not a resumable receipt/caller grant flag.
+    Native builder/firmware outputs are fresh; originals remain union-leased.
+    """
+    expected = {'schema','repo','sources','limits','timeout','gop','cohort_producers','launch_profile',
+                'producers','native_inputs','optional_native_inputs','optional_native_provenance',
+                'raw_bars','firmware','private_root','assembly_scratch'}
+    need(type(intent) is dict and set(intent) == expected and intent['schema'] == 'shizukuos.native-custody-gop-intent.v1',
+         'exact private current-epoch preparation intent required')
+    need(type(intent['timeout']) is int and 20 <= intent['timeout'] <= 900, 'original bounded observation/preparation budget')
+    need(type(intent['gop']) is dict and set(intent['gop']) == {'live_stage','firstload_build'}, 'exact original GOP stage/firstload inputs')
+    need(type(intent['native_inputs']) is dict and set(intent['native_inputs']) == {'SEABIOS.BIN','WIN98CFG.BIN','KERNEL32.BIN','KERNEL64.BIN','WIN64.IMG'},
+         'five original native inputs; cloned disk is produced here')
+    need(type(intent['firmware']) is dict and set(intent['firmware']) == {'firmware_code','firmware_vars','qemu'}, 'exact firmware/executable input pins')
+    need(type(intent['optional_native_inputs']) is dict and set(intent['optional_native_inputs']) == {'VGACFG.BIN','VGAROM.BIN','W98PERS.BIN'},
+         'real source-bound VGA and persistence selection required for default-GOP cohort')
+    need(type(intent['optional_native_provenance']) is dict and set(intent['optional_native_provenance']) == {'vga-build-receipt'},
+         'exact separately pinned source-bound VGA producer required')
+    need(type(intent['producers']) is list and len(intent['producers']) == 2,
+         'two independent original launch/constructor producers required')
+    need(type(intent['cohort_producers']) is dict and set(intent['cohort_producers']) == {'gop_stage','caller_stage','nonce_stage'} and
+         all(type(intent['cohort_producers'][name]) is list and len(intent['cohort_producers'][name]) == size
+             for name,size in (('gop_stage',3),('caller_stage',5),('nonce_stage',3))),
+         'exact original3 staging producer closures required')
+    need(type(intent['raw_bars']) is dict and set(intent['raw_bars']) == {'1','2'} and
+         all(type(words) is list and len(words) == 6 and all(type(word) is int and 0 <= word < 1<<32 for word in words)
+             for words in intent['raw_bars'].values()), 'literal source-bound6 raw BAR words per role required')
+    need(intent['assembly_scratch'] is None or type(intent['assembly_scratch']) is str,
+         'optional explicit private assembly path required')
+    repo = Path(intent['repo'])
+    replacement = custody.admitted_module('epoch_owned_constructor',sources[custody.GOP_CONSTRUCTOR_SOURCE],union)
+    root = replacement.safe_path(intent['private_root']);st = root.stat()
+    need(root.is_dir() and st.st_uid == os.geteuid() and st.st_mode & 0o777 == 0o700,
+         'existing owned mode0700 private preparation root required')
+    replacement.private_output(root/'output-policy-probe')
+    names = {'nonce':root/'nonce','clone':root/'clone','native':root/'native','vm':root/'vm'}
+    need(all(not p.exists() for p in names.values()), 'fresh one-shot preparation outputs required')
+    originals = [*intent['native_inputs'].values(),*intent['optional_native_inputs'].values(),
+                 *intent['optional_native_provenance'].values(),*intent['firmware'].values(),intent['launch_profile'],
+                 *intent['producers'],*intent['gop'].values()]
+    for row in originals:union.add(row)
+    guard()
+    epoch = custody.admitted_module('epoch_owned_live_policy',sources[custody.NATIVE_EPOCH_SOURCE],union)
+    native_builder = custody.admitted_module('epoch_owned_native_builder',sources[custody.HELPERS[0]],union)
+    preparer = custody.admitted_module('epoch_owned_vm_preparer',sources[custody.HELPERS[1]],union)
+    # Admit complete original builder code BEFORE actual component compilation.
+    # Its existing nested lease registries propagate SIGIO to this union.
+    for path in native_builder.source_files():union.add(replacement.local_pin(path))
+    launch = union.json(intent['launch_profile']);baseline_pin = launch['constructor_profile'];union.add(baseline_pin)
+    live = union.json(intent['gop']['live_stage']);gop_pin = live['source_gop_profile'];gop = union.json(gop_pin)
+    gop_profile_pin = gop['constructor_profile'];caller_profile_pin = live['constructor_profile']
+    for row in (gop_profile_pin,caller_profile_pin):union.add(row)
+    caller_profile = union.json(caller_profile_pin);union.add(caller_profile['disk'])
+    expected_nonce_producers = [sources[custody.GOP_NONCE_SOURCE],sources[custody.NATIVE_EPOCH_SOURCE],sources[custody.GOP_CONSTRUCTOR_SOURCE]]
+    need(intent['cohort_producers'].get('nonce_stage') == expected_nonce_producers, 'current independent nonce/epoch/constructor sources required')
+    for closure in intent['cohort_producers'].values():
+        for row in closure:union.add(row)
+    # Both preparation and observation have original bounded budgets. Round
+    # DOWN to an exactly representable existing OwnedQMP absolute deadline.
+    deadline_ns = int((time.monotonic()+2*intent['timeout']+16)*1e9)
+    for _ in range(16):
+        if int((deadline_ns/1e9)*1e9) == deadline_ns:break
+        deadline_ns -= 1
+    need(int((deadline_ns/1e9)*1e9) == deadline_ns, 'exact original QMP deadline representation required')
+    bars = intent['raw_bars'];need(type(bars) is dict and set(bars) == {'1','2'}, 'explicit observed raw BAR selection')
+    bars = {int(role):tuple(words) for role,words in bars.items()}
+    optional = intent['optional_native_inputs']
+    def borrowed(name):
+        row = optional[name];return epoch.PinnedFD(union.rows[row['path']]['fd'],row)
+    attempt = epoch.Attempt(borrowed('VGACFG.BIN'),borrowed('VGAROM.BIN'),borrowed('W98PERS.BIN'),bars,deadline_ns)
+    listener = None
+    try:
+        preparation_stop = time.monotonic()+intent['timeout']
+        def check():
+            guard();union.check();attempt.check()
+            need(time.monotonic() < preparation_stop, 'original preparation phase budget consumed')
+        held = borrowed_registry(union,replacement,check)
+        staged = stage(attempt,epoch,replacement,held,intent['gop']['live_stage'],intent['gop']['firstload_build'],
+                       repo,names['nonce'],check,1<<30)
+        clone = replacement.prepare(Path(staged['constructor_profile']['path']),staged['constructor_profile']['sha256'],
+                    names['clone'],'reflink',0,1<<30,large_output_root=root,borrowed_inputs=held)
+        clone_pin = replacement.local_pin(names['clone']/'preparation.json');union.add(clone_pin)
+        selected = {'DISK.IMG':clone['destination'],**intent['native_inputs']}
+        args = ['--out',str(names['native'])]
+        flags = {'DISK.IMG':'disk','SEABIOS.BIN':'rom','WIN98CFG.BIN':'config','KERNEL32.BIN':'kernel32',
+                 'KERNEL64.BIN':'kernel64','WIN64.IMG':'win64-img','VGACFG.BIN':'vga-config','VGAROM.BIN':'vga-rom',
+                 'W98PERS.BIN':'persistence-config','vga-build-receipt':'vga-build-receipt'}
+        for name,row in {**selected,**optional,**intent['optional_native_provenance']}.items():
+            union.add(row);need(name in flags, 'unsupported native original selection')
+            args += ['--'+flags[name],row['path'],'--'+flags[name]+'-sha256',row['sha256']]
+        if intent['assembly_scratch'] is not None:args += ['--assembly-scratch',intent['assembly_scratch']]
+        returned = [];check();native_builder.main(args,receipt_sink=returned.append);check()
+        result_pin = replacement.local_pin(names['native']/'result.json');built = union.json(result_pin)
+        need(returned == [union.raw(result_pin,16<<20)] and built.get('VM_executed') is False,
+             'actual native builder return must equal independently leased output')
+        esp = {'path':str(names['native']/built['artifact']['path']),'bytes':built['artifact']['bytes'],'sha256':built['artifact']['sha256']}
+        union.add(esp)
+        binding = {'policy_fd':attempt.policy_fd,'listener_path':str(names['vm']/'epoch.sock')}
+        args = ['--out',str(names['vm'])]
+        for name,row in {'esp':esp,'build-receipt':result_pin,**{k.replace('_','-'):v for k,v in intent['firmware'].items()}}.items():
+            args += ['--'+name,row['path'],'--'+name+'-sha256',row['sha256']]
+        returned = [];check();preparer.main(args,receipt_sink=returned.append,epoch_binding=binding);check()
+        plan_pin = replacement.local_pin(names['vm']/'vm-plan.json');plan = union.json(plan_pin)
+        need(returned == [union.raw(plan_pin,16<<20)] and plan.get('prospective_native_epoch_recipe') == binding,
+             'actual fresh VM preparation return differs from same live policy recipe')
+        listener = epoch.PrivateListener(names['vm']/'epoch.sock')
+        records = {'baseline_profile':baseline_pin,'gop_stage':gop_pin,'gop_profile':gop_profile_pin,
+                   'caller_stage':intent['gop']['live_stage'],'caller_profile':caller_profile_pin,
+                   'nonce_stage':replacement.local_pin(names['nonce']/'stage-result.json'),
+                   'firstload_build':intent['gop']['firstload_build']}
+        policy = {'policy_sha256':replacement.digest(attempt.policy),'nonce_sha256':replacement.digest(attempt.nonce),
+                  'original_host_deadline_ns':attempt.original_deadline_ns}
+        manifest = {'schema':'shizukuos.native-custody-manifest.v1','repo':intent['repo'],'sources':sources,
+                    'limits':intent['limits'],'timeout':intent['timeout'],'plan':plan_pin,
+                    'lineage':[staged['constructor_profile'],intent['launch_profile'],clone_pin],'producers':intent['producers'],
+                    'optional_native_inputs':optional,'optional_native_provenance':intent['optional_native_provenance'],
+                    'gop_cohort':{'record_pins':records,'producer_pins':intent['cohort_producers'],'live_policy':policy}}
+        check();custody.persist(root/'generated-custody-manifest.json',manifest)
+        return manifest,{'module':epoch,'attempt':attempt,'listener':listener,'recipe_binding':binding,
+                         'live_policy':policy,'guard':guard}
+    except BaseException:
+        try:
+            if listener is not None:listener.close()
+        finally:attempt.close()
         raise

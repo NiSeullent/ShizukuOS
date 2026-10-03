@@ -18,6 +18,7 @@ from pathlib import Path
 import shutil
 import socket
 import struct
+import stat
 import subprocess
 import time
 
@@ -172,6 +173,64 @@ def get_custody(fd):
     return module.Client(fd,os.getppid())
 
 
+class GuardianQMP:
+    """RPC observations; guardian owns the first/sole actual QMP parser.
+
+    Peer facts are queried by RPC from the guardian's original socket. No
+    socket descriptor or second parser is transferred to the controller.
+    """
+    class PeerFacts:
+        def __init__(self,custody,pump):self.custody,self.pump,self.closed = custody,pump,False
+        def getsockopt(self,level,option,size):
+            if (level,option,size) != (socket.SOL_SOCKET,socket.SO_PEERCRED,12):raise ValueError('readonly actual peer facts only')
+            if self.closed:raise ValueError('guardian peer facts proxy closed')
+            row,rights = self.custody.call('epoch-peer-facts',{},timeout=6,pump=self.pump)
+            try:
+                if rights or type(row) is not list or len(row) != 3 or any(type(value) is not int or value < 0 for value in row):
+                    raise ValueError('exact actual guardian peer facts without descriptor rights required')
+                return struct.pack('3i',*row)
+            finally:
+                for fd in rights:os.close(fd)
+        def close(self):self.closed = True
+    def __init__(self,custody,pid,deadline,pump):
+        self.custody,self.deadline,self.pump = custody,deadline,pump;self.socket = None
+        row,rights = custody.call('epoch-monitor',{},timeout=max(.001,deadline-time.monotonic()),pump=pump)
+        try:
+            if rights or type(row) is not dict or set(row) != {'host_grant_transmitted','original_deadline_ns','receipt_sha256'} or row['host_grant_transmitted'] is not True:
+                raise ValueError('actual guardian returned exchange required')
+            if type(row['original_deadline_ns']) is not int or row['original_deadline_ns'] <= time.monotonic_ns():raise ValueError('original owner deadline expired')
+            self.deadline = min(deadline,row['original_deadline_ns']/1e9)
+            self.socket = self.PeerFacts(custody,pump)
+            if struct.unpack('3i',self.socket.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12))[:2] != (pid,os.getuid()):
+                raise ValueError('current sole monitor peer differs from actual guardian child')
+            self.receipt_sha256 = row['receipt_sha256']
+        except BaseException:
+            if self.socket is not None:self.socket.close();self.socket = None
+            raise
+        finally:
+            for fd in rights:os.close(fd)
+    def call(self,command,arguments=None):
+        if self.socket is None:raise ValueError('guardian monitor proxy closed')
+        row,rights = self.custody.call('epoch-monitor-call',{'command':command,'arguments':arguments,'deadline':self.deadline},
+                                      timeout=max(.001,min(6,self.deadline-time.monotonic())),pump=self.pump)
+        try:
+            if len(rights) != 1 or type(row) is not dict or set(row) != {'pin','command'} or row['command'] != command:
+                raise ValueError('exact fresh guardian QMP result descriptor required')
+            pin = row['pin'];fd = rights[0];info = os.fstat(fd)
+            if type(pin) is not dict or set(pin) != {'path','bytes','sha256'} or type(pin['bytes']) is not int or not 0 < pin['bytes'] <= 1<<20 or info.st_size != pin['bytes'] or not stat.S_ISREG(info.st_mode):
+                raise ValueError('bounded original QMP result regular extent required')
+            raw = os.pread(fd,pin['bytes']+1,0)
+            if len(raw) != pin['bytes'] or hashlib.sha256(raw).hexdigest() != pin['sha256']:raise ValueError('actual guardian QMP result snapshot differs')
+            result = json.loads(raw,object_pairs_hook=unique_fields)
+            if type(result) is not dict or set(result) != {'command','result'} or result['command'] != command:raise ValueError('fresh result command differs')
+            return result['result']
+        finally:
+            for fd in rights:os.close(fd)
+    def hmp(self,command):return self.call('human-monitor-command',{'command-line':command})
+    def close(self):
+        if self.socket is not None:self.socket.close();self.socket = None
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--plan',type=Path,required=True)
@@ -184,6 +243,7 @@ def main():
     parser.add_argument('--plan-bytes',type=int,help=argparse.SUPPRESS)
     parser.add_argument('--runtime-source-pins-json',help=argparse.SUPPRESS)
     parser.add_argument('--pci-preparation-json',help=argparse.SUPPRESS)
+    parser.add_argument('--guardian-epoch',action='store_true',help=argparse.SUPPRESS)
     args=parser.parse_args()
     if not timeout_valid(args.timeout):parser.error('timeout must be 20..900 seconds')
     custody=get_custody(args.custody_fd)
@@ -370,8 +430,13 @@ def run_plan(args,parser,custody,leases):
             capture.atomic_json(out/'native-command.json',child.args);record['command_sha256']=sha(out/'native-command.json')
         logs.close_writers()
         print(json.dumps({'stage':'native-owned-VM-started','pid':child.pid}),flush=True)
-        monitor=capture.OwnedQMP(out/'qmp.sock',child.pid,start+args.timeout,pump=pump)
-        if custody is not None:custody.admit_qmp(monitor)
+        if getattr(args,'guardian_epoch',False):
+            if custody is None:raise ValueError('actual guardian epoch context required')
+            monitor=GuardianQMP(custody,child.pid,start+args.timeout,logs.pump)
+            record['actual_host_grant_transmitted']=True;record['host_grant_receipt_sha256']=monitor.receipt_sha256
+        else:
+            monitor=capture.OwnedQMP(out/'qmp.sock',child.pid,start+args.timeout,pump=pump)
+            if custody is not None:custody.admit_qmp(monitor)
         next_capture=10
         while child.poll() is None and time.monotonic()-start<args.timeout:
             elapsed=time.monotonic()-start;pump()

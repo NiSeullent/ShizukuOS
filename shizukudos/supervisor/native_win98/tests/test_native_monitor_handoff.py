@@ -180,6 +180,27 @@ class Handoff(unittest.TestCase):
         self.assertEqual(os.fstat(exchange.attempt.policy_fd).st_size, 256)
         self.assertIs(exchange.qmp.monitor._native_epoch_claim, exchange.qmp.claim)
 
+    def test_retained_overall_lifetime_does_not_renew_exchange_deadline(self):
+        exchange,monitor,_=self.complete()
+        with self.assertRaisesRegex(ValueError,'completed exchange'):exchange.attempt.check_after_handoff()
+        exchange.handoff_monitor()
+        later=exchange.attempt.exchange_stop_ns+1
+        self.assertLess(later,exchange.attempt.original_deadline_ns)
+        with patch.object(host.time,'monotonic_ns',return_value=later):
+            with self.assertRaisesRegex(ValueError,'exchange bound'):exchange.attempt.check()
+            exchange.attempt.check_after_handoff()
+        self.assertEqual(exchange.attempt.exchange_stop_ns,exchange.attempt.original_exchange_stop_ns)
+        with patch.object(host.time,'monotonic_ns',return_value=exchange.attempt.original_deadline_ns):
+            with self.assertRaisesRegex(ValueError,'overall lifetime'):exchange.attempt.check_after_handoff()
+
+    def test_retained_handoff_refuses_replaced_grant_and_exchange_bound(self):
+        exchange,monitor,_=self.complete();exchange.handoff_monitor()
+        attempt=exchange.attempt;attempt.check_after_handoff()
+        attempt.completed_host_grant=object()
+        with self.assertRaisesRegex(ValueError,'completed exchange'):attempt.check_after_handoff()
+        attempt.completed_host_grant=exchange;attempt.exchange_stop_ns+=1
+        with self.assertRaisesRegex(ValueError,'overall lifetime'):attempt.check_after_handoff()
+
     def test_success_returns_same_live_parser_and_retires_old_adapters(self):
         exchange, monitor, source = self.complete()
         self.assertTrue(callable(getattr(exchange, 'handoff_monitor', None)),

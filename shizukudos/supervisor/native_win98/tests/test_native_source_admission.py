@@ -57,6 +57,14 @@ class SourceAdmission(unittest.TestCase):
                                                self.sources if sources is None else sources,
                                                self.union)
 
+    def test_gop_production_closure_requires_both_helpers_and_epoch(self):
+        nonce=self.write_source(guardian.GOP_NONCE_SOURCE,b'VALUE = "nonce"\n')
+        constructor=self.write_source(guardian.GOP_CONSTRUCTOR_SOURCE,b'VALUE = "constructor"\n')
+        for addition in ({guardian.GOP_NONCE_SOURCE:nonce},
+                         {guardian.GOP_NONCE_SOURCE:nonce,guardian.GOP_CONSTRUCTOR_SOURCE:constructor}):
+            with self.subTest(addition=addition),self.assertRaises(ValueError):self.admit({**self.sources,**addition})
+        self.admit({**self.sources,guardian.GOP_NONCE_SOURCE:nonce,guardian.GOP_CONSTRUCTOR_SOURCE:constructor,NATIVE:self.native})
+
     def test_legacy_complete_closure_retains_actual_read_leases(self):
         self.admit()
         self.assertEqual(set(self.union.rows), {row['path'] for row in self.sources.values()})
