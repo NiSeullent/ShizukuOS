@@ -9,6 +9,7 @@ Neither is a recompilation of the other: they share only kcommon/ headers and th
 header, and have independent entry code, descriptor tables, memory managers and schedulers.
 """
 import argparse
+from contextlib import ExitStack
 import json
 import shutil
 import sys
@@ -63,6 +64,8 @@ def source_hashes():
     directories += [REPO / "shizukufs/v1/libsfs", REPO / "drivers/ahci_native"]
     paths = {p for directory in directories for p in directory.rglob("*")
              if p.is_file() and p.suffix in (".c", ".h", ".asm", ".ld")}
+    paths.update(SHZ / "install" / name for name in
+                 ("native_release_admission.py", "native_release_policy.py", "native_payload_ingest.py"))
     paths.update([Path(__file__).resolve(), SHZ / "tools/shzlib.py", SHZ / "win64/pe_parse.c",
                   SHZ / "win64/pe_parse.h",
                   SHZ / "supervisor/src/font8x8_basic.h"])
@@ -110,25 +113,43 @@ def build_kernel(name, directory, cflags, nasm_fmt, ld_emul, out_name, extra_c=(
             "sha256": sha256_file(binary), "elf_sha256": sha256_file(elf)}
 
 
-def main():
+def build_all(args, stack):
     global BUILD
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", type=Path, help="new canonical private output directory; default keeps the existing build location")
-    args = parser.parse_args()
     if args.out is not None:
         output = args.out
         if not output.is_absolute() or output.resolve() != output or output.exists() or not output.parent.is_dir():
-            parser.error("--out requires a new canonical absolute directory with an existing parent")
+            raise ValueError("--out requires a new canonical absolute directory with an existing parent")
         if output.is_relative_to(REPO) and not output.is_relative_to(REPO / "build"):
-            parser.error("--out cannot write generated kernels into visible project sources")
+            raise ValueError("--out cannot write generated kernels into visible project sources")
         if shutil.disk_usage(output.parent).free < (17 << 30) + (64 << 20):
-            parser.error("--out requires the retained 17 GiB reserve plus a 64 MiB component budget")
+            raise ValueError("--out requires the retained 17 GiB reserve plus a 64 MiB component budget")
         BUILD = output
     for tool in ("nasm", "gcc", "ld", "nm", "objcopy", "objdump"):
         if not shutil.which(tool):
             raise SystemExit(f"required tool missing: {tool}")
     results = {}
     built_sources = source_hashes()
+    tools = {name: {"path": str(Path(shutil.which(name)).resolve()),
+                   "sha256": sha256_file(Path(shutil.which(name)).resolve())}
+             for name in ("nasm", "gcc", "ld", "nm", "objcopy", "objdump")}
+    for program in ("cc1", "as"):
+        selected = run(["gcc", "-print-prog-name=" + program], capture=True).stdout.strip()
+        actual = Path(selected) if Path(selected).is_absolute() else Path(shutil.which(selected) or "")
+        if not actual.is_file():
+            raise RuntimeError("cannot pin actual GCC child executable: " + program)
+        actual = actual.resolve()
+        tools["gcc-" + program] = {"path": str(actual), "sha256": sha256_file(actual)}
+    release = None
+    if args.native_release_manifest is not None:
+        sys.path.insert(0, str(SHZ / "install"))
+        import native_release_admission
+        BUILD.mkdir(mode=0o700)
+        release = stack.enter_context(native_release_admission.admit_for_build(
+            args.native_release_manifest, BUILD / "private-release",
+            [{"path": str(REPO / name), "bytes": (REPO / name).stat().st_size, "sha256": sha}
+             for name, sha in built_sources.items()] +
+            [{"path": row["path"], "bytes": Path(row["path"]).stat().st_size, "sha256": row["sha256"]}
+             for row in tools.values()]))
     k32 = build_kernel("kernel32", "kernel32", K32_FLAGS, "elf32", "elf_i386", "KERNEL32.BIN")
     # The PE32+ parser is shared with the host tests; Kernel64 links the same source freestanding.
     # ShizukuFS v1 (ext4 format, jbd2): the portable libsfs sources are linked freestanding (kernel64/sfs_mount.c).
@@ -138,9 +159,10 @@ def main():
     # Same sources with SHZ_STANDALONE: hypercalls served in-kernel over COM1/PIT/RTC so it boots under QEMU TCG.
     # The standalone profile is the only one with a disk: the original AHCI core (drivers/ahci_native) is linked
     # behind kernel64/ahci_blk.c; under the Supervisor no device is passed through and the block registry stays empty.
-    k64s = build_kernel("kernel64s", "kernel64", K64_FLAGS + ["-DSHZ_STANDALONE"], "elf64", "elf_x86_64",
+    k64s = build_kernel("kernel64s", "kernel64", K64_FLAGS + ["-DSHZ_STANDALONE"] + (["-DSHZ_NATIVE_INSTALLER_RELEASE"] if release else []), "elf64", "elf_x86_64",
                         "KERNEL64S.BIN", extra_c=[SHZ / "win64" / "pe_parse.c", STUB_DIR / "standalone64.c",
-                                                  REPO / "drivers" / "ahci_native" / "ahci.c", *libsfs, *dead_screen_sources()])
+                                                  REPO / "drivers" / "ahci_native" / "ahci.c", *libsfs, *dead_screen_sources(),
+                                                  *([release["source"]] if release else [])])
     stub = build_standalone_stub()
     k32s = build_kernel("kernel32s", "kernel32", K32_FLAGS + ["-DSHZ_STANDALONE"], "elf32", "elf_i386", "KERNEL32S.BIN",
                         extra_c=[SHZ / "kernel32" / "standalone" / "standalone32.c"])
@@ -161,11 +183,31 @@ def main():
                                       "commands": [[str(x) for x in c] for c in k32s["commands"]]}
     if source_hashes() != built_sources:
         raise RuntimeError("kernel sources changed during build; no verified receipt written")
+    if any(sha256_file(Path(row["path"])) != row["sha256"] for row in tools.values()):
+        raise RuntimeError("kernel compiler/tool bytes changed; no verified receipt written")
+    # Close the admission custody before writing any successful receipt.
+    stack.close()
     shzlib.write_json(BUILD / "kernels-build-result.json", {
         "built_utc": shzlib.utc_now(), "git": shzlib.git_state(), "kernels": results,
         "kernel32_machine": "EM_386 ELF32", "kernel64_machine": "EM_X86_64 ELF64",
-        "sources_sha256": built_sources})
+        "sources_sha256": built_sources, "tools_sha256": tools,
+        "private": release is not None, "public_artifact": release is None,
+        "native_release": None if release is None else
+            {k: v for k, v in release.items() if k != "source"}})
     print(json.dumps({k: {"bytes": v["bytes"], "sha256": v["sha256"]} for k, v in results.items()}, indent=2))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--out", type=Path, help="new canonical private output directory")
+    parser.add_argument("--native-release-manifest", type=Path,
+                        help="private actual saved producer manifest; installer K64S only")
+    args = parser.parse_args()
+    if args.native_release_manifest is not None:
+        if args.out is None or any((p / ".git").exists() for p in args.out.parents):
+            parser.error("native release requires explicit fresh private --out outside Git")
+    with ExitStack() as stack:
+        build_all(args, stack)
 
 
 if __name__ == "__main__":
