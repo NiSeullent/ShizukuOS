@@ -33,7 +33,9 @@ static void find_vxd(void) {
         pop es
     }
 }
-static void query_vxd(void) {
+static WORD query_operation;
+static void query_vxd_operation(WORD operation) {
+    query_operation=operation;
     query_linear=0;query_result=0xffff;
     _asm {
         .386
@@ -43,7 +45,8 @@ static void query_vxd(void) {
         push edx
         push esi
         push edi
-        mov edx,OP_SHZGOP_CURRENT_BOOT
+        xor edx,edx
+        mov dx,word ptr [query_operation]
         xor ecx,ecx
         call dword ptr [vxd_entry]
         mov word ptr [query_result],ax
@@ -85,13 +88,13 @@ int shz_gop_current_boot_ready(const unsigned char *expected_provider,unsigned c
     unmap=(UnmapLinear)GetProcAddress(kernel,"UnMapLS");
     if(!unmap) unmap=(UnmapLinear)GetProcAddress(kernel,"UNMAPLS");
     if(!map || !unmap) return 0;
-    query_vxd();if(query_result!=1 || !query_linear) return 0;
+    query_vxd_operation(OP_SHZGOP_CURRENT_BOOT);if(query_result!=1 || !query_linear) return 0;
     alias=map(query_linear);if(!alias || !(alias>>16)) return 0;
     if((WORD)alias>0x10000UL-sizeof first ||
        GetSelectorLimit((WORD)(alias>>16))<(DWORD)(WORD)alias+sizeof first-1) {unmap((LPVOID)alias);return 0;}
     _fmemcpy(first,(const void FAR *)alias,sizeof first);unmap((LPVOID)alias);
     if(!shzgop_probe_admit(first,sizeof first,expected_provider,&mode) || !live_fsegment(first)) return 0;
-    query_vxd();if(query_result!=1 || !query_linear) return 0;
+    query_vxd_operation(OP_SHZGOP_CURRENT_BOOT);if(query_result!=1 || !query_linear) return 0;
     alias=map(query_linear);if(!alias || !(alias>>16)) return 0;
     if((WORD)alias>0x10000UL-sizeof second ||
        GetSelectorLimit((WORD)(alias>>16))<(DWORD)(WORD)alias+sizeof second-1) {unmap((LPVOID)alias);return 0;}
@@ -101,4 +104,34 @@ int shz_gop_current_boot_ready(const unsigned char *expected_provider,unsigned c
     if(memcmp(first,second,sizeof first) ||
        !shzgop_probe_admit(second,sizeof second,expected_provider,&mode) || !live_fsegment(second)) return 0;
     memcpy(snapshot,second,sizeof second);return 1;
+}
+
+static int epoch_snapshot(MapLinear map,UnmapLinear unmap,unsigned char out[SHZGOP_EPOCH_BYTES]) {
+    DWORD alias;
+    query_vxd_operation(OP_SHZGOP_GUARDIAN_EPOCH);
+    if(query_result!=1 || !query_linear) return 0;
+    alias=map(query_linear);if(!alias || !(alias>>16)) return 0;
+    if((WORD)alias>0x10000UL-SHZGOP_EPOCH_BYTES ||
+       GetSelectorLimit((WORD)(alias>>16))<(DWORD)(WORD)alias+SHZGOP_EPOCH_BYTES-1) {
+        unmap((LPVOID)alias);return 0;
+    }
+    _fmemcpy(out,(const void FAR *)alias,SHZGOP_EPOCH_BYTES);unmap((LPVOID)alias);return 1;
+}
+int shz_gop_current_guardian_ready(const unsigned char *provider,const unsigned char *nonce,
+                                  unsigned char *snapshot,unsigned bytes,
+                                  unsigned char *epoch,unsigned epochbytes) {
+    HMODULE kernel;MapLinear map;UnmapLinear unmap;
+    unsigned char first[SHZGOP_EPOCH_BYTES],second[SHZGOP_EPOCH_BYTES];
+    unsigned char probe[SHZGOP_PROBE_BYTES];
+    if(!provider || !nonce || !epoch || epochbytes!=SHZGOP_EPOCH_BYTES ||
+       !shz_gop_current_boot_ready(provider,snapshot,bytes)) return 0;
+    kernel=GetModuleHandle("KERNEL");if(!kernel) return 0;
+    map=(MapLinear)GetProcAddress(kernel,"MapLS");if(!map) map=(MapLinear)GetProcAddress(kernel,"MAPLS");
+    unmap=(UnmapLinear)GetProcAddress(kernel,"UnMapLS");if(!unmap) unmap=(UnmapLinear)GetProcAddress(kernel,"UNMAPLS");
+    if(!map || !unmap || !epoch_snapshot(map,unmap,first) ||
+       !shzgop_epoch_admit(first,sizeof first,nonce,snapshot) ||
+       !shz_gop_current_boot_ready(provider,probe,sizeof probe) || memcmp(snapshot,probe,sizeof probe) ||
+       !epoch_snapshot(map,unmap,second) || memcmp(first,second,sizeof first) ||
+       !shzgop_epoch_admit(second,sizeof second,nonce,probe)) return 0;
+    memcpy(epoch,second,sizeof second);return 1;
 }
