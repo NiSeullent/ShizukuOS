@@ -325,7 +325,7 @@ start:
  loop .skipspace
  jmp refused
 .argument:
- cmp cx,12
+ cmp cx,10
  jb refused
  mov di,winpath
  mov bx,0
@@ -355,7 +355,7 @@ start:
  jne refused
  ; Final component must be WIN.COM; validation restricts DOS83 components.
  mov si,winpath+3
- xor dx,dx
+ mov dx,si
  xor cx,cx
  xor bp,bp
 .validate:
@@ -411,6 +411,8 @@ start:
  je refused
  mov si,di
  sub si,7
+ cmp si,dx
+ jne refused
  mov di,winname
  mov cx,8
  repe cmpsb

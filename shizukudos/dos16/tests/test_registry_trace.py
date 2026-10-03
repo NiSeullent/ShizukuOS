@@ -158,6 +158,8 @@ class StartupTests(unittest.TestCase):
    ticks[0]+=20;u.mem_write(0x46c,struct.pack('<I',ticks[0]))
   u.hook_add(UC_HOOK_CODE,clock,begin=0x10000+self.symbols['read_bios_tick'],end=0x10000+self.symbols['read_bios_tick'])
   u.hook_add(UC_HOOK_INTR,intr);off=self.symbols['start'];u.emu_start(0x10000+off,1<<20,count=50000)
+  self.startup_paths={name:bytes(u.mem_read(0x10000+self.symbols[name],80)).split(b'\0',1)[0].decode('ascii')
+                      for name in ('winpath','systempath','userpath')}
   self.assertTrue(exitcode);return calls,vectors,exitcode[0]
  def test_wrapper_rejects_injection_before_target_access(self):
   for arg in (' C:\\WINDOWS\\WIN.COM & X',' C:\\LONGWINDOWS\\WIN.COM',' D:WIN.COM'):
@@ -166,6 +168,28 @@ class StartupTests(unittest.TestCase):
   for opts in ({'image':b'MZ'},{'extent':0x10000}):
    calls,vectors,status=self.startup(' C:\\WINDOWS\\WIN.COM',**opts)
    self.assertEqual(status,1);self.assertNotIn(0x2521,calls)
+ def test_wrapper_rejects_other_final_basenames_before_target_access(self):
+  for path in (r'C:\AWIN.COM',r'C:\MYWIN.COM',r'C:\X\AWIN.COM',r'C:\X\MYWIN.COM',r'C:\WINDOWS\SYSTEM\AWIN.COM',r'C:\WINDOWS\SYSTEM\MYWIN.COM'):
+   with self.subTest(path=path):
+    calls,_,status=self.startup(' '+path)
+    self.assertEqual(status,1);self.assertNotIn(0x3d00,calls)
+    self.assertNotIn(0x2521,calls);self.assertNotIn(0x4b00,calls)
+ def test_wrapper_accepts_exact_root_win_and_sibling_registry_paths(self):
+  for path in (r'C:\WIN.COM',r'c:\win.com'):
+   with self.subTest(path=path):
+    calls,vectors,status=self.startup(' '+path)
+    self.assertIn(0x3d00,calls);self.assertIn(0x4b00,calls)
+    self.assertEqual(self.startup_paths,{'winpath':r'C:\WIN.COM','systempath':r'C:\SYSTEM.DAT','userpath':r'C:\USER.DAT'})
+    self.assertEqual(vectors,{0x21:(0,0x3000),0x2f:(16,0x3000)})
+    self.assertEqual(status,1);self.assertNotIn(0x5b00,calls) # Modeled EXEC fails, never diagnostic success.
+ def test_wrapper_accepts_exact_nested_win_and_sibling_registry_paths(self):
+  for directory in (r'C:\W',r'C:\WINDOWS',r'C:\WINDOWS\SYSTEM'):
+   with self.subTest(directory=directory):
+    calls,vectors,status=self.startup(' '+directory+r'\WIN.COM')
+    self.assertIn(0x3d00,calls);self.assertIn(0x4b00,calls)
+    self.assertEqual(self.startup_paths,{'winpath':directory+r'\WIN.COM','systempath':directory+r'\SYSTEM.DAT','userpath':directory+r'\USER.DAT'})
+    self.assertEqual(vectors,{0x21:(0,0x3000),0x2f:(16,0x3000)})
+    self.assertEqual(status,1);self.assertNotIn(0x5b00,calls)
  def test_failed_exec_restores_vectors_without_log_or_success(self):
   calls,vectors,status=self.startup(' C:\\WINDOWS\\WIN.COM')
   self.assertIn(0x4b00,calls);self.assertEqual(vectors,{0x21:(0,0x3000),0x2f:(16,0x3000)})
