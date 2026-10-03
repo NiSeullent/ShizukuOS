@@ -17,6 +17,43 @@ static struct shz_pointer point(int32_t x,int32_t y,int relative,uint16_t id) {
     struct shz_pointer p={0};p.count=1;p.relative=(uint8_t)relative;
     p.contacts[0]=(struct shz_contact){x,y,id,1,1,1};return p;
 }
+static void descriptor_classes(struct shz_pointer_adapter *a,struct sink *s) {
+    /* Genuine short-item descriptors: one touchpad Application and unrelated
+     * keyboard/sensor Applications with separate IDs, plus mixed-axis mouse. */
+    const uint8_t composite[]={
+        0x05,0x0d,0x09,5,0xa1,1,0x85,1,0x09,0x42,0x15,0,0x25,1,
+        0x75,1,0x95,1,0x81,2,0x75,7,0x81,1,0x05,1,0x09,0x30,0x09,0x31,
+        0x75,8,0x95,2,0x25,0x7f,0x81,2,0xc0,
+        0x05,1,0x09,6,0xa1,1,0x85,2,0x05,7,0x09,1,0x15,0,0x25,1,
+        0x75,8,0x95,1,0x81,2,0xc0,
+        0x05,1,0x09,4,0xa1,1,0x85,3,0x09,0x30,0x09,0x31,0x25,0x7f,
+        0x75,8,0x95,2,0x81,2,0xc0};
+    const uint8_t mixed[]={0x05,1,0x09,2,0xa1,1,0x09,0x30,0x15,0x81,0x25,0x7f,
+        0x75,8,0x95,1,0x81,6,0x09,0x31,0x81,2,0xc0};
+    const uint8_t pad[]={1,1,50,60},keyboard[]={2,1},sensor[]={3,10,100},axes[]={1,100};
+    struct shz_hid_layout l;struct shz_pointer_adapter old;unsigned calls;
+    C(shz_hid_parse_report(composite,sizeof composite,&l)==SHZ_DRIVER_OK && l.touchpad);
+    C(l.report_count==3 && l.reports[0].pointer_class==2 && l.reports[1].pointer_class==4 && l.reports[2].pointer_class==4);
+    C(shz_pointer_adapter_report(a,&l,pad,sizeof pad)==SHZ_DRIVER_OK && a->tracking);
+    old=*a;calls=s->calls;
+    C(shz_pointer_adapter_report(a,&l,keyboard,sizeof keyboard)==SHZ_UNSUPPORTED);
+    C(calls==s->calls && !memcmp(a,&old,sizeof old));
+    C(shz_pointer_adapter_report(a,&l,sensor,sizeof sensor)==SHZ_UNSUPPORTED);
+    C(calls==s->calls && !memcmp(a,&old,sizeof old));
+    /* Real tip-up preserves its pointer class/axes and resets the baseline. */
+    {const uint8_t lift[]={1,0,50,60};C(shz_pointer_adapter_report(a,&l,lift,sizeof lift)==SHZ_DRIVER_OK && !a->tracking);}
+    old=*a;calls=s->calls;
+    C(shz_hid_parse_report(mixed,sizeof mixed,&l)==SHZ_DRIVER_OK);
+    C(shz_pointer_adapter_report(a,&l,axes,sizeof axes)==SHZ_UNSUPPORTED);
+    C(calls==s->calls && !memcmp(a,&old,sizeof old));
+    /* One ReportID shared across pointer and keyboard Applications is not a
+     * supported class contract; retaining an app mask must reject it too. */
+    {uint8_t joined[sizeof composite];memcpy(joined,composite,sizeof joined);
+     for(size_t i=0;i+1<sizeof joined;++i)if(joined[i]==0x85 && joined[i+1]==2)joined[i+1]=1;
+     C(shz_hid_parse_report(joined,sizeof joined,&l)==SHZ_DRIVER_OK && l.reports[0].pointer_class==6);
+     const uint8_t shared[]={1,1,50,60,1};C(shz_pointer_adapter_report(a,&l,shared,sizeof shared)==SHZ_UNSUPPORTED);
+     C(calls==s->calls && !memcmp(a,&old,sizeof old));}
+}
 int main(void) {
     struct sink s={.valid=1};struct shz_pointer_adapter a={0},old;
     struct shz_pointer_sink ops={&s,validate,emit};struct shz_pointer p;
@@ -52,5 +89,6 @@ int main(void) {
     p=point(-1,1,1,0);C(shz_pointer_adapter_input(&a,&p)==SHZ_DRIVER_OK && s.x==-1 && s.y==1);
     p.relative=2;calls=s.calls;C(shz_pointer_adapter_input(&a,&p)==SHZ_MALFORMED && calls==s.calls);
     p.relative=1;p.count=0;C(shz_pointer_adapter_input(&a,&p)==SHZ_MALFORMED && calls==s.calls);
+    descriptor_classes(&a,&s);
     printf("pointer adapter: %u assertions PASS\n",checks);return 0;
 }

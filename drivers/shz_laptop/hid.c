@@ -41,7 +41,7 @@ static int report_index(struct shz_hid_layout *l,uint8_t id) {
 }
 int shz_hid_parse_report(const uint8_t *p,size_t n,struct shz_hid_layout *out) {
     struct shz_hid_layout l;struct hid_global g,stack[4];struct hid_local local;
-    uint8_t groups[8];unsigned depth=0,push=0,next_group=0;size_t pos=0;
+    uint8_t groups[8],classes[8];unsigned depth=0,push=0,next_group=0;size_t pos=0;
     if(!p || !out || !n) return SHZ_INVALID;
     if(n>SHZ_HID_DESCRIPTOR_MAX) return SHZ_CAPACITY;
     shz_zero(&l,sizeof(l));shz_zero(&g,sizeof(g));shz_zero(&local,sizeof(local));
@@ -83,14 +83,18 @@ int shz_hid_parse_report(const uint8_t *p,size_t n,struct shz_hid_layout *out) {
                 (local.first>>16)!=(local.last>>16))) return SHZ_MALFORMED;
             if(tag==10) {
                 uint32_t usage=local_usage(&local,0);uint8_t group=depth ? groups[depth-1]:0;
+                uint8_t app=depth ? classes[depth-1]:0;
                 if(depth==8)return SHZ_CAPACITY;
-                if(usage==0x000d0005u && value==1)l.touchpad=1;
-                if(usage==0x00010002u && value==1)l.pointer=1;
+                if(value==1) {
+                    app=0;
+                    if(usage==0x000d0005u){l.touchpad=1;app=2;}
+                    if(usage==0x00010002u){l.pointer=1;app=1;}
+                }
                 if(usage==0x000d0022u) {
                     if(next_group==SHZ_HID_CONTACTS)return SHZ_CAPACITY;
                     group=(uint8_t)++next_group;
                 }
-                groups[depth++]=group;
+                groups[depth]=group;classes[depth++]=app;
             } else if(tag==12) {
                 if(!depth || bytes)return SHZ_MALFORMED;
                 --depth;
@@ -107,6 +111,8 @@ int shz_hid_parse_report(const uint8_t *p,size_t n,struct shz_hid_layout *out) {
                     (local.last&65535u)!=(uint32_t)g.maximum ||
                     (local.first>>16)!=g.page))return SHZ_UNSUPPORTED;
                 index=report_index(&l,g.report);if(index<0)return index;
+                l.reports[index].pointer_class=(uint8_t)(l.reports[index].pointer_class|
+                    (classes[depth-1]?classes[depth-1]:4));
                 bits=g.size*g.count;
                 if(bits>SHZ_HID_REPORT_MAX*8u-l.reports[index].bits)return SHZ_CAPACITY;
                 if(!(value&1u)) {
@@ -175,17 +181,21 @@ int shz_hid_decode(const struct shz_hid_layout *l,const uint8_t *p,size_t n,
 int shz_hid_pointer(const struct shz_hid_layout *l,const uint8_t *p,size_t n,struct shz_pointer *out) {
     struct shz_hid_value v[SHZ_HID_FIELDS];struct shz_pointer result;
     struct shz_contact groups[SHZ_HID_CONTACTS+1];uint8_t tip[SHZ_HID_CONTACTS+1];
-    size_t count,i;unsigned group;int r,expected=-1;
-    if(!out)return SHZ_INVALID;
-    if(!l || (!l->pointer && !l->touchpad))return SHZ_UNSUPPORTED;
+    size_t count,i;unsigned group,axes=0;int r,expected=-1,mode=-1;uint8_t app=0,id;
+    if(!l || !out)return SHZ_INVALID;
     r=shz_hid_decode(l,p,n,v,SHZ_HID_FIELDS,&count);if(r)return r;
+    id=l->numbered?p[0]:0;
+    for(i=0;i<l->report_count;i++)if(l->reports[i].id==id){app=l->reports[i].pointer_class;break;}
+    if(app!=1 && app!=2)return SHZ_UNSUPPORTED;
     shz_zero(&result,sizeof(result));shz_zero(groups,sizeof(groups));shz_zero(tip,sizeof(tip));
     for(i=0;i<count;i++) {
         group=v[i].group;if(group>SHZ_HID_CONTACTS)return SHZ_MALFORMED;
         if(v[i].page==1 && (v[i].usage==0x30 || v[i].usage==0x31)) {
-            if(v[i].usage==0x30){groups[group].x=v[i].value;groups[group].has_x=1;}
-            else {groups[group].y=v[i].value;groups[group].has_y=1;}
-            if(v[i].flags&4u)result.relative=1;
+            int relative=(v[i].flags&4u)!=0;
+            if(mode>=0 && mode!=relative)return SHZ_UNSUPPORTED;
+            mode=relative;++axes;
+            if(v[i].usage==0x30){if(groups[group].has_x)return SHZ_UNSUPPORTED;groups[group].x=v[i].value;groups[group].has_x=1;}
+            else {if(groups[group].has_y)return SHZ_UNSUPPORTED;groups[group].y=v[i].value;groups[group].has_y=1;}
         } else if(v[i].page==9 && v[i].usage>=1 && v[i].usage<=8) {
             if(v[i].value<0 || v[i].value>1)return SHZ_MALFORMED;
             if(v[i].value)result.buttons=(uint8_t)(result.buttons|(uint8_t)(1u<<(v[i].usage-1u)));
@@ -200,6 +210,8 @@ int shz_hid_pointer(const struct shz_hid_layout *l,const uint8_t *p,size_t n,str
             expected=v[i].value;
         }
     }
+    if(!axes)return SHZ_UNSUPPORTED;
+    result.relative=(uint8_t)mode;
     for(group=0;group<=SHZ_HID_CONTACTS;group++) {
         if(!tip[group] && groups[group].has_x && groups[group].has_y)groups[group].active=1;
         if(groups[group].active) {
@@ -210,6 +222,6 @@ int shz_hid_pointer(const struct shz_hid_layout *l,const uint8_t *p,size_t n,str
         }
     }
     if(expected>=0 && expected!=result.count)return SHZ_UNSUPPORTED; /* No partial-frame aggregation yet. */
-    if(!result.count && !l->touchpad)return SHZ_UNSUPPORTED;
+    if(!result.count && app!=2)return SHZ_UNSUPPORTED;
     *out=result;return SHZ_DRIVER_OK;
 }
