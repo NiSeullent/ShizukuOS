@@ -140,7 +140,7 @@ class OwnedObservation:
     def __init__(self,key,check,held,source,clone_fd,clone_pin,pidfd,child,observed):
         need(key is _OBSERVATION_KEY,'fixed-control observation issuer required')
         import threading
-        self._pid=os.getpid();self._thread=threading.get_ident();self._active=True
+        self._pid=os.getpid();self._thread=threading.get_ident();self._active=True;self._compiler_hold_started=False
         self._guard=check;self._held=held;self._source=source;self._clone_fd=clone_fd
         self._clone_pin=clone_pin;self._pidfd=pidfd;self._child=child;self._observed=json.loads(json.dumps(observed))
     def __reduce__(self):raise TypeError('live observation cannot be serialized')
@@ -149,6 +149,14 @@ class OwnedObservation:
         need(self._active and self._pid==os.getpid() and self._thread==threading.get_ident(),'observation owner lifetime differs')
         self._guard(True)
         need(self._child.poll() is not None and select.select([self._pidfd],[],[],0)[0],'actual owned child must remain reaped')
+    def begin_compiler_hold(self,deadline):
+        # Only after actual fixed observation/reap and before its phase expires.
+        self.check();now=time.monotonic()
+        need(not self._compiler_hold_started,'compiler hold already started')
+        need(type(deadline) in (int,float) and now<deadline<=now+4500,
+             'bounded root-owned compiler hold deadline required')
+        self._compiler_hold_started=True;self._guard.deadline=deadline
+        self.check()
     def summary(self):
         self.check();source=self._held[self._source['path']]
         return {'grade':'SOURCE_AND_OBSERVATION_CUSTODY_ONLY','source':dict(self._source),
@@ -161,7 +169,7 @@ class OwnedObservation:
         need(replacement.hash_fd(self._clone_fd,self._clone_pin['bytes'],self._guard)==self._clone_pin['sha256'],'held observed clone final SHA differs')
         self.check()
 
-def run(request, retain=None):
+def run(request, retain=None, compiler_hold_deadline=None):
     need(type(request) is dict and set(request)=={'schema','source','observer','observer_receipt','qemu','mcopy','lock','output','guest_seconds'},'exact private control request required')
     need(request['schema']=='shizukuos.private-baseline-control.v1' and type(request['guest_seconds']) is int and 1<=request['guest_seconds']<=600,'bounded600s guest request required')
     out=replacement.safe_path(request['output']);need(not out.exists() and out.parent.is_dir(),'fresh private output required')
@@ -277,6 +285,7 @@ def run(request, retain=None):
             need(callable(retain),'live hold hook required')
             observation=OwnedObservation(_OBSERVATION_KEY,check,held,source,clone_fd,{'path':str(clone),'bytes':source['bytes'],'sha256':result['clone_sha256']},pidfd,child,observed)
             try:
+                if compiler_hold_deadline is not None:observation.begin_compiler_hold(compiler_hold_deadline)
                 retain(observation) # Lifetime/challenge serving only; return value never affects grade.
                 observation.finish()
             finally:observation._active=False

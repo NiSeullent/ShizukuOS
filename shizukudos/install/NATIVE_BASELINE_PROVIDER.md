@@ -9,14 +9,17 @@ No policy/ingester source is changed here. Original Microsoft DOS control is
 never labeled Windows on ShizukuDOS, default GOP, SE certainty or key application.
 
 `Client(source_pin, fresh_owned0700_directory, control_request=None,
-borrowed_launcher=None)` internally starts its exact reviewed provider script
+borrowed_launcher=None, owner_unit=None)` internally starts its exact reviewed provider script
 with a pinned canonical Python executable using -I. It owns actual Popen/pidfd,
 checks actual argv/interpreter inode, and accepts one post-exec connection in
 its new private SOCK_SEQPACKET listener. SO_PEERCRED PID must equal this actual
 child; retained pidfd detects its death. The service independently verifies the
 listener creator PID and its actual parent PID. A new owner-random handshake
 and fresh32B per-request challenge plus exact sequence prevent saved-response
-reuse. Packets are bounded64KiB. The overall owner lifetime is bounded900s.
+reuse. Packets are bounded64KiB. Guest remains≤600s and the observation phase≤900s. Total keeper lifetime is
+bounded5400s from actual owner creation; after a successful reaped observation,
+the root-owned compiler hold is min(total deadline, observed time+4500s). It is
+started exactly once and cannot extend an expired guest/observation phase.
 A prefork socketpair/sameUID/caller-selected PID cannot identify the child.
 
 Without control_request, source-only keeper holds actual owned0400 regular
@@ -72,3 +75,15 @@ source/tool paths, conflicts/aliases, replay and borrowed ingester union lifecyc
 They use tiny explicitly synthetic offline original fixtures, no QEMU/Win98/VM.
 Existing actual observer C uses modeled Win32 controls only; actual Windows and
 QEMU ownership must be evaluated separately in the reviewed private trial.
+
+Windows keeper mode requires an actual independently owned delegated owner_unit
+whose MainPID is this launcher, Delegate=yes and RuntimeMax=infinity. It creates
+a new owned descendant cgroup and moves only its newly forked Popen there before
+exec. Postexec peerPID still matches this actual child. No attached PID or global
+cgroup is used. Cancellation first lets the keeper run its actual cleanup. After
+12s the launcher may TERM/KILL only its observed own descendant group members;
+it never SIGKILLs the keeper while another live descendant exists or an actual
+direct child remains unreaped. Source/clone inputs remain held during that wait.
+Cleanup may outlive phase expiry until actual quiescence; source-only mode retains
+its separate3s cancellation grace. Long-child tests use actual independent Linux
+delegated test units and explicitly modeled pre-OBSERVE phase, no QEMU/Windows.
