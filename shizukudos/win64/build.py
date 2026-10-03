@@ -444,7 +444,8 @@ def runtime_source_paths():
                 ".def", ".spec", ".pem", ".der", ".bin", ".txt", ".htm", ".html", ".js", ".cmake", ".ini", ".idl", ".rgs"}
     return sorted({p for directory in (W64, SHZ / "install", SHZ / "abi")
                    for p in directory.rglob("*") if p.is_file() and p.suffix.lower() in suffixes}
-                  | {NTSYS, SHZ / "tools/shzlib.py", SHZ / "upstream/manifest.json"})
+                  | {NTSYS, SHZ / "tools/shzlib.py", SHZ / "upstream/manifest.json",
+                     SHZ / "boot_profile/storage/provenance.h"})
 
 
 def main():

@@ -184,6 +184,13 @@ int ahci_blk_init(void)
     dev.write = ahci_write;
     dev.flush = ahci_flush_dev;
     dev.priv = &disk;
+    dev.storage.version=SHZ_STORAGE_VERSION;dev.storage.size=sizeof dev.storage;
+    dev.storage.transport=SHZ_STORAGE_SATA;dev.storage.bus=d->bus;
+    dev.storage.device=d->dev;dev.storage.function=d->fn;
+    dev.storage.unit=disk.port;dev.storage.multiplier=0xffff;
+    dev.storage.sectors=dev.sectors;dev.storage.block_size=dev.sector_size;
+    memcpy(dev.model,disk.identity.model,sizeof dev.model);
+    dev.flags=(disk.identity.features&AHCI_FEATURE_FLUSH_EXT)?BLK_F_FLUSH:0;
     dev.driver = "ahci";                            /* storage-track metadata (blk.h extensions) */
     dev.irq_mode = "poll";
     dev.queue_depth = 1;

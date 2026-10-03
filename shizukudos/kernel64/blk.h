@@ -65,6 +65,7 @@ struct blk_dev {
     uint32_t reg_index;                         /* position in the registry (0-based), set by blk_register() */
     uint32_t part_scheme, scan_notes;           /* partition: PART_SCHEME_*; whole device: PSCAN_* of its scan */
     int scan_result;                            /* whole device: partitions found, -1 = no table/not scanned */
+    shz_storage_locator_t storage;             /* kernel driver observed hardware identity; zero = unknown */
     char part_name[37];                         /* GPT partition name (ASCII fold) */
 };
 #define BLK_F_READONLY 1u

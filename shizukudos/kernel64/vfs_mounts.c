@@ -2,6 +2,7 @@
  * Kernel64 volume mount table (see vfs_mounts.h).
  */
 #include "vfs_mounts.h"
+#include "blk_authority.h"
 
 static vfs_mount_t table[VFS_MAX_MOUNTS];
 static unsigned count;
@@ -18,10 +19,17 @@ static void copy_str(char *dst, const char *src, size_t cap)
 char vfs_mount_next(fsnode_t *root, fsvol_t *vol, const char *fstype, const char *device, int (*shutdown)(fsvol_t *))
 {
     char l;
+    blk_dev_t *backing;
     if (count >= VFS_MAX_MOUNTS || !root || !vol) return 0;
+    /* Kernel mount owner resolves its actual registered device before exposing
+     * namespace state. A claim or unknown device refuses the mount. */
+    backing = device ? blk_find(device) : 0;
+    if (blk_authority_enter(backing, 1)) return 0;
     for (l = 'D'; l <= 'Z'; ++l) {
         if (fs_root_of(l)) continue;
         if (fs_mount(l, root)) continue;
+        backing->flags |= BLK_F_MOUNTED;
+        blk_authority_leave(backing, 0, 0);
         vol->letter = l;
         table[count].letter = l;
         copy_str(table[count].fstype, fstype, sizeof table[count].fstype);
@@ -32,6 +40,7 @@ char vfs_mount_next(fsnode_t *root, fsvol_t *vol, const char *fstype, const char
         ++count;
         return l;
     }
+    blk_authority_leave(backing, 0, 0);
     return 0;
 }
 

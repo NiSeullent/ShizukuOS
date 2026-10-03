@@ -19,7 +19,7 @@
 #endif
 
 static jmp_buf return_to_test;
-static unsigned checks, exit_code, sequence;
+static unsigned checks, exit_code, fixture_sequence;
 static unsigned arch_calls, mem_calls, sched_calls, timer_calls, sti_calls, ipc_calls, ipc_sequence;
 static unsigned service_calls, service_sequence, owner_calls;
 static unsigned qa_calls, ntdrv_calls, setup_calls, autorun_calls, desktop_calls, control_calls, report_calls;
@@ -47,10 +47,10 @@ static void mock_exit(unsigned code)
 static long mock_timer(unsigned vector, uint32_t period)
 {
     CHECK(vector == VEC_TIMER && period == TICK_US);
-    ++timer_calls; ++sequence;
+    ++timer_calls; ++fixture_sequence;
     return SHZ_OK;
 }
-static void mock_sti(void) { ++sti_calls; ++sequence; }
+static void mock_sti(void) { ++sti_calls; ++fixture_sequence; }
 long mock_hcall(hcreg_t opcode, hcreg_t domain, hcreg_t unused, hcreg_t *out)
 {
     CHECK(opcode == SHZ_HC_DOMAIN_STATE && domain == SHZ_DOM_WIN98 && unused == 0 && out != NULL);
@@ -79,23 +79,29 @@ long mock_hcall(hcreg_t opcode, hcreg_t domain, hcreg_t unused, hcreg_t *out)
 #endif
 #undef kmain
 
-void arch_init(void) { ++arch_calls; ++sequence; }
+void arch_init(void) { ++arch_calls; ++fixture_sequence; }
 void mem_init(const shz_bootinfo_t *bi)
 {
     CHECK(bi->magic == SHZ_BOOTINFO_MAGIC);
-    ++mem_calls; ++sequence;
+    ++mem_calls; ++fixture_sequence;
 }
-void sched_init(void) { ++sched_calls; ++sequence; }
+void sched_init(void) { ++sched_calls; ++fixture_sequence; }
 void kprintf(const char *format, ...) { (void)format; }
 void kpanic(const char *format, ...)
 {
     fprintf(stderr, "unexpected production KASSERT: %s\n", format);
     mock_exit(199);
 }
-void run_self_tests(const shz_bootinfo_t *bi) { (void)bi; ++qa_calls; ++sequence; }
-void report_final(void) { ++report_calls; ++sequence; }
+void run_self_tests(const shz_bootinfo_t *bi) { (void)bi; ++qa_calls; ++fixture_sequence; }
+void report_final(void) { ++report_calls; ++fixture_sequence; }
 unsigned tests_failed(void) { return 0; }
 #if defined(TEST_KERNEL32)
+/* Native AP boundaries: this entry fixture advertises no AP request. */
+int k32_ap_policy(const shz_bootinfo_t *bi,unsigned *count)
+{ CHECK(bi != NULL && count != NULL); *count=0; return 0; }
+int k32_ap_snapshot(const shz_bootinfo_t *bi,unsigned count)
+{ (void)bi; (void)count; CHECK(0); return -1; }
+int k32_ap_run(void) { CHECK(0); return -1; }
 void thread_sleep_ms(uint32_t milliseconds)
 {
     simulated_ms += milliseconds;
@@ -106,52 +112,78 @@ static thread_t server_thread;
 void ipc_init(const shz_bootinfo_t *bi)
 {
     CHECK(bi->channel_count == 1);
-    ++ipc_calls; ipc_sequence = ++sequence;
+    ++ipc_calls; ipc_sequence = ++fixture_sequence;
 }
 void ipc_server_thread(void *unused) { (void)unused; }
 thread_t *thread_create(const char *name, void (*worker)(void *), void *arg)
 {
     CHECK(strcmp(name, "ipc-server") == 0 && worker == ipc_server_thread && arg == NULL);
     CHECK(ipc_calls == 1);
-    ++thread_calls; ++sequence;
+    ++thread_calls; ++fixture_sequence;
     return &server_thread;
 }
 uint32_t ipc_requests_served(void) { return 0; }
 #else
 uint64_t phys_base_va;
 static uint8_t archive[64];
-void ds_native_init(void) { ++ds_calls; ++sequence; }
-void ds_native_control(void) { ++control_calls; ++sequence; }
+void ds_native_init(void) { ++ds_calls; ++fixture_sequence; }
+void ds_native_control(void) { ++control_calls; ++fixture_sequence; }
 void ds_native_timer_ready(void) { }
 void krandom_init(const void *data, size_t length)
 {
     CHECK(data != NULL && length == sizeof(shz_bootinfo_t));
-    ++random_calls; ++sequence;
+    ++random_calls; ++fixture_sequence;
 }
-void fs_init(void) { ++fs_calls; ++sequence; }
+void fs_init(void) { ++fs_calls; ++fixture_sequence; }
 int fs_load_archive(const uint8_t *data, uint64_t length)
 {
     CHECK(data == archive && length == sizeof archive);
-    ++archive_calls; ++sequence;
+    ++archive_calls; ++fixture_sequence;
     return 7;
 }
-void disk_init(void) { ++disk_calls; ++sequence; }
+void disk_init(void) { ++disk_calls; ++fixture_sequence; }
+/* No modeled storage devices in entry fixture. Actual binder is separately
+ * tested against the production registry in host/test_blk_authority.c. */
+int k64_boot_storage_bind(const shz_bootinfo_t *bi,int archive_loaded)
+{
+ CHECK(bi != NULL && archive_loaded && disk_calls==1 && sti_calls==0);
+ return -1;
+}
 void shz_cpu_bringup_prepare(const shz_bootinfo_t *bi, uint64_t initial_cr3)
 {
     CHECK(bi != NULL && bi->magic == SHZ_BOOTINFO_MAGIC && initial_cr3 == 0x1000);
     CHECK(mem_calls == 1 && arch_calls == 1 && sti_calls == 0);
-    ++bringup_prepare_calls; bringup_prepare_sequence = ++sequence;
+    ++bringup_prepare_calls; bringup_prepare_sequence = ++fixture_sequence;
 }
 void shz_cpu_bringup_verify(void)
 {
     CHECK(bringup_prepare_calls == 1 && sti_calls == 1 && sched_calls == 1);
-    ++bringup_verify_calls; bringup_verify_sequence = ++sequence;
+    ++bringup_verify_calls; bringup_verify_sequence = ++fixture_sequence;
 }
+/* This fixture does not request native AP service. Any unexpected AP call
+ * fails the fixture; dedicated AP harnesses own real worker behavior. */
+int shz_cpu_workers_requested(void) { return 0; }
+int shz_cpu_workers_start(void) { CHECK(0); return -1; }
+void thread_reap_exited(void) { CHECK(0); }
+int sched_ap_work_quiescent(void) { CHECK(0); return 0; }
+uint64_t sched_cpu_online_mask(void) { CHECK(0); return 0; }
+uint64_t ticks_now(void) { CHECK(0); return 0; }
+void *kmalloc(size_t n) { (void)n; CHECK(0); return NULL; }
+void kfree(void *p) { (void)p; CHECK(0); }
+int sched_validate(void) { CHECK(0); return 0; }
+int sched_ap_work_submit(const void *p,unsigned n,uint64_t mask,uint64_t *cookie)
+{ (void)p; (void)n; (void)mask; (void)cookie; CHECK(0); return -1; }
+int sched_ap_work_poll(uint64_t cookie,uint64_t *digest)
+{ (void)cookie; (void)digest; CHECK(0); return -1; }
+int sched_ap_work_release(uint64_t cookie) { (void)cookie; CHECK(0); return -1; }
+int sched_ap_work_migrate(unsigned origin,unsigned slot,unsigned destination)
+{ (void)origin; (void)slot; (void)destination; CHECK(0); return -1; }
+int sched_ap_work_stop(void) { CHECK(0); return -1; }
 void pci_log_devices(void) { }
-void setup_autostart(const shz_bootinfo_t *bi) { (void)bi; ++setup_calls; ++sequence; }
-unsigned k64_desktop(void) { ++desktop_calls; ++sequence; return 0; }
-void ntdrv_selftest(void) { ++ntdrv_calls; ++sequence; }
-void k64_autorun(void) { ++autorun_calls; ++sequence; }
+void setup_autostart(const shz_bootinfo_t *bi) { (void)bi; ++setup_calls; ++fixture_sequence; }
+unsigned k64_desktop(void) { ++desktop_calls; ++fixture_sequence; return 0; }
+void ntdrv_selftest(void) { ++ntdrv_calls; ++fixture_sequence; }
+void k64_autorun(void) { ++autorun_calls; ++fixture_sequence; }
 void k64_autorun_observe(void) { }
 int k64_cmdline_has(const char *text)
 {
@@ -160,13 +192,13 @@ int k64_cmdline_has(const char *text)
 void ipc64_init(const shz_bootinfo_t *bi)
 {
     CHECK(bi->channel_count > 0 && bi->channel[0].peer_domain == SHZ_DOM_KERNEL32);
-    ++ipc_calls; ipc_sequence = ++sequence;
+    ++ipc_calls; ipc_sequence = ++fixture_sequence;
 }
-int ipc64_run_tests(void) { ++qa_calls; ++sequence; return 0; }
+int ipc64_run_tests(void) { ++qa_calls; ++fixture_sequence; return 0; }
 void subsys64_start(const shz_bootinfo_t *bi)
 {
     CHECK(bi->domain_id == SHZ_DOM_KERNEL64);
-    ++service_calls; service_sequence = ++sequence;
+    ++service_calls; service_sequence = ++fixture_sequence;
 }
 #endif
 
