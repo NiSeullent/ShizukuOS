@@ -50,6 +50,7 @@ DOS_PATCHES = (
     ('0004-win-startup-chain.patch', '72c0dab2e288159523cf3c018abccf3cd895e41c0c4150c6c60678a6c5882eef'),
     ('0005-korean-cp949-nls.patch', '32de944d45cce7e6fbe9c2ef8345735a005d032dd2f6c5f7ecb808ee7fa72a71'),
     ('0006-win98-registry-path.patch', '62925e53a57b750a53c9c35c0fccd9a99ecba8cdd9f84caf96c8774b6807aad1'),
+    ('0007-primary-shell-parameters.patch', '7e1a708d5ccb2295421de318ee788a41e02290cd1089dfad881bf6533634bc06'),
     ('freecom-0001-reproducible-build-stamp.patch', 'ff9d333927637beb775a3d33fb42181026d4847f5523fdaa069553f68db2d76e'),
 )
 SCHEMA = 'shizukuos.private-native-install-payload.v1'

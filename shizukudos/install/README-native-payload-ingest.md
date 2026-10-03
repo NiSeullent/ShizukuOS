@@ -30,6 +30,10 @@ the independently constructed 2 GiB private FAT32 disk, observed installed
 `shz.foundation=win98` CONFIG/AUTOEXEC with one observed `WIN.COM` invocation.
 Observed NLS dependencies are preserved; COUNTRY-only startup is refused.
 The ordered DOS producer includes the source-written Korean CP949 NLS patch.
+Its nine ordered patches also include `0007-primary-shell-parameters.patch`,
+which records the actual primary shell's load parameters. The reviewed DOS
+receipt and artifacts come from a completed build with source leases retained
+through child reap and final readback; Windows 98 runtime acceptance is pending.
 The held source-profile producer may preserve one observed Windows BILING.SYS
 DEVICE/DEVICEHIGH line without arguments and select explicit COUNTRY=82,949
 configuration. The importer independently reconstructs those startup bytes,
