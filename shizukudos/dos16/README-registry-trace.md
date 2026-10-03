@@ -7,6 +7,10 @@ host preparation must pin that actual selected Windows file and disk. The
 wrapper checks the target with read-only open/read/seek/close before installing
 vectors: MZ, oversized and invalid paths are unsupported. Its intended current
 target is a verified flat COM image; `.COM` alone never admits an MZ image.
+The final path component must be exactly `WIN.COM`, compared case insensitively;
+`AWIN.COM` and `MYWIN.COM` are refused before target file access. Explicit
+root paths such as `C:\WIN.COM` and nested DOS83 directories are supported,
+with `SYSTEM.DAT` and `USER.DAT` selected from that same directory.
 
 The wrapper retains its own memory while invoking the original DOS EXEC 4B00
 service. An intercepted call queries the original AH51 current PSP, checks its
