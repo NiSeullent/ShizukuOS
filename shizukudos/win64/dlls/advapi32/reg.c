@@ -7,13 +7,14 @@
  *    ERROR_FILE_NOT_FOUND for a missing key/value, ERROR_MORE_DATA when a buffer is too small, ERROR_NO_MORE_ITEMS at the
  *    end of an enumeration, ERROR_ACCESS_DENIED when the handle lacks the needed right or the key still has sub-keys.
  *  - Predefined keys map to native paths: HKLM -> \Registry\Machine, HKU -> \Registry\User, HKCU -> \Registry\User\<SID of
- *    the single system user>, HKCC -> ...\Hardware Profiles\Current, HKCR -> \Registry\Machine\Software\Classes. The last is
+ *    the current supported token user>, HKCC -> ...\Hardware Profiles\Current, HKCR -> \Registry\Machine\Software\Classes. The last is
  *    a simplification: Windows presents HKCR as a merged view of HKCU and HKLM class data. HKEY_PERFORMANCE_DATA,
  *    HKEY_DYN_DATA and HKEY_CURRENT_USER_LOCAL_SETTINGS are not supported (ERROR_NOT_SUPPORTED). Predefined handles are not
  *    cached: each call opens the native key it needs and closes it again, so RegDisablePredefinedCache has nothing to do.
  *  - RegNotifyChangeKeyValue: one-shot notifications on key handles, asynchronous (event) or blocking. Notifications on the
  *    predefined keys use a native handle kept open for the life of the process (opened on first use), because a notification
- *    dies with the handle it was registered on. REG_NOTIFY_THREAD_AGNOSTIC is implied: a notification is not tied to the
+ *    dies with the handle it was registered on. HKCU validates the current token on every registration and keeps separate
+ *    immutable handles for distinct user paths. REG_NOTIFY_THREAD_AGNOSTIC is implied: a notification is not tied to the
  *    registering thread.
  *  - There is one registry view: KEY_WOW64_32KEY / KEY_WOW64_64KEY are accepted and change nothing (no Wow6432Node).
  *  - Security attributes are ignored, the registry is volatile (see kernel64/registry.c for the whole list of limits).
@@ -25,6 +26,7 @@
 #include <winnls.h>
 #include <winreg.h>
 #include "ntreg.h"
+#include "../../../accounts/account.h"
 
 #define ALLOC(n) RtlAllocateHeap(ShzProcessHeap(), 0, (n))
 #define FREE(p) RtlFreeHeap(ShzProcessHeap(), 0, (p))
@@ -36,7 +38,7 @@ static size_t wlen(const WCHAR *s) { size_t n = 0; while (s[n]) ++n; return n; }
 /* ---------------------------------------------------------------- predefined keys */
 static const WCHAR *const predef_paths[8] = {
     L"\\Registry\\Machine\\Software\\Classes",                                                 /* HKEY_CLASSES_ROOT */
-    L"\\Registry\\User\\" SHZ_USER_SID_W,                                                      /* HKEY_CURRENT_USER */
+    0,                                                                                         /* HKEY_CURRENT_USER: token-derived */
     L"\\Registry\\Machine",                                                                    /* HKEY_LOCAL_MACHINE */
     L"\\Registry\\User",                                                                       /* HKEY_USERS */
     0,                                                                                         /* HKEY_PERFORMANCE_DATA */
@@ -88,17 +90,24 @@ static LONG objname_init(objname_t *n, HKEY hkey, LPCWSTR sub)
     n->oa.SecurityDescriptor = n->oa.SecurityQualityOfService = 0;
     if (is_predef(hkey, &idx)) {
         const WCHAR *root = predef_paths[idx];
+        SHZ_UNICODE_STRING current = {0};
         size_t rl;
+        if (idx == 1) {
+            NTSTATUS st = RtlFormatCurrentUserKeyPath(&current);
+            if (st) return werr(st);
+            root = current.Buffer;
+        }
         if (!root) return ERROR_NOT_SUPPORTED;
         rl = wlen(root);
         total = rl + (sublen ? 1 + sublen : 0);
-        if (total > 32767) return ERROR_INVALID_PARAMETER;
+        if (total > 32767) { RtlFreeUnicodeString(&current); return ERROR_INVALID_PARAMETER; }
         if (total < sizeof n->small / sizeof(WCHAR)) buf = n->small;
         else {
             buf = n->heap = ALLOC((total + 1) * sizeof(WCHAR));
-            if (!buf) return ERROR_NOT_ENOUGH_MEMORY;
+            if (!buf) { RtlFreeUnicodeString(&current); return ERROR_NOT_ENOUGH_MEMORY; }
         }
         memcpy(buf, root, rl * sizeof(WCHAR));
+        RtlFreeUnicodeString(&current);
         if (sublen) {
             buf[rl] = L'\\';
             memcpy(buf + rl + 1, sub, sublen * sizeof(WCHAR));
@@ -836,12 +845,62 @@ DLLAPI LONG WINAPI RegQueryInfoKeyW(HKEY hKey, LPWSTR lpClass, LPDWORD lpcchClas
 
 /* ---------------------------------------------------------------- change notification */
 static HANDLE g_notify_roots[8];           /* native handles behind predefined keys, for notifications only */
+typedef struct { HANDLE h; USHORT chars; WCHAR path[80]; } user_notify_root;
+static user_notify_root *g_notify_users[SHZ_ACCOUNT_LIMIT];
+
+/* A published entry is immutable and process-lived so a concurrent registration
+ * cannot close another thread's notification handle. Every call resolves its
+ * token first, including cache hits. Kernel checks still govern retained handles
+ * across enrollment and lowered integrity. */
+static LONG notify_user_handle(HKEY hkey, HANDLE *out)
+{
+    objname_t n;
+    user_notify_root *candidate = 0;
+    ULONG i = 0, chars;
+    LONG e = objname_init(&n, hkey, 0);
+    if (e) return e;
+    chars = n.us.Length / sizeof(WCHAR);
+    if (chars >= sizeof candidate->path / sizeof(WCHAR)) { objname_free(&n); return ERROR_INVALID_PARAMETER; }
+    while (i < SHZ_ACCOUNT_LIMIT) {
+        user_notify_root *entry = __atomic_load_n(&g_notify_users[i], __ATOMIC_ACQUIRE);
+        if (entry) {
+            if (entry->chars == chars && !memcmp(entry->path, n.us.Buffer, chars * sizeof(WCHAR))) {
+                *out = entry->h;
+                if (candidate) { NtClose(candidate->h); FREE(candidate); }
+                objname_free(&n);
+                return ERROR_SUCCESS;
+            }
+            ++i;
+        } else {
+            if (!candidate) {
+                NTSTATUS st;
+                candidate = ALLOC(sizeof *candidate);
+                if (!candidate) { objname_free(&n); return ERROR_NOT_ENOUGH_MEMORY; }
+                candidate->chars = (USHORT)chars;
+                memcpy(candidate->path, n.us.Buffer, (chars + 1) * sizeof(WCHAR));
+                candidate->h = 0;
+                st = NtOpenKey(&candidate->h, KEY_NOTIFY | KEY_QUERY_VALUE, &n.oa);
+                if (st) { FREE(candidate); objname_free(&n); return werr(st); }
+            }
+            if (!__sync_val_compare_and_swap(&g_notify_users[i], (user_notify_root *)0, candidate)) {
+                *out = candidate->h;
+                objname_free(&n);
+                return ERROR_SUCCESS;
+            }
+            /* Another thread published first: recheck its immutable identity. */
+        }
+    }
+    if (candidate) { NtClose(candidate->h); FREE(candidate); }
+    objname_free(&n);
+    return ERROR_NOT_ENOUGH_MEMORY;
+}
 
 static LONG notify_handle(HKEY hkey, HANDLE *out)
 {
     unsigned idx;
     if (!hkey) return ERROR_INVALID_HANDLE;
     if (!is_predef(hkey, &idx)) { *out = (HANDLE)hkey; return ERROR_SUCCESS; }
+    if (idx == 1) return notify_user_handle(hkey, out);
     if (!g_notify_roots[idx]) {
         objname_t n;
         HANDLE h = 0;

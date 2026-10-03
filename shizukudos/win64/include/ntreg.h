@@ -6,8 +6,10 @@
 #define SHZ_WIN64_NTREG_H
 #include "nt.h"
 
-/* The single interactive identity of the system. Kernel64 seeds \REGISTRY\USER\<SID> with the same string
- * (kernel64/registry.c SHZ_USER_SID); the registry tests check both agree. */
+/* Compatibility identity for the actual legacy pre-enrollment token (auth_id
+ * 0x4e7 and authoritative account count zero). Enrolled account TokenUser SIDs
+ * use this machine-domain prefix with their UID1000..1015. HKCU resolves the
+ * current token on every call; these constants are not a fallback identity. */
 #define SHZ_USER_SID_A "S-1-5-21-2210311251-3305482031-1094512843-1001"
 #define SHZ_USER_SID_W L"S-1-5-21-2210311251-3305482031-1094512843-1001"
 #define SHZ_USER_NAME_W L"shizuku"
