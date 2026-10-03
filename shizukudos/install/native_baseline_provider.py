@@ -194,10 +194,19 @@ class Client:
         self.active=False;self.child=self.pidfd=self.peer=self.listener=self.inputs=None
         self.owner_pid=os.getpid();self.owner_thread=threading.get_ident();self.sequence=0
     def __reduce__(self):raise TypeError('live baseline service cannot be serialized')
-    def owner_check(self):
+    def _owner_inputs_check(self):
         need(self.active and os.getpid()==self.owner_pid and threading.get_ident()==self.owner_thread,'current provider client owner/lifetime required')
-        if self.child is not None:need(self.child.poll() is None and not select.select([self.pidfd],[],[],0)[0],'actual owned service exited')
         for entry in self.held.values():entry['checkpoint']()
+    def owner_check(self):
+        self._owner_inputs_check()
+        if self.child is not None:need(self.child.poll() is None and not select.select([self.pidfd],[],[],0)[0],'actual owned service exited')
+    def _finish_check(self):
+        # The authenticated FINISH reply can remain queued after normal exit.
+        # Owner/input custody still holds; finish() must separately require the
+        # actual zero exit and pidfd reap before completing its final readbacks.
+        self._owner_inputs_check()
+        need(self.child is not None and self.pidfd is not None and self.child.poll() in (None,0),
+             'actual owned service final cleanup failed')
     def __enter__(self):
         try:
             replacement.safe_path(self.output);need(not self.output.exists() and self.output.parent.is_dir() and stat.S_IMODE(self.output.parent.stat().st_mode)==0o700 and self.output.parent.stat().st_uid==os.getuid(),'fresh owned0700 provider directory required')
@@ -250,10 +259,12 @@ class Client:
         self.owner_check();need(hasattr(self,'summary'),'live ready source required')
         challenge=os.urandom(32).hex();self.sequence+=1
         send(self.peer,{'operation':operation,'token':self.token,'sequence':self.sequence,'challenge':challenge})
-        row=receive(self.peer,self.deadline,self.owner_check)
+        check=self._finish_check if operation=='FINISH' else self.owner_check
+        row=receive(self.peer,self.deadline,check)
         need(row['token']==self.token and row['sequence']==self.sequence and row['challenge']==challenge,'live challenge response differs')
         if operation=='WINDOWS_GRADE':raise ValueError(row['reason'])
         need(row['state']==operation and row['summary']==self.summary,'actual source hold changed')
+        check()
         return row
     def match_held_source(self,entry):
         self.query();need(entry['pin']==self.source and replacement.identity(os.fstat(entry['fd']))==tuple(self.summary['source_identity']),'held compiler source FD differs')
