@@ -52,3 +52,16 @@ service/policy integration remain required.
 Tests execute the actual Python parser and existing FAT reader, real mkfs/mcopy
 on disposable synthetic FAT12/FAT32 images, and an owned Linux child/pidfd cleanup.
 They do not execute Windows, QEMU or licensed media.
+
+The followup guard keeps the actual original entry checkpoint on every FAT IO.
+The one union's shared ANY-input SIGIO break latch is checked through that entry;
+conflicting writes to a different retained tool also fail immediately. Every IO
+also checks phase/cancellation/current source identity and the resource floor.
+All178 input namespace/lease checks run at a fixed one-second maximum callback
+cadence and are forced at tool/launch/observation/readback/release transitions.
+The interval is a source literal, not a request/INI option. Namespace drift of a
+nonoriginal input is refused by the next sweep and before it may be reopened for
+a producer transition. Original path drift is refused on the very next IO.
+Tests include real nonoriginal writer SIGIO and real source/tool rename controls;
+modeled monotonic tests verify the one-second threshold, forced transitions and
+cancellation/deadline/backward-clock refusal. No actual boot success follows.

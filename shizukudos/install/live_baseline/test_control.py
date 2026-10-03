@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-only
-import importlib.util,io,json,os,struct,subprocess,tempfile,unittest
+import importlib.util,io,json,os,struct,subprocess,sys,tempfile,unittest
+from unittest.mock import patch
 from pathlib import Path
 s=importlib.util.spec_from_file_location('baseline_control',Path(__file__).with_name('control.py'));m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
 class Controls(unittest.TestCase):
@@ -75,6 +76,58 @@ class Controls(unittest.TestCase):
         finally:
             if child.poll() is None:child.kill();child.wait()
             os.close(pidfd)
+    def fixture_guard(self,root):
+        source=root/'original';tool=root/'tool';source.write_bytes(b'original read only');tool.write_bytes(b'leased tool')
+        return source,tool,[m.replacement.local_pin(source),m.replacement.local_pin(tool)]
+    def test_actual_nonoriginal_writer_break_immediately_refuses(self):
+        with tempfile.TemporaryDirectory(dir='/var/tmp') as temp:
+            source,tool,pins=self.fixture_guard(Path(temp))
+            with self.assertRaises(RuntimeError):
+                with m.replacement.leased_inputs(pins) as held:
+                    with patch.object(m.time,'monotonic',return_value=10):
+                        guard=m.InputGuard(held,str(source),100,[False],lambda:None);guard(True)
+                        result=subprocess.run([sys.executable,'-c','import os,sys; os.open(sys.argv[1],os.O_WRONLY|os.O_NONBLOCK)',str(tool)],capture_output=True,timeout=5)
+                        self.assertNotEqual(result.returncode,0)
+                        # No one-second namespace sweep yet; shared ANY-input SIGIO rejects immediately.
+                        with self.assertRaises(RuntimeError):guard()
+    def test_actual_tool_alias_rename_refuses_at_fixed_sweep(self):
+        with tempfile.TemporaryDirectory(dir='/var/tmp') as temp:
+            source,tool,pins=self.fixture_guard(Path(temp))
+            with self.assertRaises((OSError,RuntimeError)):
+                with m.replacement.leased_inputs(pins) as held:
+                    with patch.object(m.time,'monotonic',return_value=10):
+                        guard=m.InputGuard(held,str(source),100,[False],lambda:None);guard(True)
+                    tool.rename(tool.with_name('retained-tool'))
+                    with patch.object(m.time,'monotonic',return_value=10.99):guard()
+                    with patch.object(m.time,'monotonic',return_value=11):
+                        with self.assertRaises((OSError,RuntimeError)):guard()
+    def test_actual_original_alias_immediately_refuses(self):
+        with tempfile.TemporaryDirectory(dir='/var/tmp') as temp:
+            source,tool,pins=self.fixture_guard(Path(temp))
+            with self.assertRaises((OSError,RuntimeError)):
+                with m.replacement.leased_inputs(pins) as held:
+                    with patch.object(m.time,'monotonic',return_value=10):
+                        guard=m.InputGuard(held,str(source),100,[False],lambda:None);guard(True)
+                        source.rename(source.with_name('retained-original'))
+                        with self.assertRaises((OSError,RuntimeError)):guard()
+    def test_fixed_guard_cadence_force_cancellation_deadline_clock(self):
+        counts=[0,0];held={'source':{'checkpoint':lambda:counts.__setitem__(0,counts[0]+1)},'tool':{'checkpoint':lambda:counts.__setitem__(1,counts[1]+1)}}
+        cancel=[False];resources=[]
+        guard=m.InputGuard(held,'source',20,cancel,lambda:resources.append(1))
+        with patch.object(m.time,'monotonic',return_value=10):guard();self.assertEqual(counts[1],1)
+        with patch.object(m.time,'monotonic',return_value=10.9):guard();self.assertEqual(counts[1],1)
+        with patch.object(m.time,'monotonic',return_value=11):guard();self.assertEqual(counts[1],2)
+        with patch.object(m.time,'monotonic',return_value=11.1):guard(True);self.assertEqual(counts[1],3)
+        self.assertEqual(len(resources),4)
+        for now in (10,20,float('nan')):
+            with patch.object(m.time,'monotonic',return_value=now),self.assertRaises(ValueError):guard()
+        cancel[0]=True
+        with patch.object(m.time,'monotonic',return_value=12),self.assertRaises(ValueError):guard()
+    def test_slow_or_expired_whole_sweep_refuses(self):
+        held={'source':{'checkpoint':lambda:None},'tool':{'checkpoint':lambda:None}}
+        for clock,deadline in (([10,12],100),([10,11],11),([10,9],100)):
+            guard=m.InputGuard(held,'source',deadline,[False],lambda:None)
+            with patch.object(m.time,'monotonic',side_effect=clock),self.assertRaises(ValueError):guard(True)
     def test_invalid_request_never_launches(self):
         for seconds in (0,601,True,'600'):
             with self.assertRaises(ValueError):m.run({'schema':'shizukuos.private-baseline-control.v1','source':{},'observer':{},'observer_receipt':{},'qemu':{},'mcopy':{},'lock':'/no','output':'/no','guest_seconds':seconds})
