@@ -50,6 +50,8 @@ FIXED_FILES = (
     "tools/build_laptop_security_iso.py", "tools/tests/test_laptop_security_iso.py",
     "docs/releases/LAPTOP_SECURITY_ADDON_ISO.md",
     "docs/SHIZUKUDOS_WINDOWS98_ARCHITECTURE.md", "docs/SHIZUKUOS_ARCHITECTURE_SUPPLEMENT.md",
+    "docs/SHIZUKUOS_ARCHITECTURE_CONTRACT.md", "docs/INTEGRATED_ARCHITECTURE.md",
+    "docs/SHIZUKUOS_FULL_GOAL_ACCEPTANCE.md",
     "docs/superpowers/specs/2026-10-02-laptop-security-iso.md",
     "docs/superpowers/plans/2026-10-02-laptop-security-iso.md",
     "docs/agents/plans/core-k64-persistent-ap.md",
