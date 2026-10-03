@@ -36,7 +36,9 @@ MSG_FRAME, MSG_TICK, MSG_DONE, MSG_NOTE = 1, 2, 3, 4
 SOURCES = ["platform/abi32/w64_e2e.py", "platform/abi32/w64_harness.c", "platform/abi32/w64_gate.S",
            "platform/abi32/k64model.py", "shizukudos/abi/test_abi.py", "shizukudos/abi/shz_ipc.h",
            "shizukudos/abi/shz_abi.h", "ntwrapper/vxd/bridge.c", "ntwrapper/vxd/bridge.h", "ntwrapper/core.c",
-           "ntwrapper/include/ntwrapper.h", "ntwin32/win64/ntw64.h"]
+           "ntwrapper/include/ntwrapper.h", "ntwin32/win64/ntw64.h",
+           "ntwrapper/vxd/pma_endpoint.c", "ntwrapper/vxd/pma_endpoint.h",
+           "shizukudos/abi/shz_vmm_pma.h", "shizukudos/abi/shz_clock.h"]
 
 
 def sha(path: Path) -> str:
@@ -128,12 +130,15 @@ SECTIONS {{
                  "-Werror", "-Wpedantic", "-Wconversion", "-Wshadow"]
     build.run([*harness_flags, "-I", OUT, "-c", HERE / "w64_harness.c", "-o", OUT / "w64_harness.o"])
     build.run([*vxd_flags, "-c", ROOT / "ntwrapper/vxd/bridge.c", "-o", OUT / "bridge.o"])
+    # bridge.c dispatches the real PMA broker; link its production body even
+    # though this W64 conversation does not initialize or exercise PMA.
+    build.run([*vxd_flags, "-c", ROOT / "ntwrapper/vxd/pma_endpoint.c", "-o", OUT / "pma_endpoint.o"])
     build.run([*vxd_flags, "-c", ROOT / "ntwrapper/core.c", "-o", OUT / "core.o"])
     build.run(["clang", "--target=i486-none-elf", "-c", HERE / "w64_gate.S", "-o", OUT / "w64_gate.o"])
     build.run(["clang", "--target=i486-none-elf", "-c", OUT / "images.S", "-o", OUT / "images.o"])
     binary = OUT / "w64-e2e"
     build.run(["ld.lld", "-m", "elf_i386", "-static", "-T", OUT / "link.ld", "-o", binary, OUT / "w64_gate.o",
-               OUT / "w64_harness.o", OUT / "bridge.o", OUT / "core.o", OUT / "images.o"])
+               OUT / "w64_harness.o", OUT / "bridge.o", OUT / "pma_endpoint.o", OUT / "core.o", OUT / "images.o"])
     undefined = build.run(["nm", "-u", binary], capture_output=True, text=True).stdout
     if undefined.strip():
         raise RuntimeError(f"Unexpected unresolved host dependency: {undefined}")

@@ -190,9 +190,12 @@ static uint32_t STDCALL mock_GetModuleFileNameA(uintptr_t module, char *buffer, 
     for (i = 0; i < sizeof path; ++i) buffer[i] = path[i];
     return sizeof path - 1;
 }
+#include "clock_mock.h"
 static uintptr_t STDCALL mock_CreateFileA(const char *path, uint32_t access, uint32_t share,
     void *security, uint32_t disposition, uint32_t flags, uintptr_t template_file)
 {
+    if (equal(path, "\\\\.\\NTWRAP9X.VXD"))
+        return clock_open(access, share, security, disposition, flags, template_file);
     CHECK(equal(path, "C:\\APP\\NTW32.INI"));
     CHECK(access == UINT32_C(0x80000000) && share == 1 && security == NULL);
     CHECK(disposition == 3 && flags == UINT32_C(0x80) && template_file == 0);
@@ -213,6 +216,7 @@ static int STDCALL mock_ReadFile(uintptr_t handle, void *buffer, uint32_t bytes,
 }
 static int STDCALL mock_CloseHandle(uintptr_t handle)
 {
+    if (clock_testing && handle != INI_HANDLE) return clock_close(handle);
     CHECK(handle == INI_HANDLE);
     ++ini_closed;
     return 1;
@@ -279,6 +283,7 @@ static void build_kex_image(void)
 static uint32_t STDCALL mock_DeviceIoControl(uintptr_t device, uint32_t code, void *input, uint32_t input_bytes,
     void *output, uint32_t output_bytes, uint32_t *returned, void *overlapped)
 {
+    if (clock_testing) return clock_device_io(device, code, input, input_bytes, output, output_bytes, returned, overlapped);
     (void)device; (void)code; (void)input; (void)input_bytes; (void)output; (void)output_bytes;
     (void)returned; (void)overlapped;
     fail("unexpected DeviceIoControl", __LINE__);
@@ -958,6 +963,7 @@ static void utf_long_and_native(void)
     }
 }
 
+#include "clock_tests.inc"
 int harness_main(void)
 {
     patch_imports();
@@ -976,6 +982,7 @@ int harness_main(void)
     utf_conversion();
     utf_long_and_native();
     routing_policy();
+    core_clock_contracts();
     CHECK(call3(PE_ENTRY, PE_BASE, 0, 0).low == 1);
     CHECK(module_calls == 2 + reattaches);
     write_string("PASS NTW32 actual PE32 ABI: ");

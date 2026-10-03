@@ -24,7 +24,7 @@ IMPORTS = {"Sleep", "GetTickCount", "GetModuleHandleA", "GetProcAddress", "SetLa
            "GetModuleFileNameA", "CreateFileA", "ReadFile", "CloseHandle",
            "GetEnvironmentVariableA", "OutputDebugStringA", "GetLastError",
            # WIN64 subsystem client transport (ntwin32/win64/ntw64.c, with CreateFileA/GetLastError); w64_e2e.py
-           "DeviceIoControl"}
+           "DeviceIoControl", "VirtualQuery"}
 EXPORTS = {
     "InitializeSRWLock", "AcquireSRWLockExclusive", "AcquireSRWLockShared",
     "ReleaseSRWLockExclusive", "ReleaseSRWLockShared", "TryAcquireSRWLockExclusive",
@@ -37,6 +37,7 @@ W64_EXPORTS = {
     "NtwQuerySubsystem64", "NtwCreateProcess64W", "NtwWaitProcess64", "NtwReadConsole64",
     "NtwWriteConsole64", "NtwCloseConsole64", "NtwKillProcess64", "NtwCloseProcess64",
 }
+CLOCK_EXPORTS = {"NtwQueryCoreClock", "NtQueryPerformanceCounter", "NtwShutdownCoreClock"}
 
 
 def parser_module():
@@ -90,7 +91,7 @@ def inspect(data):
                 raise ValueError(f"Unsupported import: {name!r}")
             imports.append((name, iat))
     if {name for name, _ in imports} != IMPORTS:
-        raise ValueError("DLL import inventory differs from the fifteen mock contracts")
+        raise ValueError("DLL import inventory differs from the sixteen mock contracts")
     export_rva, export_size = pe.directory(0)
     at = pe.offset(export_rva, 40)
     function_count, name_count, functions, names, ordinals = struct.unpack_from("<IIIII", data, at + 20)
@@ -107,8 +108,8 @@ def inspect(data):
             raise ValueError("Forwarded exports are unsupported")
         code_rva(rva)
         exports[name] = rva
-    if set(exports) != EXPORTS | W64_EXPORTS:
-        raise ValueError(f"Need exact 17+8-export runtime; got {sorted(exports)}")
+    if set(exports) != EXPORTS | W64_EXPORTS | CLOCK_EXPORTS:
+        raise ValueError(f"Need exact 17+8+3-export runtime; got {sorted(exports)}")
     return pe, image, preferred, entry, imports, exports
 
 
@@ -210,7 +211,10 @@ def main():
     options.dll = options.dll.resolve()
     options.exe = options.exe.resolve()
     BUILD.mkdir(parents=True, exist_ok=True)
-    source_paths = [HERE / name for name in ("build.py", "harness.c", "entry.S", "test_packer.py")]
+    source_paths = [HERE / name for name in ("build.py", "harness.c", "clock_mock.h", "clock_tests.inc",
+                                           "entry.S", "test_packer.py")]
+    source_paths.extend(ROOT / name for name in ("ntwrapper/vxd/bridge.h", "shizukudos/abi/shz_clock.h",
+                                                "shizukudos/abi/shz_abi.h"))
     source_paths.append(ROOT / "ntwin32/prepare.py")
     source_hashes = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
                      for path in source_paths}
@@ -241,7 +245,8 @@ def main():
               "sources_sha256": source_hashes,
               "packer_tests": {"status": "PASS", "count": int(count_match.group(1)),
                                "stdout": packer_tests.stdout, "stderr": packer_tests.stderr},
-              "imports_mocked": sorted(IMPORTS), "exports_checked": sorted(EXPORTS | W64_EXPORTS),
+              "imports_mocked": sorted(IMPORTS),
+              "exports_checked": sorted(EXPORTS | W64_EXPORTS | CLOCK_EXPORTS),
               "variants": variants,
               "win64_bridge_e2e": {key: win64[key] for key in
                                    ("status", "harness_stdout", "exe_sha256", "binary_sha256", "sources_sha256",

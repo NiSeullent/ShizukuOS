@@ -24,7 +24,7 @@ class PackerTests(unittest.TestCase):
         self.assertEqual(base, 0x68000000)
         self.assertLess(entry, len(image))
         self.assertEqual({name for name, _ in imports}, build.IMPORTS)
-        self.assertEqual(set(exports), build.EXPORTS | build.W64_EXPORTS)
+        self.assertEqual(set(exports), build.EXPORTS | build.W64_EXPORTS | build.CLOCK_EXPORTS)
 
     def test_image_size_limit(self):
         data = bytearray(self.data)
@@ -61,6 +61,18 @@ class PackerTests(unittest.TestCase):
         data = self.data.replace(b"GetTickCount\0", b"GetTockCount\0", 1)
         self.assertNotEqual(data, self.data)
         with self.assertRaisesRegex(ValueError, "Unsupported import"):
+            build.inspect(data)
+
+    def test_unknown_virtualquery_import_stays_rejected(self):
+        data = self.data.replace(b"VirtualQuery\0", b"VirtualQuezy\0", 1)
+        self.assertNotEqual(data, self.data)
+        with self.assertRaisesRegex(ValueError, "Unsupported import"):
+            build.inspect(data)
+
+    def test_unknown_clock_export_stays_rejected(self):
+        data = self.data.replace(b"NtwQueryCoreClock\0", b"NtwQueryCoreClocx\0", 1)
+        self.assertNotEqual(data, self.data)
+        with self.assertRaisesRegex(ValueError, "exact 17\\+8\\+3-export"):
             build.inspect(data)
 
     def test_relocation_baseline_unchanged(self):

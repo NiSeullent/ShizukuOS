@@ -343,6 +343,13 @@ static uint32_t STDCALL mock_GetModuleFileNameA(uintptr_t module, char *buffer, 
     return sizeof path - 1;
 }
 static uint32_t STDCALL mock_CloseHandle(uintptr_t handle) { (void)handle; fail("unexpected CloseHandle", __LINE__); }
+/* Clock calls run with the typed page model in harness.c at both PE bases.
+ * This separate W64 conversation must never start a clock query implicitly. */
+static uint32_t STDCALL mock_VirtualQuery(const void *address, void *information, uint32_t bytes)
+{
+    (void)address; (void)information; (void)bytes;
+    fail("unexpected VirtualQuery in W64 conversation", __LINE__);
+}
 static void STDCALL mock_OutputDebugStringA(const char *text) { CHECK(text && slen(text) < 512); ++debug_lines; }
 static int STDCALL mock_MultiByteToWideChar(uint32_t page, uint32_t flags, const char *src, int len, uint16_t *dst, int cap)
 {

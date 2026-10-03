@@ -2,7 +2,7 @@
 
 This harness executes the project's **built `NTW32.DLL` machine code** on the
 host CPU in 32-bit mode. The DLL is embedded in a static Linux ELF32 process;
-seven original, explicitly limited service mocks replace its KERNEL32 imports.
+sixteen original, explicitly limited service mocks replace its KERNEL32 imports.
 This is compiled CPU/ABI evidence. It is **not a Windows 98 guest test**, a
 Windows loader, an application compatibility layer, or a replacement kernel.
 
@@ -57,18 +57,39 @@ Each variant checks:
   `[routing] order=` and `[order]` entries, malformed and oversized
   configuration, KernelEx attribution, static-export forwarding to native,
   and the guard against forwarding an export into `NTW32.DLL` itself.
+- The three Core clock exports, by calling the actual native PE32 adapter with
+  modeled `VirtualQuery`, device I/O and handle ownership: 64-bit samples,
+  four-byte alignment, optional frequency, writable and rejected protections,
+  cross-page outputs, invalid/short memory-query replies, wrapping ranges,
+  malformed clock replies, open/query/close failures, retained zero handles,
+  cleanup retries, LastError preservation, NTSTATUS mapping and overlap policy.
+  A protection change after transport prevents output publication. Detach stops
+  admission without closing under the loader lock; explicit shutdown retries
+  failed cleanup and is idempotent after success.
 
 The mocks cover only `GetModuleHandleA`, `GetProcAddress`, `GetTickCount`,
 `SetLastError`, `GetLastError`, `Sleep`, `MultiByteToWideChar`,
 `WideCharToMultiByte`, and, for the routing policy, `GetModuleFileNameA`,
 `CreateFileA`, `ReadFile`, `CloseHandle`, `GetEnvironmentVariableA` and
-`OutputDebugStringA`.
+`OutputDebugStringA`, plus `DeviceIoControl` and `VirtualQuery` for the clock.
 The two conversion mocks only record arguments and return configured values;
 all `CP_UTF8` bytes are processed by the actual independent DLL code. Mock
 counters and return values are test fixtures,
 not implementations of those Windows services. Unrecognized imports, forwarder
 exports, TLS, CLR, delay imports, load configuration, and relocation types are
 rejected. The harness does not execute an arbitrary third-party DLL.
+
+The clock memory-query model uses the explicit 28-byte
+[MEMORY_BASIC_INFORMATION32 layout](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-memory_basic_information),
+with `RegionSize` at byte 12 and `Protect` at byte 20. Calls check the compiled
+adapter's stdcall arguments and requested structure size. The model follows
+the documented [VirtualQuery return and region contract](https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualquery):
+returned bytes are checked, and each queried region must cover the cursor.
+The three-page buffer contains real writable host memory; the queried states,
+protection flags and failures are injected service results. This does not test
+native Windows 98 VirtualQuery behavior, real page protection or memory pinning.
+Callers must keep output ranges alive throughout the call. The clock exports
+remain separate from the eight WIN64 exports and from KERNEL32 routing.
 
 ## Run
 
@@ -107,8 +128,8 @@ Both variants still have 54 HIGHLOW sites and zero undefined symbols. This
 establishes the adapter's behavior under the explicit service model; actual
 Win98 priority scheduling and timer latency still need guest tests.
 
-`build/results.json` records the input DLL hash, all four harness source and parser
-hashes in `sources_sha256`, the packer test PASS/count,
+`build/results.json` records the input DLL hash, the harness, clock fixture,
+shared ABI header and parser hashes in `sources_sha256`, the packer test PASS/count,
 mock inventory, export inventory, base/delta, relocation-site count, test
 stdout, and executable hashes. A source or input change during the run prevents
 a completed report. Rebuild and rerun whenever the runtime changes.
@@ -119,7 +140,12 @@ a completed report. Rebuild and rerun whenever the runtime changes.
 `build/w64/w64-e2e`, that maps the actual `NTW32.DLL` at its preferred base and
 the actual `NTW64RUN.EXE` at `0x00400000`, binds the EXE's imports to the DLL's
 exports, and compiles in `ntwrapper/vxd/bridge.c` and `core.c` with the VxD's
-own flags. DeviceIoControl goes into `ntwv_dioc_ex()` as VWIN32 would deliver
+own flags. It also links the production `pma_endpoint.c` required by the bridge's
+PMA dispatch and acknowledgement references. This W64 conversation does not
+initialize or exercise PMA, and PMA behavior is not established by resolving
+those symbols. An unexpected clock `VirtualQuery` call in this conversation
+fails; the clock exports are exercised separately at both DLL bases.
+DeviceIoControl goes into `ntwv_dioc_ex()` as VWIN32 would deliver
 it; the VMM page services are an identity model and the Supervisor hypercalls
 are modeled. The channel is a real `shz_channel_init()` region. On each
 doorbell the harness pops the VxD's frames with `shz_ring_pop()` and sends the
@@ -139,6 +165,25 @@ kill, wait timeout, a handle closed on a running process, the four-process
 limit, a corrupted slot, a lost reply, and eleven NTW64RUN.EXE command lines.
 The result is `build/w64/w64-results.json` and `win64_bridge_e2e` in
 `build/results.json`. It is not a Windows 98, VMM, Supervisor or Kernel64 run.
+
+## Core clock CI regression
+
+The public source at `27a69c36e8dca10c1a2d5420a09c70d87dcf1214` builds a DLL
+with sixteen native imports and 28 exports (17 runtime, eight WIN64, three
+clock). The former exact inventory rejected `VirtualQuery` before execution.
+With the typed clock fixture and exact inventory updated, the original command
+`python3 platform/abi32/build.py` passes without skipping any lane. An altered
+`VirtualQuery` import or clock export is still rejected by the packer.
+
+The 2026-10-03 run used freshly built DLL SHA-256
+`4a2dc8fde4813c42675936e6446c0c7689aa4b6065b6a8a803cc5c6a19fc223f` and
+NTW64RUN SHA-256
+`c1efefdfbdb53f6c83ed1896b1140cf32b3f9ec2d8f737ab839340d057e11831`.
+Fourteen packer tests passed. Each DLL base passed 1,326 checks and 254 actual
+PE calls with verified ESP, applying 491 HIGHLOW relocations at the alternate
+base. The W64 conversation passed 90,903 checks, 194 DLL calls and eleven actual
+NTW64RUN runs, with zero undefined symbols. These are host execution results
+under the documented models; Windows 98 guest execution remains unverified.
 
 ## What this does not establish
 
