@@ -13,7 +13,7 @@ import time
 ROOT=Path(__file__).resolve().parents[2]
 UNITS=('auth_core','sysk32_auth','sysk32_sec','proc','ldr','objects','ipc_core',
        'ipc_proc','ipc_io','ipc_section','sysx','syscall','sysfile','npfs','autorun',
-       'gfx_wm','gfx_msg','gfx_input')
+       'gfx_wm','gfx_msg','gfx_input','registry','sysreg')
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)

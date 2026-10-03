@@ -66,7 +66,8 @@ CONTROLS = r'''
     /* Complete real policy against regular, elevated and sandbox subjects. */
     const uint32_t privileged[]={SYS_NtShzBlkRead,SYS_NtShzSetupBlkRead,
         SYS_NtShzBlkWrite,SYS_NtShzSetupBlkWrite,SYS_NtDeviceIoControlFile,
-        SYS_NtLoadDriver,SYS_NtUnloadDriver,SYS_NtSetValueKey};
+        SYS_NtLoadDriver,SYS_NtUnloadDriver};
+    /* Registry permissions are concrete-node gates, covered by run_registry_accounts.py. */
     for(unsigned i=0;i<sizeof privileged/sizeof *privileged;i++) {
         assert(!shz_auth_syscall_allowed(&children[0],privileged[i]));
         assert(shz_auth_syscall_allowed(&children[1],privileged[i]));
