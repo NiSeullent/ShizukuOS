@@ -10,10 +10,11 @@
 #define ID_CLASSIC 101u
 #define ID_SHIZUKUOS 102u
 #define REFRESH_STATUS (WM_APP+41u)
+#define REFRESH_RETRY 74u
 static shz_theme_native theme;
 static HINSTANCE instance;
 static HWND main_window,classic_button,shizuku_button,saved_label,current_label,status_label;
-static unsigned busy,blocked;
+static unsigned busy,blocked,refresh_pending;
 
 static void clear(void *memory,SIZE_T size)
 { unsigned char *p=memory;SIZE_T i;for(i=0;i<size;++i)p[i]=0; }
@@ -42,10 +43,18 @@ static void failure_text(const shz_theme_result *result,char buffer[256])
 static void refresh_status(void)
 {
     shz_theme_snapshot snapshot;shz_theme_result result;blocked=1;
+    if(refresh_pending){KillTimer(main_window,REFRESH_RETRY);refresh_pending=0;}
     if(!shz_theme_native_snapshot(&theme,&snapshot,&result)){
         SetWindowTextA(saved_label,"Saved theme: invalid, unreadable or busy; selection disabled");
         SetWindowTextA(current_label,"Current session: existing system colors left untouched");
         SetWindowTextA(status_label,"Theme state could not be validated. No palette or startup values were changed.");
+        if(result.phase==SHZ_THEME_PHASE_PROFILE_SNAPSHOT && result.error==ERROR_TIMEOUT){
+            /* A queued color broadcast can arrive before the sender finishes
+             * saving and releases its mutex. Retry reads without waiting. */
+            refresh_pending=SetTimer(main_window,REFRESH_RETRY,250,NULL)!=0;
+            SetWindowTextA(status_label,refresh_pending?"Another theme operation is active. Checking again shortly.":
+                "Another theme operation is active; refresh unavailable. Reopen this window.");
+        }
     }else{
         SetWindowTextA(saved_label,!snapshot.saved?"Saved theme: none (baseline captured; nothing applied yet)":
             snapshot.saved_style==SHZ_THEME_CLASSIC?"Saved theme: Classic":"Saved theme: ShizukuOS");
@@ -90,8 +99,11 @@ static LRESULT CALLBACK window_proc(HWND window,UINT message,WPARAM wparam,LPARA
     case REFRESH_STATUS:
         if(!busy){refresh_status();}
         return 0;
+    case WM_TIMER:
+        if(wparam==REFRESH_RETRY && refresh_pending && !busy)refresh_status();
+        return 0;
     case WM_CLOSE:DestroyWindow(window);return 0;
-    case WM_DESTROY:PostQuitMessage(0);return 0;
+    case WM_DESTROY:KillTimer(window,REFRESH_RETRY);PostQuitMessage(0);return 0;
     }
     return DefWindowProcA(window,message,wparam,lparam);
 }

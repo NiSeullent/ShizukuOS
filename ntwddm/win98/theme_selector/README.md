@@ -92,6 +92,12 @@ while a peer may be broadcasting to their windows. An abandoned mutex is refused
 and disables that instance until it closes.
 Synchronous `WM_SYSCOLORCHANGE` handling posts an asynchronous status refresh,
 avoiding a second selector waiting for that mutex during `SetSysColors`' broadcast.
+If a queued refresh arrives before the sender releases the mutex, the UI retries
+the read every 250 ms without waiting. A successful read cancels the retry;
+invalid or unreadable profiles disable selection without a retry loop. The
+selector uses a window-owned timer, while personalization uses its existing
+preview timer. Closing the window ends retries. No retry applies a palette or
+writes a profile automatically.
 
 Before writes, apply snapshots the complete old profile, old Run value and current
 native palette. It applies/readbacks colors, writes/flushes/readbacks the whole
