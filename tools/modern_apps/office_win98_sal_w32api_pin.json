@@ -1,0 +1,51 @@
+{
+  "schema": "shizuku.libreoffice-sal-win98-w32api.v1",
+  "observed_at_utc": "2026-10-03",
+  "application": "LibreOffice",
+  "upstream_tag": "libreoffice-26.8.0.3",
+  "upstream_commit": "bce0998afefdbc355585ca324285661a2170ba77",
+  "source_url_base": "https://raw.githubusercontent.com/LibreOffice/core/bce0998afefdbc355585ca324285661a2170ba77/",
+  "patch": {
+    "file": "office_win98_sal_w32api.patch",
+    "sha256": "92ee9a53f64ce05e8136585f0071bfbe812fc8c61ffd7fd82a88b12f44e115fb",
+    "license": "upstream MPL-2.0; new header MPL-2.0"
+  },
+  "files": {
+    "sal/osl/w32/socket.cxx": {
+      "original": {
+        "file": "office_win98_upstream_socket.cxx",
+        "sha256": "bae9475c0c9bf1d332b0be5c867a727966c30027125dcf531a334ddc4fe2da29"
+      },
+      "modified_sha256": "a97f74ea4cdf5dc196cd58798aa5e6eedd417cb695bc6d59059dc1a7394a5acd"
+    },
+    "sal/osl/w32/file_dirvol.cxx": {
+      "original": {
+        "file": "office_win98_upstream_file_dirvol.cxx",
+        "sha256": "e6508fce49dc8812dfdab2c9b0c7a305e2192dd318d892a2478727e4ada04f96"
+      },
+      "modified_sha256": "0d1adf2b0507de8f86f88b4dd8cc72daa51af70b9b012a49ee9ff5f2e526c544"
+    }
+  },
+  "new_file": {
+    "path": "sal/osl/w32/win98_offsal2.h",
+    "sha256": "a774130b4bac1f28801c670e7964d290688111f927dc45b0796eb7f7b1943600"
+  },
+  "activation": {
+    "define": "LIBO_WIN98=1",
+    "link": "OFFSAL.DLL import library (ntwin32/office_sal/office_sal.def)"
+  },
+  "provider": "ntwin32/office_sal (OFFSAL.DLL, Win98 SE KERNEL32-only static imports)",
+  "semantics": {
+    "W file APIs": "W->ACP with exact round-trip, else ERROR_NO_UNICODE_TRANSLATION (1113); >=260 -> 206; \\\\?\\ prefix -> 123; find-data names verified back",
+    "InetPtonW/InetNtopW": "IPv4 strict dotted decimal (no leading zeros); AF_INET6 -> WSAEAFNOSUPPORT",
+    "GetAddrInfoW/GetNameInfoW": "legacy resolver (gethostbyname etc. loaded at run time), IPv4 only, ASCII host names, unsupported flags WSAEINVAL",
+    "GetVolumeNameForVolumeMountPointW": "ERROR_CALL_NOT_IMPLEMENTED (no volume GUID paths)"
+  },
+  "not_covered": [
+    "pipe.cxx (no local named pipes on Win98: OfsCreateNamedPipeW/WaitNamedPipeW exported, unpatched)",
+    "security.cxx (CheckTokenMembership/ConvertSidToStringSidW/userenv imports absent: not patched)",
+    "backtrace.cxx/signal.cxx (OfsCaptureStackBackTrace exported; dbghelp SymFromAddr and WER absent: not patched)",
+    "file.cxx and remaining W calls (GetVolumeInformationW, GetDiskFreeSpaceExW, WNet*W, GetNamedSecurityInfoW, GetLogicalDriveStringsW)"
+  ],
+  "upstream_base_note": "socket.cxx and file_dirvol.cxx are untouched by office_win98_sal_startup.patch; both patches can be applied independently"
+}

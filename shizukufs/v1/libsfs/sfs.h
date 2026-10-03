@@ -40,7 +40,9 @@ enum {
     SFS_ENAMETOOLONG = -13,
     SFS_EFBIG = -14,
     SFS_EBUSY = -15,
-    SFS_ERANGE = -16
+    SFS_ERANGE = -16,
+    SFS_EACCES = -17,       /* caller's credential lacks the requested permission (sfs_access.h) */
+    SFS_EPERM = -18         /* operation reserved to the owner or a privileged credential (sfs_access.h) */
 };
 
 /* Mount flags. */

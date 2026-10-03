@@ -7,7 +7,7 @@
 struct source { uint64_t token; archive_source_t *cap; archive_source_info_t info; unsigned admitted,role; };
 struct owner {
  process_t *process; int pid; unsigned retired;
- struct source sources[2];
+ struct source sources[3];                 /* [0..1] manifest/SIM pair, [2] optional role-2 SZOU */
  uint64_t claim_token; blk_authority_claim_t *claim; blk_authority_identity_t target;
 };
 static struct owner owners[OWNERS];
@@ -44,7 +44,7 @@ static struct owner *owner_for(process_t *p,int create)
 static struct source *source_for(struct owner *o,uint64_t t)
 {
  unsigned i;if(!o||!t)return 0;
- for(i=0;i<2;i++)if(o->sources[i].token==t&&o->sources[i].cap)return &o->sources[i];
+ for(i=0;i<3;i++)if(o->sources[i].token==t&&o->sources[i].cap)return &o->sources[i];
  return 0;
 }
 static blk_dev_t *device(unsigned index)
@@ -60,7 +60,7 @@ static int pair(struct owner *o,const shz_native_call_v1 *r,blk_authority_source
 static int claim_matches(struct owner *o,const shz_native_call_v1 *r)
 {return o&&o->claim&&r->handle==o->claim_token&&!memcmp(&r->target,&o->target,sizeof o->target);}
 static void tidy(struct owner *o)
-{if(o&&!o->claim&&!o->sources[0].cap&&!o->sources[1].cap)memset(o,0,sizeof *o);}
+{if(o&&!o->claim&&!o->sources[0].cap&&!o->sources[1].cap&&!o->sources[2].cap)memset(o,0,sizeof *o);}
 _Static_assert(sizeof(blk_authority_identity_t)==sizeof(shz_native_target_v1),"target wire/kernel identity");
 int32_t setup_native_syscall(process_t *p,uint64_t user,uint64_t bytes)
 {
@@ -79,7 +79,7 @@ int32_t setup_native_syscall(process_t *p,uint64_t user,uint64_t bytes)
  }
  if(r.operation==SHZ_NATIVE_RELEASE_INFO){
   unsigned role=r.index;
-  if(role>1){status=STATUS_INVALID_PARAMETER;goto done;}
+  if(role>SHZ_NATIVE_ROLE_MAX){status=STATUS_INVALID_PARAMETER;goto done;}
   /* A readonly reply contains no caller-supplied apparent handles/authority. */
   memset(&r,0,sizeof r);r.version=SHZ_NATIVE_SYS_VERSION;r.bytes=sizeof r;
   r.operation=SHZ_NATIVE_RELEASE_INFO;r.index=role;
@@ -90,7 +90,7 @@ int32_t setup_native_syscall(process_t *p,uint64_t user,uint64_t bytes)
  switch(r.operation){
  case SHZ_NATIVE_OPEN:
   if(o->claim||!terminated(r.path,sizeof r.path)||!r.path[0]){status=STATUS_INVALID_PARAMETER;break;}
-  for(i=0;i<2;i++)if(!o->sources[i].cap){s=&o->sources[i];break;}
+  for(i=0;i<3;i++)if(!o->sources[i].cap){s=&o->sources[i];break;}
   if(!s||!(new_token=token())){status=STATUS_INSUFFICIENT_RESOURCES;break;}
   rc=archive_source_open(o,r.path,&s->cap,&s->info);
   if(!rc){s->token=new_token;r.handle=new_token;memcpy(&r.source,&s->info,sizeof r.source);created_source=1;}
@@ -102,7 +102,7 @@ int32_t setup_native_syscall(process_t *p,uint64_t user,uint64_t bytes)
   s=source_for(o,r.handle);if(!s){status=STATUS_INVALID_HANDLE;break;}
   if(r.operation==SHZ_NATIVE_ADMIT){
    archive_source_info_t info;
-   if(r.index>1||(s->admitted&&s->role!=r.index))break;
+   if(r.index>SHZ_NATIVE_ROLE_MAX||(s->admitted&&s->role!=r.index))break;
    rc=archive_source_info(o,s->cap,&s->info,&info);
    if(!rc)rc=setup_native_release_source(&info,r.index);
    if(!rc){s->admitted=1;s->role=r.index;memcpy(&r.source,&info,sizeof r.source);}
@@ -166,10 +166,10 @@ void setup_native_process_teardown(process_t *p)
  struct owner *o;unsigned i;if(!p)return;acquire();o=owner_for(p,0);
  if(o){
   if(o->claim&&!blk_authority_release(o,o->claim,&o->target)){o->claim=0;o->claim_token=0;}
-  for(i=0;i<2;i++)if(o->sources[i].cap&&!archive_source_close(o,o->sources[i].cap,&o->sources[i].info))memset(&o->sources[i],0,sizeof o->sources[i]);
+  for(i=0;i<3;i++)if(o->sources[i].cap&&!archive_source_close(o,o->sources[i].cap,&o->sources[i].info))memset(&o->sources[i],0,sizeof o->sources[i]);
   /* Poisoned claim retains snapshot references and kernel owner address. This
    * slot cannot be reused by a recycled process pointer/PID until reboot. */
-  if(o->claim||o->sources[0].cap||o->sources[1].cap){o->retired=1;o->process=0;}
+  if(o->claim||o->sources[0].cap||o->sources[1].cap||o->sources[2].cap){o->retired=1;o->process=0;}
   else memset(o,0,sizeof *o);
  }
  mutex_unlock(&lock);

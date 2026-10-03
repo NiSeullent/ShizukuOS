@@ -39,13 +39,13 @@ class ContinuationAssets(unittest.TestCase):
     def test_full_static_inventory_preserves_all_existing_assets_and_exact_nine_additions(self):
         prepared = self.prepared()
         assets = prepared['assets']
-        self.assertEqual(len(assets), 100)
+        self.assertEqual(len(assets), 104)
         self.assertTrue(ADDED.issubset(assets))
         existing = set(publisher.STATIC) | set(publisher.AUTHORSHIP_STATIC)
         existing.update('authorship/images/' + name for name in publisher.AUTHORSHIP_IMAGES)
         preview = json.loads((self.site / 'evidence/preview.json').read_bytes())
         existing.update('evidence/' + Path(frame['src']).as_posix() for collection in preview['collections'] for frame in collection['frames'])
-        self.assertEqual(len(existing), 91)
+        self.assertEqual(len(existing), 95)
         self.assertEqual(set(assets), existing | ADDED)
         for name, raw in assets.items():
             self.assertEqual(raw, (self.site / name).read_bytes(), name)
@@ -140,13 +140,13 @@ class ContinuationAssets(unittest.TestCase):
                 self.assertIn('ShizukuOS', text)
                 self.assertIn('1.0.0', text)
                 self.assertNotIn('1.0.0 complete', text)
-                self.assertIn('https://github.com/NiSeullent/Win98-Modern', text)
+                self.assertIn('https://github.com/NiSeullent/ShizukuOS', text)
         handoff = (self.site / 'authorship/handoff.html').read_text()
         self.assertIn('href="../continuation/"', handoff)
         self.assertIn('href="../continuation/guide.html"', handoff)
         self.assertIn('0.9', handoff)
         self.assertIn('1.0.0', handoff)
-        self.assertIn('https://github.com/NiSeullent/Win98-Modern/tree/main', handoff)
+        self.assertIn('https://github.com/NiSeullent/ShizukuOS/tree/main', handoff)
 
 
 if __name__ == '__main__':

@@ -10,9 +10,12 @@
 #include "cpu.h"
 #include "domain.h"
 #include "pool.h"
+#include "display_grant.h"
+#include "video.h"
 #include "../../abi/shz_ipc.h"
 #include "../../boot_profile/win98_foundation.h"
 #include "../../kernel32/service_policy.h"
+#include "../../kernel64/standalone/memholes.h"   /* SHZ_K64_* image window (memory-layout contract b4) */
 
 #define BOOT_GDT_GPA 0x6000u
 #define BOOT_PML4_GPA 0x1000u
@@ -22,6 +25,11 @@
 #define KERNEL_GPA 0x100000ull
 #define INITRD_GPA 0x02000000ull
 #define K64_VIRT_BASE 0xffffffff80000000ull
+/* Kernel64 image + BSS window is [SHZ_K64_KERNEL_GPA, SHZ_K64_KERNEL_END) = [1 MiB, 4 MiB); its heap starts at
+ * SHZ_K64_HEAP_GPA. The Supervisor zeroes the entire domain RAM, so only the file bound needs a check here
+ * (kernel64/link.ld asserts file + BSS <= the window). Kernel32 keeps its own unchanged contract. */
+_Static_assert(KERNEL_GPA == SHZ_K64_KERNEL_GPA && SHZ_K64_KERNEL_GPA + SHZ_K64_KERNEL_FILE_MAX <= SHZ_K64_HEAP_GPA &&
+               SHZ_K64_HEAP_GPA <= INITRD_GPA, "Kernel64 Supervisor copy geometry disagrees with memholes.h");
 
 static const uint64_t boot_gdt[5] = {
     0,
@@ -30,6 +38,28 @@ static const uint64_t boot_gdt[5] = {
     0x00af9b000000ffffull,      /* 0x18 code, 64-bit */
     0x00cf93000000ffffull,      /* 0x20 data */
 };
+
+/* Loader flag policy (shz_info.h). Each known bit is decided separately; the
+ * whole value is never compared against one bit. Unknown bits and the
+ * native+exclusive-K64-display combination (refused by the loader before
+ * handoff, see loader.c k64_display/native_win98) fail closed here as well, so
+ * a corrupted handoff can neither weaken nor silently pick a profile.
+ *   0                      -> SHZ_LFP_DOS: DOS16 + K32/K64, no Windows baseline
+ *   SHZ_LOADER_K64_DISPLAY -> SHZ_LFP_DISPLAY: same as DOS plus the GOP grant
+ *                             check; never publishes the Windows foundation
+ *   SHZ_LOADER_NATIVE_WIN98-> SHZ_LFP_NATIVE: strict native foundation policy
+ *   anything else          -> SHZ_LFP_INVALID (refused) */
+#define SHZ_LOADER_KNOWN_FLAGS (SHZ_LOADER_NATIVE_WIN98 | SHZ_LOADER_K64_DISPLAY)
+enum { SHZ_LFP_INVALID = -1, SHZ_LFP_DOS = 0, SHZ_LFP_DISPLAY = 1, SHZ_LFP_NATIVE = 2 };
+
+static int loader_flag_policy(uint32_t flags)
+{
+    if (flags & ~(uint32_t)SHZ_LOADER_KNOWN_FLAGS)
+        return SHZ_LFP_INVALID;
+    if (flags & SHZ_LOADER_NATIVE_WIN98)
+        return (flags & SHZ_LOADER_K64_DISPLAY) ? SHZ_LFP_INVALID : SHZ_LFP_NATIVE;
+    return (flags & SHZ_LOADER_K64_DISPLAY) ? SHZ_LFP_DISPLAY : SHZ_LFP_DOS;
+}
 
 static const shz_blob_t *find_blob(const shz_info_t *info, const char *name)
 {
@@ -71,7 +101,14 @@ int kernel_domain_create(shz_info_t *info, const shz_caps_t *caps, dom_kind_t ki
     vmx_cfg_t cfg;
     uint8_t *ram;
     shz_bootinfo_t *bi;
+    int display_granted = 0;
+    const int policy = loader_flag_policy(info->loader_flags);
 
+    if (policy == SHZ_LFP_INVALID) {
+        log_capture(info->last_error, sizeof info->last_error, "%s: loader flags %x refused (unknown bits or "
+                    "native Win98 combined with K64 display)", lm ? "K64" : "K32", info->loader_flags);
+        return -1;
+    }
     if (!size || !kernel)
         return 1;                                   /* not configured: not an error */
     memset(d, 0, sizeof *d);
@@ -86,6 +123,12 @@ int kernel_domain_create(shz_info_t *info, const shz_caps_t *caps, dom_kind_t ki
     if ((base & 0x1fffff) || (size & 0x1fffff) || size < (16ull << 20) || kernel->size > (size - KERNEL_GPA) / 2 ||
         (initrd && (INITRD_GPA + initrd->size > size))) {
         log_capture(info->last_error, sizeof info->last_error, "%s: RAM/kernel/initrd geometry invalid", d->name);
+        return -1;
+    }
+    /* Validated copy: the K64 file must end before the kernel heap boundary (4 MiB), never inside it. */
+    if (lm && (kernel->size == 0 || kernel->size > SHZ_K64_KERNEL_FILE_MAX || size < SHZ_K64_HEAP_GPA)) {
+        log_capture(info->last_error, sizeof info->last_error,
+                    "%s: kernel file %llu bytes outside the [1 MiB, 4 MiB) image window", d->name, kernel->size);
         return -1;
     }
     ram = (uint8_t *)(uintptr_t)base;
@@ -116,7 +159,7 @@ int kernel_domain_create(shz_info_t *info, const shz_caps_t *caps, dom_kind_t ki
     /* Native Win98 is the explicit owner of this K32 service lifetime. The
      * existing ABI1.1 command line carries policy; default DOS/QA stays empty.
      */
-    if (!lm && info->loader_flags == SHZ_LOADER_NATIVE_WIN98) {
+    if (!lm && policy == SHZ_LFP_NATIVE) {
         memcpy(bi->cmdline, K32_WIN98_SERVICE_CMDLINE, sizeof K32_WIN98_SERVICE_CMDLINE);
         bi->cmdline_size = sizeof K32_WIN98_SERVICE_CMDLINE - 1;
     }
@@ -124,6 +167,30 @@ int kernel_domain_create(shz_info_t *info, const shz_caps_t *caps, dom_kind_t ki
     if (ept_init(&d->ept) || ept_map(&d->ept, 0, base, size, EPT_RWX | EPT_WB, 0)) {
         log_capture(info->last_error, sizeof info->last_error, "%s: EPT construction failed", d->name);
         return -1;
+    }
+    /* Explicit display grant (BOOT.INI k64_display=yes). The descriptor is published only together with the EPT
+     * mapping; a refused check leaves fb_* zero (Kernel64: STATUS_NO_SUCH_DEVICE) and the console on GOP. */
+    if (lm && policy == SHZ_LFP_DISPLAY) {
+        shz_fb_grant_t g;
+        const char *why = shz_fb_grant_check(info, size, &g);
+        if (why) {
+            kprintf("SHZ: display: GOP grant to %s refused: %s; the Supervisor console keeps the framebuffer\n",
+                    d->name, why);
+        } else if (ept_map(&d->ept, g.base, g.base, g.map_bytes, EPT_R | EPT_W | EPT_WC, 0)) {
+            /* A partial mapping must not survive without a descriptor: the domain is not started. */
+            log_capture(info->last_error, sizeof info->last_error, "%s: EPT display grant mapping failed", d->name);
+            return -1;
+        } else {
+            bi->fb_base = g.base;
+            bi->fb_size = g.size;
+            bi->fb_width = g.width;
+            bi->fb_height = g.height;
+            bi->fb_pitch = g.pitch;
+            bi->fb_format = g.format;
+            bi->fb_bpp = 32;
+            bi->flags |= SHZ_BIF_FB_SUPERVISOR_GRANT;
+            display_granted = 1;
+        }
     }
     d->io_bitmap_a = pool_alloc_pages(1);
     d->io_bitmap_b = pool_alloc_pages(1);
@@ -168,6 +235,12 @@ int kernel_domain_create(shz_info_t *info, const shz_caps_t *caps, dom_kind_t ki
     d->vc.gpr[GPR_RDI] = SHZ_BOOTINFO_GPA;
     d->vc.gpr[GPR_RAX] = SHZ_BOOTINFO_MAGIC;
     d->state = SHZ_DS_RUNNABLE;
+    if (display_granted) {                          /* single writer from here on: Kernel64 */
+        video_delegate_display(id);
+        kprintf("SHZ: display: GOP %ux%u pitch %u %s at %llx (%llu KiB) granted to %s; DOS text console no longer "
+                "drawn on GOP while %s runs\n", bi->fb_width, bi->fb_height, bi->fb_pitch,
+                bi->fb_format == SHZ_FB_RGBX8888 ? "RGBX" : "BGRX", bi->fb_base, bi->fb_size >> 10, d->name, d->name);
+    }
     info->domains[id].kind = kind;
     info->domains[id].generation = d->generation;
     info->domains[id].state = SHZ_DS_RUNNABLE;
@@ -196,8 +269,9 @@ static int win98_foundation_publish(shz_info_t *info)
     static const dom_kind_t kinds[] = {DK_WIN98, DK_KERNEL32, DK_KERNEL64};
     shz_bootinfo_t *workers[2], candidates[2];
     unsigned i;
-    if (!info->loader_flags) return 0;
-    if (info->loader_flags != SHZ_LOADER_NATIVE_WIN98) goto refused;
+    const int policy = loader_flag_policy(info->loader_flags);
+    if (policy == SHZ_LFP_DOS || policy == SHZ_LFP_DISPLAY) return 0;   /* no Windows baseline to publish */
+    if (policy != SHZ_LFP_NATIVE) goto refused;
     for (i = 0; i < 3; ++i) {
         domain_t *d = &g_dom[ids[i]];
         if (d->id != ids[i] || d->kind != kinds[i] || !d->generation ||
@@ -242,8 +316,10 @@ int ipc_channels_create(shz_info_t *info)
 {
     unsigned c;
     if (!info->ipc_base || info->ipc_size < (uint64_t)SHZ_MAX_CHANNELS * SHZ_IPC_REGION_SIZE) {
-        if (!info->loader_flags) return 0;
-        log_capture(info->last_error, sizeof info->last_error, "native Win98 foundation lacks IPC backing");
+        const int policy = loader_flag_policy(info->loader_flags);
+        if (policy == SHZ_LFP_DOS || policy == SHZ_LFP_DISPLAY) return 0;
+        log_capture(info->last_error, sizeof info->last_error, policy == SHZ_LFP_NATIVE ?
+                    "native Win98 foundation lacks IPC backing" : "loader flags refused");
         return -1;
     }
     for (c = 0; c < SHZ_MAX_CHANNELS; ++c) {

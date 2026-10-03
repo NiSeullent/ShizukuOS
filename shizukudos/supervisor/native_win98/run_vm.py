@@ -88,6 +88,48 @@ class GuardianOriginalInputs:
                 for entry in self.rows.values()]
 
 
+INPUT_RECIPE_FLAGS=('--input-recipe','--input-recipe-sha256')
+
+
+def recipe_flags_unique(argv):
+    """Each recipe flag at most once (argparse would keep only the last)."""
+    for flag in INPUT_RECIPE_FLAGS:
+        if sum(1 for token in argv if token==flag or token.startswith(flag+'='))>1:return False
+    return True
+
+
+def load_input_recipe(path,sha256,borrowed,capture):
+    """Compile the recipe from one pinned descriptor; never a follow-symlink path read.
+
+    Guardian custody: bytes come only from the guardian's held, full-SHA leased
+    FD (borrowed original); the borrowed checkpoint keeps the path/inode identity
+    pinned until the reap. Standalone: O_NOFOLLOW read with before/after
+    descriptor+path identity. The compiled script is the only copy used.
+    """
+    if type(sha256) is not str or len(sha256)!=64 or any(c not in '0123456789abcdef' for c in sha256):
+        raise ValueError('input recipe SHA-256 must be 64 lowercase hex digits')
+    path=Path(path)
+    if not path.is_absolute() or os.path.normpath(str(path))!=str(path):raise ValueError('absolute canonical input recipe path required')
+    st=os.lstat(path)
+    if not stat.S_ISREG(st.st_mode) or not 0<st.st_size<=capture.INPUT_RECIPE_MAX_BYTES:
+        raise ValueError('regular non-symlink bounded input recipe required')
+    if borrowed is not None:
+        item={'path':str(path),'bytes':st.st_size,'sha256':sha256}
+        raw=borrowed.read(item,capture.INPUT_RECIPE_MAX_BYTES)
+        return capture.InputScript(raw,sha256),dict(item,custody='GUARDIAN_BORROWED_FULL_SHA_LEASED_FD')
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
+    try:
+        before=os.fstat(fd)
+        if (before.st_dev,before.st_ino)!=(st.st_dev,st.st_ino) or not stat.S_ISREG(before.st_mode):raise ValueError('input recipe path swapped before open')
+        raw=os.pread(fd,capture.INPUT_RECIPE_MAX_BYTES+1,0)
+        after=os.fstat(fd);named=os.lstat(path)
+        ident=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+        if ident(after)!=ident(before) or ident(named)!=ident(before) or len(raw)!=before.st_size:
+            raise ValueError('input recipe changed during the pinned read')
+    finally:os.close(fd)
+    return capture.InputScript(raw,sha256),{'path':str(path),'bytes':len(raw),'sha256':sha256,'custody':'CONTROLLER_PINNED_NOFOLLOW_READ'}
+
+
 def helper_identity(repo):
     """Explicit caller pin, distinct from the historical ESP producer sources."""
     for name in HELPERS:
@@ -232,7 +274,7 @@ class GuardianQMP:
 
 
 def main():
-    parser=argparse.ArgumentParser(description=__doc__)
+    parser=argparse.ArgumentParser(description=__doc__,allow_abbrev=False)
     parser.add_argument('--plan',type=Path,required=True)
     parser.add_argument('--plan-sha256',required=True)
     parser.add_argument('--repo',type=Path,required=True)
@@ -243,7 +285,10 @@ def main():
     parser.add_argument('--plan-bytes',type=int,help=argparse.SUPPRESS)
     parser.add_argument('--runtime-source-pins-json',help=argparse.SUPPRESS)
     parser.add_argument('--pci-preparation-json',help=argparse.SUPPRESS)
+    parser.add_argument('--input-recipe',type=Path,help='hash-pinned scripted input recipe (owned QMP only)')
+    parser.add_argument('--input-recipe-sha256')
     parser.add_argument('--guardian-epoch',action='store_true',help=argparse.SUPPRESS)
+    if not recipe_flags_unique(sys.argv[1:]):parser.error('each input recipe flag may appear at most once')
     args=parser.parse_args()
     if not timeout_valid(args.timeout):parser.error('timeout must be 20..900 seconds')
     custody=get_custody(args.custody_fd)
@@ -253,6 +298,14 @@ def main():
         try:leases.close()
         finally:
             if custody is not None:custody.close()
+
+
+def expected_recipe(preparation,plan,qemu,out,guardian_epoch,custody):
+    """Rebuild the exact argv; the epoch binding comes only from the held plan and only under a live guardian epoch."""
+    epoch_binding=plan.get('prospective_native_epoch_recipe')
+    if (epoch_binding is not None)!=bool(guardian_epoch) or (guardian_epoch and custody is None):
+        raise ValueError('live guardian custody and exact prospective epoch binding must match')
+    return preparation.recipe(qemu,out,epoch_binding=epoch_binding)
 
 
 def run_plan(args,parser,custody,leases):
@@ -266,6 +319,8 @@ def run_plan(args,parser,custody,leases):
         if type(pci_selection) is not dict:raise ValueError('explicit PCI selection object required')
     runtime_names=RUNTIME_ORIGINALS+ (('tools/native_pci_preparation.py',) if pci_selection is not None else ())
     if not timeout_valid(args.timeout):parser.error('timeout must be 20..900 seconds')
+    input_script=recipe_pin=None
+    if (args.input_recipe is None)!=(args.input_recipe_sha256 is None):parser.error('input recipe path and SHA-256 are required together')
     plan_size=args.plan_bytes if borrowed is not None else args.plan.stat().st_size
     if type(plan_size) is not int or not 0<plan_size<=16<<20:parser.error('private plan must be nonempty and at most 16 MiB')
     plan_pin={'path':str(args.plan),'sha256':args.plan_sha256,'bytes':plan_size}
@@ -319,6 +374,10 @@ def run_plan(args,parser,custody,leases):
     native=frozen/'shizukudos/supervisor/native_win98'
     loader=custody.load if custody is not None else load
     capture=loader('native_run_capture',native/'owned_capture.py')
+    # The recipe is compiled by the frozen/admitted capture snapshot, before any spawn.
+    if args.input_recipe is not None:
+        try:input_script,recipe_pin=load_input_recipe(args.input_recipe,args.input_recipe_sha256,borrowed,capture)
+        except (OSError,ValueError) as error:parser.error('input recipe refused: %s'%error)
     guards=loader('native_run_guards',native/'build.py')
     preparation=loader('native_run_preparation',native/'prepare_vm.py')
     info_helper=loader('native_run_info',frozen/'shizukudos/tools/shzinfo.py')
@@ -355,7 +414,7 @@ def run_plan(args,parser,custody,leases):
     source_sizes[header_name]=target.stat().st_size
     layout_bytes=(custody.layout(info_helper,target) if custody is not None else info_helper.selfcheck(frozen))
     qemu=Path(plan['input_pins']['qemu']['path'])
-    recipe=preparation.recipe(qemu,out)
+    recipe=expected_recipe(preparation,plan,qemu,out,getattr(args,'guardian_epoch',False),custody)
     if recipe!=plan['qemu_argv']:raise ValueError('VM argv differs from the exact source recipe')
     for key,name in [('esp','esp.img'),('firmware_code','OVMF_CODE.fd'),('firmware_vars','OVMF_VARS.fd')]:
         item=plan['input_pins'][key];guards.pinned_hash(out/name,item['sha256'],item['bytes'],max(item['bytes'],4<<20))
@@ -381,7 +440,8 @@ def run_plan(args,parser,custody,leases):
             'log_limit_per_stream_bytes':capture.LOG_LIMIT,'capture_total_limit_bytes':capture.CAPTURE_LIMIT,
             'host_memory_admission_bytes':capture.MEMORY_ADMISSION,'host_memory_floor_bytes':capture.MEMORY_FLOOR,
             'collection_verified':False,'receipt_persisted':False,'lease_integrity_verified':False}
-    checkpoints=[];child=monitor=logs=None;start=time.monotonic()
+    checkpoints=[];child=monitor=logs=scoped_input=None;start=time.monotonic()
+    if recipe_pin is not None:record['input_recipe']=recipe_pin
     record.update(original_integrity_method=('GUARDIAN_INITIAL_FULL_SHA_AND_CONTINUOUS_SHARED_READ_LEASE_IDENTITY' if borrowed is not None else 'CONTROLLER_INDEPENDENT_FULL_SHA_AND_READ_LEASE'),
                   controller_independent_original_full_SHA_readback=borrowed is None,
                   guardian_late_full_SHA_closure_pending=borrowed is not None,guardian_PID1_final_join_required=borrowed is not None)
@@ -437,9 +497,13 @@ def run_plan(args,parser,custody,leases):
         else:
             monitor=capture.OwnedQMP(out/'qmp.sock',child.pid,start+args.timeout,pump=pump)
             if custody is not None:custody.admit_qmp(monitor)
+        scoped_input=capture.ScopedInput(input_script,monitor) if input_script is not None else None
         next_capture=10
         while child.poll() is None and time.monotonic()-start<args.timeout:
             elapsed=time.monotonic()-start;pump()
+            if scoped_input is not None:
+                try:scoped_input.poll(elapsed)
+                finally:record['input_injection']=scoped_input.evidence()
             last_writes=esp_write_bytes(monitor.call('query-blockstats'),last_writes)
             if elapsed>=next_capture:
                 stem='native-%03d'%len(record['captures']);sample={'seconds':round(elapsed,3)}
@@ -464,7 +528,8 @@ def run_plan(args,parser,custody,leases):
                 print(json.dumps({'stage':'native-capture','seconds':sample['seconds'],'status':sample['native_status']}),flush=True)
                 next_capture=elapsed+20
             if failure_seen is not None and elapsed-failure_seen>=20:break
-            logs.pump(timeout=min(1,max(0,start+args.timeout-time.monotonic())))
+            wake=1 if scoped_input is None or scoped_input.next_due(time.monotonic()-start) is None else min(1,scoped_input.next_due(time.monotonic()-start))
+            logs.pump(timeout=min(wake,max(0,start+args.timeout-time.monotonic())))
         # Observation deadline is distinct from the bounded final sample/cleanup.
         monitor.deadline=time.monotonic()+5
         monitor.call('stop');record['final_pause_acknowledged']=True

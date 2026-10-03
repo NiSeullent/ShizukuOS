@@ -90,7 +90,10 @@ static void btn_paint(HWND h, HDC dc)
         f.top += 7;
         DrawEdge(dc, &f, EDGE_ETCHED, BF_RECT);
         if (n > 0) {
-            RECT tr = { 8, 0, 8 + n * 8 + 4, 16 };
+            SIZE ts = { n * 8, 16 };
+            RECT tr;
+            GetTextExtentPoint32W(dc, t, n, &ts);
+            SetRect(&tr, 8, 0, 8 + ts.cx + 4, 16);
             FillRect(dc, &tr, bk ? bk : GetSysColorBrush(COLOR_3DFACE));
             OffsetRect(&tr, 2, 0);
             btn_text(h, dc, &tr, DT_LEFT | DT_TOP | DT_SINGLELINE, disabled);
@@ -113,7 +116,15 @@ static void btn_paint(HWND h, HDC dc)
         DrawFrameControl(dc, &box, DFC_BUTTON, dfcs);
         if (style & BS_LEFTTEXT) tr.right -= 17; else tr.left += 17;
         btn_text(h, dc, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE, disabled);
-        if (focused) { RECT fr = tr; fr.right = fr.left + 8 * GetWindowTextLengthW(h) + 2; DrawFocusRect(dc, &fr); }
+        if (focused) {
+            WCHAR t[256];
+            SIZE ts = { 0, 16 };
+            RECT fr = tr;
+            const int n = GetWindowTextW(h, t, 256);
+            if (n > 0) GetTextExtentPoint32W(dc, t, n, &ts);
+            fr.right = fr.left + ts.cx + 2;
+            DrawFocusRect(dc, &fr);
+        }
         return;
     }
     case BS_OWNERDRAW: {
@@ -880,13 +891,21 @@ static INT_PTR CALLBACK msgbox_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 
 static int wrap_lines(LPCWSTR text, int *width)
 {
-    int lines = 1, col = 0, maxc = 0, i;
+    /* *width = widest line in half-cells (one per 8 px, as 4 dlu): ASCII 1, Hangul and other full-width glyphs 2 */
+    int lines = 1, col = 0, maxc = 0, i, start = 0, px = 0, maxpx = 0;
     for (i = 0; text && text[i]; ++i) {
-        if (text[i] == '\n' || col >= 60) { ++lines; if (col > maxc) maxc = col; col = 0; if (text[i] == '\n') continue; }
+        if (text[i] == '\n' || col >= 60) {
+            px = u32_text_px(text + start, i - start - (i > start && text[i - 1] == '\r'));
+            if (px > maxpx) maxpx = px;
+            ++lines; if (col > maxc) maxc = col; col = 0; start = i;
+            if (text[i] == '\n') { start = i + 1; continue; }
+        }
         if (text[i] != '\r') ++col;
     }
     if (col > maxc) maxc = col;
-    *width = maxc;
+    px = text ? u32_text_px(text + start, i - start - (i > start && text[i - 1] == '\r')) : 0;
+    if (px > maxpx) maxpx = px;
+    *width = (maxpx + 7) / 8 > maxc ? (maxpx + 7) / 8 : maxc;
     return lines;
 }
 

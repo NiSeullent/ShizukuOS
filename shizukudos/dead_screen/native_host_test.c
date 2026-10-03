@@ -19,6 +19,11 @@ static ds_fault original;
 uint64_t ds_test_cr2(void){return 0xdeadbeef;}
 uint64_t ds_test_cr3(void){return 0x1000;}
 uint64_t ds_test_flags(void){return 0x46;}
+/* Modelled stack facts for measure(): boot stack [0x100000,0x108000); the
+ * unsafe-stack mode leaves only 256 bytes of headroom. Task stack absent. */
+uint64_t ds_test_boot_stack_top(void){return 0x108000;}
+uint64_t ds_test_task_stack_top(void){return 0;}
+uint64_t ds_test_sp(void){return !strcmp(mode,"unsafe-stack")?0x100100:0x104000;}
 void ds_test_halt(void){halted=1;longjmp(stop,1);}
 uint8_t ds_test_inb(uint16_t p)
 {
@@ -58,6 +63,7 @@ int main(int argc,char **argv)
     if(strcmp(mode,"fallback") && strcmp(mode,"uartfail"))ds_native_bind(pixels,640,480,2560,sizeof pixels,0);
     if(!strcmp(mode,"small"))ds_native_bind(pixels,320,200,1280,sizeof pixels,0);
     if(!strcmp(mode,"force-text"))ds_native_force_text();
+    if(!strcmp(mode,"unsafe-smp"))ds_native_secondary_cpu_started();
     ds_native_timer_ready();
     if(!setjmp(stop)) {
         if(!strcmp(mode,"panic")) {
@@ -65,10 +71,20 @@ int main(int argc,char **argv)
             ds_native_panic(0x12345678,0x87654321,0x98765432);
         }
         struct regs r={0};r.rip=0x123456789; r.rsp=0xabcdef; r.rbp=0xbcdef;
-        r.vector=14;r.error=3;r.cs=8;r.rflags=0x246;r.rax=91;r.r15=92;
+        r.vector=!strcmp(mode,"unsafe-df")?8:14;r.error=3;r.cs=8;r.rflags=0x246;r.rax=91;r.r15=92;
         ds_native_exception(&r);
     }
-    if(!strcmp(mode,"fallback") || !strcmp(mode,"uartfail") || !strcmp(mode,"small") || !strcmp(mode,"force-text")) {
+    if(!strncmp(mode,"unsafe-",7)) {
+        /* Visual + trace rendered from static state, game loop refused, halted;
+         * this is not the render-failure text path. */
+        const unsigned expect=!strcmp(mode,"unsafe-stack")?DS_UNSAFE_STACK:
+                              !strcmp(mode,"unsafe-df")?DS_UNSAFE_VECTOR:DS_UNSAFE_SMP;
+        CHECK(halted && !iterations);
+        CHECK(strstr(output,"Dead Screen: games refused, unsafe=0x"));
+        char want[16];snprintf(want,sizeof want,"%08x",expect);CHECK(strstr(output,want));
+        CHECK(!strstr(output,"You session got wasted"));
+        unsigned nonzero=0;for(unsigned i=0;i<640*480;++i)nonzero+=pixels[i]!=0;CHECK(nonzero>2000);
+    } else if(!strcmp(mode,"fallback") || !strcmp(mode,"uartfail") || !strcmp(mode,"small") || !strcmp(mode,"force-text")) {
         CHECK(halted && !iterations);
         if(strcmp(mode,"uartfail")){CHECK(strstr(output,"You session got wasted\nEnglish traceback:"));
             CHECK(strstr(output,"IP=0x0000000123456789"));CHECK(strstr(output,"CR2=0x00000000deadbeef"));}

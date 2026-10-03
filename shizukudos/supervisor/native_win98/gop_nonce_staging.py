@@ -22,6 +22,12 @@ FIRSTLOAD_SOURCES = frozenset('drivers/shizuku_gop/first_load/'+n for n in
     'shizukudos/boot_profile/storage/provenance.h'))
 
 
+def recipe_binding(policy_fd,listener_path,optional):
+    """Live owner recipe binding; selecting W98PERS (role 2) pins the OVMF low32 PCI aperture knob."""
+    binding = {'policy_fd':policy_fd,'listener_path':listener_path}
+    if 'W98PERS.BIN' in optional:binding['modern_persistence_low32'] = True
+    return binding
+
 def need(ok, message):
     if not ok:raise ValueError(message)
 
@@ -304,7 +310,7 @@ def prepare_intent(custody, intent, union, sources, guard):
              'actual native builder return must equal independently leased output')
         esp = {'path':str(names['native']/built['artifact']['path']),'bytes':built['artifact']['bytes'],'sha256':built['artifact']['sha256']}
         union.add(esp)
-        binding = {'policy_fd':attempt.policy_fd,'listener_path':str(names['vm']/'epoch.sock')}
+        binding = recipe_binding(attempt.policy_fd,str(names['vm']/'epoch.sock'),optional)
         args = ['--out',str(names['vm'])]
         for name,row in {'esp':esp,'build-receipt':result_pin,**{k.replace('_','-'):v for k,v in intent['firmware'].items()}}.items():
             args += ['--'+name,row['path'],'--'+name+'-sha256',row['sha256']]

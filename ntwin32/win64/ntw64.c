@@ -533,3 +533,39 @@ BOOL WINAPI NtwCloseProcess64(HANDLE handle)
     r->used = 0;
     return TRUE;
 }
+
+/* ---------------------------------------------------------------- NTW32-internal GUI transport (not exported)
+ * ntw64_gui.c reuses this file's single serialized call()/pump() and record table: the HANDLE must be a live,
+ * not-closed record of this generation; its pid is written into the request selector (offset 8). The reply must
+ * echo the opcode, carry no pool buffer and have exactly `want_len` bytes. */
+BOOL ntw64_gui_transact(HANDLE handle, uint32_t opcode, uint8_t *payload, uint16_t len, uint8_t *reply_payload,
+                        uint16_t want_len, int32_t *status)
+{
+    struct record *r = record_of(handle);
+    shz_msg_hdr_t reply;
+    *status = NTW64_TRANSPORT;
+    if (!r || r->closed) return fail(NTW64_ERROR_INVALID_HANDLE);
+    if (len < 12u || len > SHZ_MSG_MAX_INLINE || !payload || !reply_payload) return fail(ERROR_INVALID_PARAMETER);
+    if (!ensure_open()) return FALSE;
+    ntw_copy(payload + 8, &r->pid, 4);
+    if (!call(opcode, payload, len, NULL, 0, &reply, reply_payload)) { *status = last_status; return FALSE; }
+    *status = last_status;
+    if (reply.opcode != opcode || (reply.flags & SHZ_MSGF_BUFFER) || reply.buffer_length || reply.payload_length != want_len) {
+        *status = SHZ_E_PROTO;
+        return fail(ERROR_INVALID_DATA);
+    }
+    return TRUE;
+}
+
+/* Drains pending frames once and reports whether the process behind `handle` has exited. */
+BOOL ntw64_gui_poll_exit(HANDLE handle, int *exited, DWORD *exit_code)
+{
+    struct record *r = record_of(handle);
+    shz_msg_hdr_t unused;
+    uint8_t unused_payload[SHZ_MSG_MAX_INLINE];
+    if (!r) return fail(NTW64_ERROR_INVALID_HANDLE);
+    if (!r->exited && pump(0, &unused, unused_payload) < 0) return FALSE;
+    *exited = r->exited;
+    if (r->exited && exit_code) *exit_code = (DWORD)r->exit_code;
+    return TRUE;
+}

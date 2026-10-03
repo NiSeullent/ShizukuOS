@@ -24,6 +24,7 @@
 #include "fs.h"
 #include "../abi/shz_ipc.h"
 #include "../pma_bridge/service.h"
+#include "w64_gui_service.h"
 
 #define W64_MAX_PROCS 4
 #define W64_OUT_FIFO 2048u
@@ -50,6 +51,7 @@ typedef struct {
     int reaped, exited_sent;
     int64_t exit_code;
     uint32_t fault_status;
+    uint32_t owner_cap;                 /* capability_id of the creating request (GUI view binding) */
 } w64_slot_t;
 
 static w64_slot_t slots[W64_MAX_PROCS];
@@ -263,7 +265,8 @@ static void reply(const shz_msg_hdr_t *req, int32_t status, const void *payload,
         ++refused;
 }
 
-static int event(uint32_t opcode, const void *payload, uint16_t len)
+/* Events carry the creating slot's owner capability so the VxD routes them by owner token (wire b5 s2). */
+static int event(uint32_t opcode, const void *payload, uint16_t len, uint32_t owner_cap)
 {
     shz_msg_hdr_t h;
     memset(&h, 0, sizeof h);
@@ -273,6 +276,7 @@ static int event(uint32_t opcode, const void *payload, uint16_t len)
     h.dst_domain = (uint16_t)peer;
     h.generation = chan->generation;
     h.payload_length = len;
+    h.capability_id = owner_cap;
     return push(&h, payload);
 }
 
@@ -288,6 +292,44 @@ static void fill_event(shz_w64_event_t *ev, const w64_slot_t *s, uint32_t state,
     ev->console_dropped = s->dropped;
 }
 
+/* ---------------------------------------------------------------- channel attestation (wire b5)
+ * The Supervisor records, in its own memory, that the Win98 domain's ring-0 VxD stamps a derived owner on every user
+ * W64 send for one channel generation (SHZ_HC_CHANNEL_ATTEST). The Supervisor revokes that record when the attester
+ * domain exits, fails or is restarted, WITHOUT changing the channel header, so every authorization re-asks
+ * SHZ_HC_CHANNEL_ATTESTED (a positive answer is never cached). attest_ever is a fail-closed latch only: after a
+ * positive answer, any refusal is REVOKED (nothing served), never the legacy unattested rules. */
+static volatile uint32_t attest_ever;
+#ifndef SHZ_STANDALONE
+static int chan_auth(void)
+{
+    hcreg_t st = SHZ_HC_CHANNEL_ATTESTED, bits, gen = 0;
+    uint32_t live, ever = attest_ever;
+    int a;
+    if (!chan) return ever ? SHZ_CHAN_AUTH_REVOKED : SHZ_CHAN_AUTH_LEGACY;
+    live = chan->generation;
+    bits = chan->channel_id;
+    __asm__ volatile("vmcall" : "+a"(st), "+b"(bits), "+c"(gen) : : "memory", "cc");
+    a = shz_chan_auth_state((long)st, bits, gen, live, SHZ_CHAN_ATTEST_W64_DERIVED_OWNER, &ever);
+    if (ever) attest_ever = 1;
+    return a;
+}
+#else
+static int chan_auth(void) { return SHZ_CHAN_AUTH_LEGACY; }  /* in-kernel loopback client: no VxD, no attestation */
+#endif
+static int chan_attested(void) { return chan_auth() == SHZ_CHAN_AUTH_ATTESTED; }
+int subsys64_channel_attested(void) { return chan_attested(); }
+
+/* Authorization state of the message being dispatched: one fresh Supervisor query per received message (handle()),
+ * REVOKED outside a dispatch so no stray use can succeed. */
+static int msg_auth = SHZ_CHAN_AUTH_REVOKED;
+
+/* A DERIVED (user) sender acts only on the slot it created once the channel is attested; non-DERIVED = in-VxD. */
+static int owner_ok(const shz_msg_hdr_t *m, const w64_slot_t *s)
+{
+    return shz_w64_console_owner_auth(msg_auth == SHZ_CHAN_AUTH_ATTESTED, msg_auth == SHZ_CHAN_AUTH_REVOKED,
+                                      s->owner_cap, m->capability_id);
+}
+
 /* ---------------------------------------------------------------- request handlers */
 static void handle_query(const shz_msg_hdr_t *m)
 {
@@ -297,7 +339,7 @@ static void handle_query(const shz_msg_hdr_t *m)
     info.abi_minor = SHZ_ABI_MINOR;
     info.subsystem_version = SHZ_W64_SUBSYS_VERSION;
     info.capabilities = SHZ_W64_CAP_CREATE | SHZ_W64_CAP_CONSOLE_OUTPUT | SHZ_W64_CAP_CONSOLE_INPUT | SHZ_W64_CAP_KILL |
-                        SHZ_W64_CAP_POOL_ARGS;
+                        SHZ_W64_CAP_POOL_ARGS | (w64_gui_enabled() ? SHZ_W64_CAP_GUI : 0u);
     info.max_processes = W64_MAX_PROCS;
     info.max_args_bytes = SHZ_W64_MAX_ARGS_BYTES;
     info.console_window = SHZ_W64_CONSOLE_WINDOW;
@@ -331,6 +373,7 @@ static void handle_create(const shz_msg_hdr_t *m, const uint8_t *payload)
         return;
     }
     s = slot_alloc();
+    if (s) s->owner_cap = m->capability_id;
     if (!s) {
         reply(m, SHZ_E_NOMEM, 0, 0);
         return;
@@ -361,6 +404,7 @@ static void handle_console_ack(const shz_msg_hdr_t *m, const uint8_t *payload)
     if (shz_w64_console_check(m, payload, &c) != SHZ_OK || c.length) { ++refused; return; }
     s = slot_by_pid(c.pid);
     if (!s || c.seq > s->seq_sent) { ++refused; return; }  /* acknowledging what was never sent: hostile, ignored */
+    if (!owner_ok(m, s)) { ++refused; return; }           /* another process's console window */
     if (c.seq > s->seq_acked)
         s->seq_acked = c.seq;
 }
@@ -375,6 +419,7 @@ static void handle_console_input(const shz_msg_hdr_t *m, const uint8_t *payload)
     if (rc != SHZ_OK || c.stream != 0) { ++refused; reply(m, rc == SHZ_OK ? SHZ_E_INVALID : rc, 0, 0); return; }
     s = slot_by_pid(c.pid);
     if (!s || s->reaped) { reply(m, SHZ_E_NOENT, 0, 0); return; }
+    if (!owner_ok(m, s)) { ++refused; reply(m, SHZ_E_DENIED, 0, 0); return; }
     fl = irq_save();
     space = W64_IN_FIFO - (s->in_head - s->in_tail);
     if (s->in_eof) { irq_restore(fl); reply(m, SHZ_E_INVALID, 0, 0); return; }     /* stdin already closed */
@@ -397,6 +442,7 @@ static void handle_kill(const shz_msg_hdr_t *m, const uint8_t *payload)
     memcpy(&k, payload, sizeof k);
     s = slot_by_pid(k.pid);
     if (!s) { reply(m, SHZ_E_NOENT, 0, 0); return; }
+    if (!owner_ok(m, s)) { ++refused; reply(m, SHZ_E_DENIED, 0, 0); return; }
     if (!s->reaped && s->proc && !s->proc->terminated) {
         process_terminate(s->proc, (int64_t)k.exit_code, 0);
         s->state = SHZ_W64_PS_KILLED;
@@ -413,9 +459,36 @@ static void handle_release(const shz_msg_hdr_t *m, const uint8_t *payload)
     memcpy(&k, payload, sizeof k);
     s = slot_by_pid(k.pid);
     if (!s) { reply(m, SHZ_E_NOENT, 0, 0); return; }
+    if (!owner_ok(m, s)) { ++refused; reply(m, SHZ_E_DENIED, 0, 0); return; }
     if (!s->reaped || !s->exited_sent) { reply(m, SHZ_E_BUSY, 0, 0); return; }
+    w64_gui_revoke((uint32_t)s->pid, s->gen);
     s->used = 0;
     reply(m, SHZ_OK, 0, 0);
+}
+
+/* Native GUI frame pull (abi/shz_w64_gui.h): the request pid only selects this service's own slot. */
+static void handle_gui(const shz_msg_hdr_t *m, const uint8_t *payload)
+{
+    uint8_t out[SHZ_MSG_MAX_INLINE];
+    uint16_t len = 0;
+    w64_gui_subject_t sub;
+    w64_slot_t *s;
+    int32_t st;
+    if (m->flags & SHZ_MSGF_ONEWAY) { ++refused; return; }
+    if ((m->flags & SHZ_MSGF_BUFFER) || m->buffer_length) { ++refused; reply(m, SHZ_E_INVALID, 0, 0); return; }
+    s = slot_by_pid(shz_w64_gui_selector_pid(payload, m->payload_length));
+    memset(&sub, 0, sizeof sub);
+    if (s) {
+        sub.pid = (uint32_t)s->pid;
+        sub.slot_gen = s->gen;
+        sub.proc = s->reaped ? 0 : s->proc;
+        sub.owner_cap = s->owner_cap;
+    }
+    sub.channel_gen = chan->generation;
+    sub.request_cap = m->capability_id;
+    sub.channel_attested = msg_auth == SHZ_CHAN_AUTH_ATTESTED;
+    st = w64_gui_handle(m->opcode, payload, m->payload_length, s ? &sub : 0, out, &len);
+    reply(m, st, st == SHZ_OK ? out : 0, st == SHZ_OK ? len : 0);
 }
 
 static void handle(const shz_msg_hdr_t *m, const uint8_t *payload)
@@ -427,6 +500,15 @@ static void handle(const shz_msg_hdr_t *m, const uint8_t *payload)
             reply(m, SHZ_E_STALE, 0, 0);
         return;
     }
+    msg_auth = chan_auth();
+    if (msg_auth == SHZ_CHAN_AUTH_REVOKED) {
+        /* The attesting Win98 instance is gone: refuse everything on this channel and drop GUI views/snapshots. */
+        ++refused;
+        w64_gui_revoke_all();
+        if (!(m->flags & SHZ_MSGF_ONEWAY)) reply(m, SHZ_E_DENIED, 0, 0);
+        msg_auth = SHZ_CHAN_AUTH_REVOKED;
+        return;
+    }
     ++served;
     switch (m->opcode) {
     case SHZ_OP_W64_QUERY: handle_query(m); break;
@@ -435,7 +517,15 @@ static void handle(const shz_msg_hdr_t *m, const uint8_t *payload)
     case SHZ_OP_W64_CONSOLE_INPUT: handle_console_input(m, payload); break;
     case SHZ_OP_W64_KILL_PROCESS: handle_kill(m, payload); break;
     case SHZ_OP_W64_RELEASE: handle_release(m, payload); break;
+    case SHZ_OP_W64_GUI_QUERY_VIEW: case SHZ_OP_W64_GUI_FRAME_ACQUIRE: case SHZ_OP_W64_GUI_FRAME_READ:
+    case SHZ_OP_W64_GUI_FRAME_RELEASE: case SHZ_OP_W64_GUI_INPUT: case SHZ_OP_W64_GUI_CLOSE_VIEW:
+        handle_gui(m, payload); break;
     case SHZ_OP_W64_SHUTDOWN:
+        if (msg_auth == SHZ_CHAN_AUTH_ATTESTED && shz_w64_owner_cap_derived(m->capability_id)) {
+            ++refused;                                      /* only the VxD itself ends the subsystem */
+            if (!(m->flags & SHZ_MSGF_ONEWAY)) reply(m, SHZ_E_DENIED, 0, 0);
+            break;
+        }
         shutdown_requested = 1;
         shutdown_deadline = ticks_now() + W64_SHUTDOWN_WAIT_MS;
         KASSERT(shz_pma_service_shutdown(&pma_service) == SHZ_OK);
@@ -467,6 +557,7 @@ static int pump_slot(w64_slot_t *s)
             if (s->state != SHZ_W64_PS_KILLED) s->state = SHZ_W64_PS_EXITED;
             s->reaped = 1;
             s->proc = 0;
+            w64_gui_revoke((uint32_t)s->pid, s->gen);
             progressed = 1;
         }
     }
@@ -487,7 +578,7 @@ static int pump_slot(w64_slot_t *s)
             c.length = (uint16_t)n;
             c.stream = (uint8_t)(stream + 1);
             memcpy(pl, &c, sizeof c);
-            if (event(SHZ_OP_W64_CONSOLE_OUTPUT, pl, (uint16_t)(sizeof c + n)) != SHZ_OK)
+            if (event(SHZ_OP_W64_CONSOLE_OUTPUT, pl, (uint16_t)(sizeof c + n), s->owner_cap) != SHZ_OK)
                 return progressed;                          /* ring full: retry on the next pass */
             fl = irq_save();
             f->tail += n;                                   /* consume only once the frame is on the wire */
@@ -500,7 +591,7 @@ static int pump_slot(w64_slot_t *s)
     if (s->reaped && !s->exited_sent && s->out[0].head == s->out[0].tail && s->out[1].head == s->out[1].tail) {
         shz_w64_event_t ev;
         fill_event(&ev, s, s->state, STATUS_SUCCESS);
-        if (event(SHZ_OP_W64_PROCESS_EXITED, &ev, sizeof ev) == SHZ_OK) {
+        if (event(SHZ_OP_W64_PROCESS_EXITED, &ev, sizeof ev, s->owner_cap) == SHZ_OK) {
             s->exited_sent = 1;
             progressed = 1;
             kprintf("K64 subsys64: pid %d %s, exit %d fault %x, %u console frame(s), %u dropped byte(s)\n", s->pid,

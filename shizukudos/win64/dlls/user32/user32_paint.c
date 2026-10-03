@@ -279,8 +279,30 @@ DLLAPI BOOL WINAPI DrawFocusRect(HDC hdc, const RECT *rc)
 }
 
 /* DrawText: DT_LEFT/CENTER/RIGHT/TOP/VCENTER/BOTTOM, SINGLELINE, WORDBREAK, EXPANDTABS, NOCLIP, NOPREFIX, CALCRECT and
- * END_ELLIPSIS. Everything is measured with the one built-in fixed-width font. '&' prefixes are removed but no underline is
+ * END_ELLIPSIS. Every width is measured with GetTextExtentPoint32W, the same per-character advances ExtTextOutW draws
+ * with (ASCII 8 px, Hangul and other full-width glyphs 16 px at scale 1). '&' prefixes are removed but no underline is
  * drawn. */
+static int dt_width(HDC hdc, const WCHAR *s, int n)
+{
+    SIZE sz;
+    return n > 0 && GetTextExtentPoint32W(hdc, s, n, &sz) ? sz.cx : 0;
+}
+
+/* Menus and message boxes measure before they have a DC; they draw with the default font, so a private memory DC
+ * that keeps the default font gives the same per-character advances (ASCII 8, Hangul 16) gdi32 draws with. */
+int u32_text_px(LPCWSTR s, int n)
+{
+    static HDC measure_dc;
+    HDC dc = measure_dc;
+    if (!dc) {
+        HDC fresh = CreateCompatibleDC(0);
+        if (!fresh) return n * 8;                                  /* no GDI: the built-in font's ASCII advance */
+        if (InterlockedCompareExchangePointer((PVOID *)&measure_dc, fresh, 0) != 0) DeleteDC(fresh);
+        dc = measure_dc;
+    }
+    return dt_width(dc, s, n);
+}
+
 DLLAPI int WINAPI DrawTextW(HDC hdc, LPCWSTR text, int len, LPRECT rc, UINT fmt)
 {
     TEXTMETRICW tm;
@@ -315,7 +337,7 @@ DLLAPI int WINAPI DrawTextW(HDC hdc, LPCWSTR text, int len, LPRECT rc, UINT fmt)
             }
             if (c == '\t' || c == '\n') c = ' ';
             *o++ = c;
-            if ((fmt & DT_WORDBREAK) && !(fmt & DT_SINGLELINE) && (int)(o - lines[nl]) * cw > rw && rw >= cw) {
+            if ((fmt & DT_WORDBREAK) && !(fmt & DT_SINGLELINE) && rw >= cw && dt_width(hdc, lines[nl], (int)(o - lines[nl])) > rw) {
                 WCHAR *sp = o - 1;
                 while (sp > lines[nl] && *sp != ' ') --sp;
                 if (sp > lines[nl]) {                              /* wrap after the last blank */
@@ -335,7 +357,7 @@ DLLAPI int WINAPI DrawTextW(HDC hdc, LPCWSTR text, int len, LPRECT rc, UINT fmt)
         lens[nl] = (int)(o - lines[nl]);
         ++nl;
     }
-    for (i = 0; i < nl; ++i) if (lens[i] * cw > maxw) maxw = lens[i] * cw;
+    for (i = 0; i < nl; ++i) { const int w = dt_width(hdc, lines[i], lens[i]); if (w > maxw) maxw = w; }
     if (fmt & DT_CALCRECT) {
         rc->right = rc->left + maxw;
         if (fmt & DT_SINGLELINE) rc->bottom = rc->top + lh; else rc->bottom = rc->top + nl * lh;
@@ -348,12 +370,14 @@ DLLAPI int WINAPI DrawTextW(HDC hdc, LPCWSTR text, int len, LPRECT rc, UINT fmt)
         else if (fmt & DT_BOTTOM) y = rc->bottom - lh;
     }
     for (i = 0; i < nl; ++i, y += lh) {
-        int x = rc->left, w = lens[i] * cw;
+        int x = rc->left, w = dt_width(hdc, lines[i], lens[i]);
         WCHAR dots[3] = { '.', '.', '.' };
-        if ((fmt & DT_END_ELLIPSIS) && (fmt & DT_SINGLELINE) && w > rw && rw >= 3 * cw) {
-            int keep = (rw - 3 * cw) / cw;
+        const int dw = dt_width(hdc, dots, 3);
+        if ((fmt & DT_END_ELLIPSIS) && (fmt & DT_SINGLELINE) && w > rw && rw >= dw) {
+            int keep = lens[i];
+            while (keep > 0 && dt_width(hdc, lines[i], keep) + dw > rw) --keep;
             ExtTextOutW(hdc, x, y, (fmt & DT_NOCLIP) ? 0 : ETO_CLIPPED, rc, lines[i], (UINT)keep, 0);
-            ExtTextOutW(hdc, x + keep * cw, y, (fmt & DT_NOCLIP) ? 0 : ETO_CLIPPED, rc, dots, 3, 0);
+            ExtTextOutW(hdc, x + dt_width(hdc, lines[i], keep), y, (fmt & DT_NOCLIP) ? 0 : ETO_CLIPPED, rc, dots, 3, 0);
             continue;
         }
         if ((fmt & DT_CENTER) == DT_CENTER) x = rc->left + (rw - w) / 2;

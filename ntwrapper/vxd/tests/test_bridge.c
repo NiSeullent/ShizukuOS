@@ -34,7 +34,7 @@ static int hv_present(void) { return (int)signature; }
 static int32_t clock_sample(void *opaque, uint64_t *value)
 { CHECK(!opaque && !protected_now && locked == 2); ++clock_calls; *value=clock_value; return clock_status; }
 static int32_t hcall(uint32_t op,uint32_t a,uint32_t b,uint32_t *low,uint32_t *high);
-static const struct ntwv_hv hv={hv_present,hcall,0};
+static const struct ntwv_hv hv={hv_present,hcall,0,0};
 static struct ntwv_dioc clock_request;
 static int32_t hcall(uint32_t op,uint32_t a,uint32_t b,uint32_t *low,uint32_t *high)
 {

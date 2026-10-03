@@ -43,6 +43,8 @@ static const shz_blob_t *blob(const shz_info_t *i,const char *name,int *error)
         if(n<16 && !name[n] && !i->blobs[b].name[n]){const shz_blob_t *v=&i->blobs[b];if(found || !v->base || !v->size || v->base>UINT64_MAX-v->size){*error=1;return 0;}found=v;}}
     return found;
 }
+/* Diagnostic only: records the FIRST refusal stage; the caller still returns -1. */
+static int refuse(w98_native_gate_t *g,uint32_t stage){if(!g->refusal_stage)g->refusal_stage=stage;return -1;}
 static int current(w98_native_gate_t *g)
 {
     uint64_t n=g->ports.now(g->ports.opaque);if(g->deadline!=g->original_deadline || n<g->last_now || n>=g->original_deadline)return -1;g->last_now=n;return 0;
@@ -110,22 +112,22 @@ static int policy_bind(w98_native_gate_t *g,const uint8_t p[256],unsigned roles,
 {
     if(le32(p)!=W98_GATE_POLICY_MAGIC || le16(p+4)!=1 || le16(p+6)!=256 || le32(p+8)!=roles ||
        !empty(p+12,4) || empty(p+16,32) || !le64(p+144) || le32(p+152)!=10000 ||
-       le16(p+156)!=W98_GATE_COM2 || !empty(p+158,2) || !empty(p+164,4) || !empty(p+216,40))return -1;
+       le16(p+156)!=W98_GATE_COM2 || !empty(p+158,2) || !empty(p+164,4) || !empty(p+248,8))return refuse(g,W98_GATE_REFUSED_POLICY);
     zero((uint8_t *)e,sizeof *e);copy(e->nonce,p+16,32);g->host_deadline_ns=le64(p+144);
     for(unsigned role=1;role<=2;role++){
         const uint8_t *hash=p+48+(role-1)*32;const uint8_t *raw=p+168+(role-1)*24;
-        if(!(roles&(1u<<(role-1)))){if(!empty(hash,32) || le16(p+160+(role-1)*2) || !empty(raw,24) || (role==1 && !empty(p+112,32)))return -1;continue;}
-        w98_epoch_device_t *d=&e->device[e->count++];d->role=(uint16_t)role;d->bdf=le16(p+160+(role-1)*2);if(d->bdf>=256)return -1;
+        if(!(roles&(1u<<(role-1)))){if(!empty(hash,32) || le16(p+160+(role-1)*2) || !empty(raw,24) || (role==1 && !empty(p+112,32)))return refuse(g,W98_GATE_REFUSED_POLICY);continue;}
+        w98_epoch_device_t *d=&e->device[e->count++];d->role=(uint16_t)role;d->bdf=le16(p+160+(role-1)*2);if(d->bdf>=256)return refuse(g,W98_GATE_REFUSED_POLICY);
         copy(e->config_sha256[role-1],hash,32);for(unsigned b=0;b<6;b++)d->raw_bar[b]=le32(raw+b*4);
         if(role==1){const w98_vga_config_t *c=(const void *)(uintptr_t)v->base;
-            if(!w98_vga_config_valid(c,v->size) || d->bdf!=c->bdf || config_hash(v,hash) || config_hash(r,p+112) || !equal(c->rom_sha256,p+112,32) || d->raw_bar[0]!=(c->lfb_base|8))return -1;
+            if(!w98_vga_config_valid(c,v->size) || d->bdf!=c->bdf || config_hash(v,hash) || config_hash(r,p+112) || !equal(c->rom_sha256,p+112,32) || d->raw_bar[0]!=(c->lfb_base|8))return refuse(g,W98_GATE_REFUSED_VGA_BIND);
             d->vendor=0x1234;d->device=0x1111;d->class_code=0x030000;d->command_required=3;copy(e->rom_sha256,p+112,32);
         }else{const w98_persist_config_t *c=(const void *)(uintptr_t)s->base;
-            if(storage_valid(c) || d->bdf!=c->bdf || config_hash(s,hash) || storage_bars(c,d->raw_bar))return -1;
+            if(storage_valid(c) || d->bdf!=c->bdf || config_hash(s,hash) || storage_bars(c,d->raw_bar))return refuse(g,W98_GATE_REFUSED_STORAGE_BIND);
             d->vendor=c->vendor;d->device=c->device;d->class_code=0x010000;
         }
     }
-    return current(g);
+    return current(g)?refuse(g,W98_GATE_REFUSED_BIND_RECHECK):0;
 }
 static int pci_read(void *ctx,uint16_t bdf,unsigned off,uint32_t *out)
 {
@@ -153,44 +155,54 @@ int w98_native_device_gate_with_io(w98_native_gate_t *g,const shz_info_t *i,cons
     int error=0;unsigned roles;uint8_t policy[256];w98_epoch_expect_t expected;
     if(!g)return -1;
     g->admitted=0;g->protocol.protocol_admitted=0;if(g->attempted || !i)return -1;
-    const shz_blob_t *v=blob(i,"VGACFG.BIN",&error),*r=blob(i,"VGAROM.BIN",&error),*s=blob(i,"W98PERS.BIN",&error);
-    if(!error && !v && !r && !s)return 0; /* no control-port touch in default RAM */
+    const shz_blob_t *v=blob(i,"VGACFG.BIN",&error),*r=blob(i,"VGAROM.BIN",&error),*s=blob(i,"W98PERS.BIN",&error),
+        *n=blob(i,"W98INPT.BIN",&error);
+    if(!error && !v && !r && !s && !n)return 0; /* no control-port touch in default RAM */
     g->attempted=1;
-    if(error || !!v!=!!r || (v && (v->size!=136 || v->base&7 || r->size!=65536)) || (s && (s->size!=192 || s->base&7)) ||
+    if(error || !!v!=!!r || (v && (v->size!=136 || v->base&7 || r->size!=65536)) || (s && (s->size!=192 || s->base&7)) || (n && (!v || n->size!=96)) ||
        !caps || !caps->hypervisor_bit || i->magic!=SHZ_INFO_MAGIC || i->version!=SHZ_INFO_VERSION || i->size!=sizeof *i ||
        !(i->loader_flags&SHZ_LOADER_NATIVE_WIN98) || i->tsc_hz<1000000 || i->tsc_hz>1000000000000ull ||
-       !io || !io->read || !io->write || !io->now || !io->pause)return -1;
-    const shz_blob_t *source_slot[3]={v,r,s};shz_blob_t original[3];
+       !io || !io->read || !io->write || !io->now || !io->pause)return refuse(g,W98_GATE_REFUSED_SHAPE);
+    const shz_blob_t *source_slot[4]={v,r,s,n};shz_blob_t original[4];
     if(v){original[0]=*v;original[1]=*r;v=&original[0];r=&original[1];}
     if(s){original[2]=*s;s=&original[2];}
+    if(n){original[3]=*n;n=&original[3];}
     roles=(v?1u:0u)|(s?2u:0u);g->ports=*io;g->hz=i->tsc_hz;g->last_now=io->now(io->opaque);
-    if(g->last_now>UINT64_MAX-g->hz*10)return -1;
+    if(g->last_now>UINT64_MAX-g->hz*10)return refuse(g,W98_GATE_REFUSED_CLOCK);
     g->deadline=g->last_now+g->hz*10;g->original_deadline=g->deadline;
-    if(policy_read(g,policy))return -1;
+    if(policy_read(g,policy))return refuse(g,W98_GATE_REFUSED_FWCFG);
     /* Freeze before hashing. These copies stay outside all submitted DMA
      * request buffers and are never replaced/reused during this lifetime. */
     if(v){snapshot_blob(&g->snapshots[0],v,g->config[0]);snapshot_blob(&g->snapshots[1],r,g->rom);}
     if(s)snapshot_blob(&g->snapshots[2],s,g->config[1]);
+    if(n)snapshot_blob(&g->snapshots[3],n,g->input);
+    /* Explicit input option: field present <=> blob present; frozen copy hashed. */
+    if(n?(empty(policy+216,32) || config_hash(&g->snapshots[3],policy+216) || config_hash(n,policy+216)):!empty(policy+216,32))return refuse(g,W98_GATE_REFUSED_INPUT_SHA);
     if(policy_bind(g,policy,roles,v?&g->snapshots[0]:0,r?&g->snapshots[1]:0,s?&g->snapshots[2]:0,&expected) ||
-       (v && (config_hash(v,policy+48) || config_hash(r,policy+112))) || (s && config_hash(s,policy+80)) || current(g))return -1;
+       (v && (config_hash(v,policy+48) || config_hash(r,policy+112))) || (s && config_hash(s,policy+80)) || current(g))return refuse(g,W98_GATE_REFUSED_BIND_RECHECK);
     /* Only the approved control UART is programmed; no UART IRQ is enabled. */
     static const uint8_t offsets[]={3,1,3,0,1,3,2,4},values[]={3,0,128,1,0,3,0xc7,3};
-    for(unsigned b=0;b<sizeof offsets;b++)if(write_port(g,W98_GATE_COM2+offsets[b],1,values[b]))return -1;
+    for(unsigned b=0;b<sizeof offsets;b++)if(write_port(g,W98_GATE_COM2+offsets[b],1,values[b]))return refuse(g,W98_GATE_REFUSED_UART);
     /* FIFO setup discards old/preboot bytes. Host waits for this exact nonce
      * READY on the owned channel before supplying the reviewed challenge. */
     uint8_t ready[48]={0x57,0x44,0x45,0x31,1,0,W98_GATE_READY,0,48};unsigned sent=0,calls=0;
     copy(ready+16,expected.nonce,32);
     while(sent<sizeof ready){
-        if(current(g) || calls++>=W98_EPOCH_MAX_IO_CALLS)return -1;
-        int n=uart_send(g,ready+sent,(unsigned)sizeof ready-sent);if(n<0 || (unsigned)n>sizeof ready-sent)return -1;
-        sent+=(unsigned)n;if(!n){pause_gate(g);if(current(g))return -1;}
+        if(current(g) || calls++>=W98_EPOCH_MAX_IO_CALLS)return refuse(g,W98_GATE_REFUSED_READY);
+        int n=uart_send(g,ready+sent,(unsigned)sizeof ready-sent);if(n<0 || (unsigned)n>sizeof ready-sent)return refuse(g,W98_GATE_REFUSED_READY);
+        sent+=(unsigned)n;if(!n){pause_gate(g);if(current(g))return refuse(g,W98_GATE_REFUSED_READY);}
     }
     const w98_epoch_io_t stream={g,pci_read,uart_receive,uart_send,ticks,pause_gate};
-    if(w98_native_epoch_gate(&g->protocol,&expected,&stream,g->deadline) ||
+    const int epoch=w98_native_epoch_gate(&g->protocol,&expected,&stream,g->deadline);
+    if(epoch ||
        (v && (!equal((const uint8_t *)source_slot[0],(const uint8_t *)&original[0],sizeof original[0]) || !equal((const uint8_t *)source_slot[1],(const uint8_t *)&original[1],sizeof original[1]))) ||
        (s && !equal((const uint8_t *)source_slot[2],(const uint8_t *)&original[2],sizeof original[2])) ||
+       (n && (!equal((const uint8_t *)source_slot[3],(const uint8_t *)&original[3],sizeof original[3]) ||
+              config_hash(n,policy+216) || config_hash(&g->snapshots[3],policy+216))) ||
        (v && (config_hash(v,policy+48) || config_hash(r,policy+112) || config_hash(&g->snapshots[0],policy+48) || config_hash(&g->snapshots[1],policy+112))) ||
        (s && (config_hash(s,policy+80) || config_hash(&g->snapshots[2],policy+80))) || current(g)){
+        (void)refuse(g,!epoch?W98_GATE_REFUSED_POST_GRANT:!g->protocol.nonce_consumed?W98_GATE_REFUSED_EPOCH_PRE:
+                     g->protocol.io_calls>=W98_EPOCH_MAX_IO_CALLS?W98_GATE_REFUSED_EPOCH_BUDGET:W98_GATE_REFUSED_EPOCH);
         g->protocol.protocol_admitted=0;g->protocol.state=W98_EPOCH_FAILED;return -1;
     }
     g->admitted=1;return 0;
@@ -214,7 +226,7 @@ int w98_native_device_gate(const shz_info_t *i,const shz_caps_t *caps)
 const shz_blob_t *w98_native_device_gate_blob(const char *name)
 {
     if(!name || !lifetime.admitted || !lifetime.protocol.protocol_admitted)return 0;
-    for(unsigned b=0;b<3;b++){const shz_blob_t *s=&lifetime.snapshots[b];unsigned n=0;
+    for(unsigned b=0;b<4;b++){const shz_blob_t *s=&lifetime.snapshots[b];unsigned n=0;
         while(n<16 && name[n] && s->name[n]==name[n])n++;
         if(n<16 && !name[n] && !s->name[n] && s->base && s->size)return s;}
     return 0;
@@ -252,3 +264,9 @@ int w98_native_gate_gop_words(const w98_native_gate_t *g,uint32_t out[40])
 }
 int w98_native_device_gate_gop_words(uint32_t out[40])
 {return w98_native_gate_gop_words(&lifetime,out);}
+uint32_t w98_native_device_gate_refusal(uint32_t *epoch_io_calls,uint32_t *port_calls)
+{
+    if(epoch_io_calls)*epoch_io_calls=lifetime.protocol.io_calls;
+    if(port_calls)*port_calls=lifetime.port_calls;
+    return lifetime.refusal_stage;
+}

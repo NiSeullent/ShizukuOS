@@ -12,18 +12,24 @@
  *
  * The Win64 command line is the text from <image> to the end of this program's command line. stdout and
  * stderr of the Win64 process arrive merged on this program's stdout. The exit code is the Win64 process's
- * exit code; 255 means NTW64RUN itself failed (usage, bridge unavailable, creation, relay or cleanup failed)
- * and a message on stderr names the Win32 error when that stream is writable. */
+ * exit code; 252..255 mean NTW64RUN itself failed and a message on stderr names the Win32 error when that
+ * stream is writable: 254 bridge unavailable (no VxD Supervisor/channel, ABI mismatch), 253 access denied
+ * (foreign/unauthorized owner), 252 handle/channel revoked, 255 any other frontend failure. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include "ntw64.h"
 
 #define RUN_FAILED 255u
+/* Distinct frontend failure classes (a remote exit code can still equal them; stderr names the cause). */
+#define RUN_BRIDGE_UNAVAILABLE 254u   /* VxD/Supervisor/Kernel64 channel absent or ABI mismatch */
+#define RUN_ACCESS_DENIED 253u        /* owner/capability refused: foreign or unauthorized caller */
+#define RUN_CHANNEL_REVOKED 252u      /* process/channel handle no longer valid (revoked or generation retired) */
 #define CMD_CHARS 2048
 #define PATH_CAP 261
 
 static HANDLE out_h, err_h;
 static int io_failed;
+static DWORD first_code;
 static DWORD io_error;
 static WCHAR wpath[PATH_CAP], wcmd[CMD_CHARS + 1], wdir[PATH_CAP];
 static char io[4096];
@@ -62,9 +68,20 @@ static void put_num(HANDLE h, DWORD v, int hex)
     while (n) put(h, &digits[--n], 1);
 }
 
+static DWORD classify(DWORD error)
+{
+    switch (error) {
+    case 50: case 55: case 1306: return RUN_BRIDGE_UNAVAILABLE;
+    case 5: case 288: case 1314: return RUN_ACCESS_DENIED;
+    case 6: return RUN_CHANNEL_REVOKED;
+    default: return RUN_FAILED;
+    }
+}
+
 static DWORD failed(const char *what)
 {
     const DWORD error = GetLastError();
+    DWORD code;
     puts_to(err_h, "NTW64RUN: ");
     puts_to(err_h, what);
     puts_to(err_h, " failed, Win32 error ");
@@ -74,10 +91,14 @@ static DWORD failed(const char *what)
     case 50: puts_to(err_h, " (no ShizukuDOS Supervisor: not running as a Win98 domain)"); break;
     case 55: puts_to(err_h, " (the Supervisor announces no Kernel64 channel)"); break;
     case 1306: puts_to(err_h, " (inter-kernel ABI major version mismatch)"); break;
+    case 5: case 288: case 1314: puts_to(err_h, " (access denied: the caller does not own this channel or process)"); break;
+    case 6: puts_to(err_h, " (handle or channel revoked)"); break;
     default: break;
     }
     puts_to(err_h, "\r\n");
-    return RUN_FAILED;
+    code = classify(error);
+    if (!first_code) first_code = code;
+    return code;
 }
 
 static DWORD usage(void)
@@ -150,6 +171,7 @@ static DWORD run(void)
     DWORD got = 0, code = 0;
     io_failed = 0;
     io_error = 0;
+    first_code = 0;
     out_h = GetStdHandle(STD_OUTPUT_HANDLE);
     err_h = GetStdHandle(STD_ERROR_HANDLE);
     while (*s == '/' || *s == '-') {
@@ -249,7 +271,7 @@ static DWORD run(void)
         (void)failed("NtwCloseProcess64");
     }
     /* A real remote exit never clears an earlier frontend failure. */
-    return frontend_failed || io_failed ? RUN_FAILED : code;
+    return frontend_failed || io_failed ? (first_code ? first_code : RUN_FAILED) : code;
 }
 
 void mainCRTStartup(void)

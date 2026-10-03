@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * Compile the existing reviewed SHA-256 core into the real installer. Both
- * transitive source files are explicitly included in Win64 build receipts. */
-#include "../../accounts/sha256.c"
+ * The reviewed accounts SHA-256 core is now compiled exactly once inside
+ * native_install.c (with the SZOU leaf modules), so every existing link set that
+ * names both TUs keeps a single definition. This TU stays for build receipts. */
+typedef int shz_native_runtime_sha_in_native_install;

@@ -1,20 +1,15 @@
 <!doctype html>
-<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#eef3f8"><meta name="description" content="현재 수동 개발 미리보기의 Windows 98·GOP·Notepad++ 필수 조건과 USB 도구의 검증 범위."><title>설치 안내 · ShizukuOS</title><link rel="icon" href="./favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="./styles.css?v=20261003-rebuild1"><link rel="alternate" hreflang="ko" href="https://m98.nyase.kr/install.html"><link rel="alternate" hreflang="en" href="https://m98.nyase.kr/en/install.html"></head>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#edf4f3"><meta name="description" content="현재 수동 개발 미리보기의 Windows 98·GOP·Notepad++ 필수 조건과 USB 도구의 검증 범위."><title>설치 안내 · ShizukuOS</title><link rel="icon" href="./favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="./styles.css?v=20261003-slade1"><link rel="alternate" hreflang="ko" href="https://m98.nyase.kr/install.html"><link rel="alternate" hreflang="en" href="https://m98.nyase.kr/en/install.html"></head>
 <body class="guide-page"><a class="skip" href="#main">본문으로 건너뛰기</a>
-<header class="top site-header"><a class="brand" href="./index.html"><span class="brand-mark" aria-hidden="true">S</span><span><strong>ShizukuOS</strong><small>1.0.0 개발 중</small></span></a><nav class="site-nav" aria-label="주 메뉴"><a href="./index.html">프로젝트</a><a href="./downloads.html">다운로드</a><a href="./install.html" aria-current="page">설치 안내</a><a href="./apps.html">앱 지원</a><a href="./develop.html">개발·소스</a><a class="language-link" href="./en/install.html" lang="en" hreflang="en">English</a></nav></header>
+<header class="top site-header"><a class="brand" href="./index.html"><span class="brand-mark" aria-hidden="true">S</span><span><strong>ShizukuOS</strong><small>ShizukuOS Core</small></span></a><nav class="site-nav" aria-label="주 메뉴"><a href="./index.html">홈</a><a href="./downloads.html">다운로드</a><a href="./preview.html">실행 기록</a><a href="./develop.html">개발·소스</a><a class="language-link" href="./en/install.html" lang="en" hreflang="en">English</a></nav></header>
 
 <main id="main">
 
-<section class="page-hero"><p class="eyebrow">설치 안내 · Pre-Beta 01 준비</p><span class="status-pill pending">Pre-Beta 01 · 준비 중</span><h1>시험 환경부터 준비하세요.</h1><p class="lead">지금 배포하는 구성요소 ZIP의 수동 설치 안내입니다. Pre-Beta 01 설치 ISO는 검증을 기다리고 있습니다.</p></section>
+<section class="page-hero"><p class="eyebrow">구성요소 설치 안내</p><span class="status-pill pending">Pre-Beta 01 · 준비 중</span><h1>시험 환경부터 준비하세요.</h1><p class="lead">지금 배포하는 구성요소 ZIP의 수동 설치 안내입니다. Pre-Beta 01 설치 ISO는 검증을 기다리고 있습니다.</p></section>
 
-<section class="scope-note"><h2>시험용 Windows 98 SE 설치본이 필요합니다.</h2><p>기존 설치본과 설정을 백업하고 Windows·앱 원본은 직접 준비하세요. 기존 공개 시험은 원래 Microsoft DOS/VMM 부팅 경로를 사용하며, 새 ShizukuCore 통합 부팅을 입증하지 않습니다.</p></section>
+<section class="scope-note"><h2>시험용 Windows 98 SE 설치본이 필요합니다.</h2><p>기존 설치본과 설정을 백업하고 Windows·앱 원본은 직접 준비하세요. 기존 공개 시험은 원래 Microsoft DOS/VMM 부팅 경로를 사용하며, 새 ShizukuOS 전체 시스템의 완료를 입증하지 않습니다.</p></section>
 
-<section class="section-block" aria-labelledby="prebeta-checks"><h2 id="prebeta-checks">Pre-Beta 01 공개 전 확인할 것</h2><p>첫 검증 대상은 x86_64 UEFI 가상 머신입니다. 아래 네 조건은 모두 검증 대기 중입니다. 배포 시 실제 전환 단계와 남아 있는 DOS/VMM 의존성을 표시합니다.</p><div class="card-grid">
-<article class="info-card"><span class="status-pill pending">검증 대기</span><h3>Windows 98 부팅</h3><p>실제 Windows 98의 창·입력·파일 작업과 ShizukuCore 서비스 연결을 확인합니다.</p></article>
-<article class="info-card"><span class="status-pill pending">검증 대기</span><h3>UEFI 대상 디스크 설치</h3><p>프로젝트 설치 프로그램으로 시험용 대상 디스크에 설치합니다.</p></article>
-<article class="info-card"><span class="status-pill pending">검증 대기</span><h3>ISO 없이 콜드 부팅</h3><p>설치 ISO를 제거한 뒤 설치 디스크에서 다시 부팅합니다.</p></article>
-<article class="info-card"><span class="status-pill pending">검증 대기</span><h3>설치된 GOP 기본 그래픽 및 코어 드라이버</h3><p>설치된 GOP 드라이버의 실제 화면 출력을 확인하고 설치된 코어 드라이버를 식별합니다.</p></article>
-</div><p class="small">Windows 98 설치 미디어는 사용자가 소유한 파일을 로컬에서 준비합니다. Windows 설치 파일·제품 키·개인 설치 디스크는 공개 배포하지 않습니다.</p><p class="small">Pre-Beta 01에서 현대 앱의 실제 기능은 미검증입니다. <a href="./apps.html">기존 앱별 시험 상태</a>를 확인하세요. 최종 1.0.0의 전체 개발 목표는 유지합니다.</p></section>
+<section class="section-block" aria-labelledby="prebeta-checks"><h2 id="prebeta-checks">OS 설치판과 구성요소 ZIP은 용도가 다릅니다.</h2><p>ShizukuOS 설치판은 자체 설치·부팅·드라이버와 데스크톱의 실제 검증을 마친 뒤 공개합니다. 지금 제공하는 ZIP은 과거 Windows 98 호환 환경용 개발 구성요소입니다.</p><p><a href="./apps.html">과거 앱별 시험 상태</a> · <a href="./develop.html">ShizukuOS의 개발 목표</a></p></section>
 
 <section class="section-block" id="requirements"><h2>필수 조건</h2><div class="card-grid">
 <article class="info-card"><h3>Notepad++ 8.9.8.1</h3><ul><li>한국어 OEM Windows 98 SE 시험 환경.</li><li>KernelEx 4.5.2, Microsoft Unicode Layer, 공식 x86 portable 앱 원본.</li><li>ZIP의 전용 NTWPENV 실행기. 일반 실행에는 종료 오류가 있었습니다.</li></ul><p>다른 에디션·새 설치본·다른 앱 버전은 미검증입니다.</p><a href="./downloads/SHZNPP-README.md">설정 단계와 원본 앱 해시</a></article>
@@ -30,5 +25,5 @@
 
 </main>
 
-<footer class="site-footer"><div><strong>ShizukuOS</strong><p>공식 ISO는 m98.nyase.kr에서만 배포합니다. GitHub에는 소스와 패치를 공개합니다.</p></div><nav aria-label="추가 안내"><a href="./preview.html">실행 기록</a><a href="./authorship/">Authorship</a><a href="./continuation/">소스·USB 도구</a><a href="./legacy-console/">기존 시험 콘솔</a><a href="https://github.com/NiSeullent/Win98-Modern">GitHub</a></nav></footer>
+<footer class="site-footer"><div><strong>ShizukuOS</strong><p>공식 ISO는 m98.nyase.kr에서만 배포합니다. GitHub에는 소스와 패치를 공개합니다.</p></div><nav aria-label="추가 안내"><a href="./preview.html">실행 기록</a><a href="./authorship/">Authorship</a><a href="./continuation/">소스·USB 도구</a><a href="./legacy-console/">기존 시험 콘솔</a><a href="https://github.com/NiSeullent/ShizukuOS">GitHub</a></nav></footer>
 </body></html>

@@ -68,6 +68,32 @@ int shz_auth_registry_subject(process_t *p,shz_subject *out,int *active) {
     for(i=0;i<authority.count;i++)if(authority.accounts[i].uid==s.uid&&authority.accounts[i].roles==s.roles){allowed=1;break;}
     mutex_unlock(&authority_lock);return allowed;
 }
+/* Filesystem DAC subject (ShizukuFS, kernel64/sfs_mount.c). Snapshot of the bound subject of
+ * the kernel's own process object; never derived from caller-supplied data. 1 = usable, 0 =
+ * refuse. *active is read under authority_lock: 0 only when the authority truly has no
+ * enrolled account. Unlike the registry getter, a process in teardown keeps its immutable
+ * bound subject (delete-on-close at exit); once its binding is gone subject() yields the
+ * anonymous default, which libsfs refuses while accounts are active. */
+int shz_auth_fs_subject(process_t *,shz_subject *,int *);
+int shz_auth_fs_subject(process_t *p,shz_subject *out,int *active) {
+    shz_subject s;binding *b;uint64_t f;unsigned i;int allowed;
+    memset(out,0,sizeof *out);*active=1;
+    if(!p||!p->used)return 0;
+    s=subject(p);
+    f=irq_save();b=find(p,0);allowed=!b||!b->pending;irq_restore(f);
+    if(!allowed)return 0;
+    init();mutex_lock(&authority_lock);
+    *active=authority.count!=0;allowed=!*active;
+    if(*active&&s.uid>=1000u&&s.uid<1000u+SHZ_ACCOUNT_LIMIT&&s.session&&!s.reserved&&
+       s.auth_id==(((uint64_t)s.uid<<32)|s.session))
+        for(i=0;i<authority.count;i++)if(authority.accounts[i].uid==s.uid&&authority.accounts[i].roles==s.roles){allowed=1;break;}
+    mutex_unlock(&authority_lock);
+    /* Sandboxed or anonymous subjects while accounts are active are not authority accounts;
+     * hand them to the mapper, which grants only world access (sandbox) or refuses. */
+    if(!allowed&&*active&&((s.flags&SHZ_SUBJECT_SANDBOX)||!s.uid))allowed=1;
+    if(allowed)*out=s;
+    return allowed;
+}
 int shz_auth_inherit(process_t *parent,process_t *child) {
     shz_subject s;if(!parent)return 0;s=subject(parent);
     /* Anonymous legacy development processes keep lazy default tokens. */

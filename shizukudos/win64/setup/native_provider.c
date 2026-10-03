@@ -33,7 +33,7 @@ static int slot(shz_native_provider_t *v, void *h)
 {
     unsigned i;
     if (!h) return -1;
-    for(i=0;i<2;i++) if(v->source[i]==h) return (int)i;
+    for(i=0;i<3;i++) if(v->source[i]==h) return (int)i;
     return -1;
 }
 static int source_check(void *ctx,void *h)
@@ -44,7 +44,7 @@ static int source_check(void *ctx,void *h)
 static int open_file(void *ctx,const char *path,void **h,uint64_t *bytes)
 {
     shz_native_provider_t *v=ctx; void *opened=0; uint64_t size=0; int rc;
-    if(!v->started || v->opened>=2 || !h || !bytes) return -1;
+    if(!v->started || v->opened>=3 || !h || !bytes) return -1;
     rc=v->base.file_open(v->base.ctx,path,&opened,&size);
     if(opened) {
         if(slot(v,opened)>=0) return -1; /* duplicate handle cannot be consumed twice */
@@ -201,4 +201,17 @@ void shz_native_provider_run(shz_native_provider_t *v,const native_setup_request
     }
     v->started=1;
     setup_run_native(&v->platform,&v->ops,request,result);
+}
+void shz_native_provider_run_original_userland(shz_native_provider_t *v,const native_setup_szou_ops_v1_t *sops,
+    const native_setup_request_v1_t *request,const native_setup_szou_request_v1_t *sreq,
+    native_setup_result_v1_t *result,native_setup_szou_result_v1_t *sres)
+{
+    if(!result || !sres) return;
+    if(!v || !v->initialized || v->started) {
+        memset(result,0,sizeof *result); memset(sres,0,sizeof *sres);
+        strcpy(result->reason,"native provider absent or already consumed"); strcpy(sres->reason,result->reason); return;
+    }
+    v->started=1;
+    if(sreq) native_install_run_original_userland(&v->platform,&v->ops,sops,request,sreq,result,sres);
+    else native_install_resume_original_userland(&v->platform,&v->ops,request,result,sres);
 }

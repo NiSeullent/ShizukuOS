@@ -132,3 +132,11 @@ documentation. The current Microsoft method pages' minimum-client tables list
 later Windows versions; the older ActiveDesktop description and installed
 legacy SDK interfaces support this compatibility implementation, and actual
 Win98 HTML-wallpaper behavior remains an explicit native acceptance item.
+
+## Batch 3 additions
+- Account switch: SHZWALL's instance mutex and window title carry `szw_user_tag(GetUserName)`; every ~1 s the
+  agent compares the logged-on user and stops itself (`SZW_STOP_PROFILE`, exit 6, static wallpaper repainted by Explorer)
+  when it differs. `/enable` and `/disable` address only the current user's agent.
+- Modern retro: `retro_core.c` runs ShizukuOS colours (SetSysColors via theme_selector) and modern window metrics as one
+  transaction with verified rollback; custom colours refuse (no exact undo). "All classic" reverses both.
+- Installer manifest: `INSTALL_FILES.txt`. The installer never writes a Run key.

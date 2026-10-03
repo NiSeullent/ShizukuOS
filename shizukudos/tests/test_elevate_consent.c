@@ -107,6 +107,11 @@ HWND CreateWindowExW(DWORD ex,const WCHAR *c,const WCHAR *title,DWORD style,int 
  return create_fail?0:(HWND)1;
 }
 BOOL ShowWindow(HWND w,int n){(void)w;(void)n;return TRUE;}
+/* Consent expiry clock: constant here; expiry paths are covered by
+ * shizukudos/win64/apps/elevate/host/test_elevate_flow.c. */
+uintptr_t SetTimer(HWND w,uintptr_t id,UINT ms,TIMERPROC p){(void)w;(void)ms;(void)p;return id;}
+BOOL KillTimer(HWND w,uintptr_t id){(void)w;(void)id;return TRUE;}
+DWORD GetTickCount(void){return 1000;}
 HWND SetFocus(HWND w){return w;}
 int GetMessageW(MSG *m,HWND w,UINT low,UINT high){
  (void)w;(void)low;(void)high;

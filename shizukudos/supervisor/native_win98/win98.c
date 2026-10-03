@@ -9,6 +9,7 @@
 #include "l1_vga.h"
 #include "persistence.h"
 #include "native_device_gate.h"
+#include "native_input.h"
 #include "../src/console.h"
 #include "../src/cpu.h"
 #include "../src/devices.h"
@@ -76,21 +77,29 @@ static int vga_owned_overlap(const shz_info_t *info,const domain_t *d,const w98_
         if(n && (b>~0ull-n || (b<c->lfb_base+c->lfb_bytes && c->lfb_base<b+n)))return 1;}
     return 0;
 }
+/* Once-per-boot refusal diagnostics on the Supervisor console (COM1): fixed
+ * component names and numeric stages only, never nonce/hash/blob bytes. The
+ * caller's refusal result is returned unchanged. */
+static int w98_refused(const char *what,unsigned stage)
+{kprintf("W98DOMAIN refused %s stage=%u\n",what,stage);return -1;}
 static int win98_vga_init(domain_t *d,shz_info_t *info,const shz_caps_t *caps)
 {
     int error=0;
     const shz_blob_t *c=vga_blob(info,"VGACFG.BIN",&error),*r=vga_blob(info,"VGAROM.BIN",&error);
     memset(&vga,0,sizeof vga);
-    if(error)return -1;
+    if(error)return w98_refused("vga",1);
     if(!c && !r)return 0;
     c=w98_native_device_gate_blob("VGACFG.BIN");r=w98_native_device_gate_blob("VGAROM.BIN");
-    if(!c || !r || !caps->hypervisor_bit || c->size!=sizeof(w98_vga_config_t) ||
-       (c->base&7) || c->base>~0ull-c->size || r->base>~0ull-r->size)return -1;
+    if(!c || !r)return w98_refused("vga",2);
+    if(!caps->hypervisor_bit || c->size!=sizeof(w98_vga_config_t) ||
+       (c->base&7) || c->base>~0ull-c->size || r->base>~0ull-r->size)return w98_refused("vga",3);
     const w98_vga_config_t *binding=(const w98_vga_config_t *)(uintptr_t)c->base;
-    if(!w98_vga_config_valid(binding,c->size) || vga_owned_overlap(info,d,binding))return -1;
+    if(!w98_vga_config_valid(binding,c->size) || vga_owned_overlap(info,d,binding))return w98_refused("vga",4);
     const w98_vga_ops_t ops={d,vga_cfg_read,vga_in,vga_out,vga_map,vga_uc,vga_owner,vga_a20};
-    return w98_l1_vga_init(&vga,(const w98_vga_config_t *)(uintptr_t)c->base,c->size,
+    const int rc=w98_l1_vga_init(&vga,(const w98_vga_config_t *)(uintptr_t)c->base,c->size,
         (const uint8_t *)(uintptr_t)r->base,r->size,&ops);
+    if(rc)kprintf("W98DOMAIN refused vga stage=5 result=%d\n",rc);
+    return rc;
 }
 static int persistence_binding(const domain_t *d)
 {
@@ -149,15 +158,99 @@ static int win98_persistence_finalize(void)
 static int win98_persistence_init(domain_t *d,shz_info_t *info,const shz_caps_t *caps)
 {
     int error=0;const shz_blob_t *c=vga_blob(info,"W98PERS.BIN",&error);
-    if(error)return -1;
+    if(error)return w98_refused("persistence",1);
     if(!c)return 0;
-    c=w98_native_device_gate_blob("W98PERS.BIN");if(!c)return -1;
+    c=w98_native_device_gate_blob("W98PERS.BIN");if(!c)return w98_refused("persistence",2);
     if(!caps->hypervisor_bit || c->size!=sizeof(w98_persist_config_t) ||
        (c->base&7) || c->base>~0ull-c->size || !d->vc.vmcs_pa || (d->vc.vmcs_pa&4095) ||
-       __atomic_load_n(&d->vc.cpu_binding_valid,__ATOMIC_ACQUIRE)!=1 || d->vc.domain_id!=SHZ_DOM_WIN98)return -1;
-    if(w98_persistence_attach_native(&persistence,&ata,(const w98_persist_config_t *)(uintptr_t)c->base,c->size,info))return -1;
+       __atomic_load_n(&d->vc.cpu_binding_valid,__ATOMIC_ACQUIRE)!=1 || d->vc.domain_id!=SHZ_DOM_WIN98)return w98_refused("persistence",3);
+    if(w98_persistence_attach_native(&persistence,&ata,(const w98_persist_config_t *)(uintptr_t)c->base,c->size,info))return w98_refused("persistence",4);
     persistence_epoch.domain=d;persistence_epoch.info=info;persistence_epoch.vmcs=d->vc.vmcs_pa;
     persistence_epoch.owner_cpu=d->vc.owner_cpu;persistence_epoch.generation=d->generation;
+    return 0;
+}
+/* Optional explicit owned-machine input (W98INPT.BIN). Bound to the live
+ * domain object/generation/VMCS/owner CPU captured at creation, the admitted
+ * device-gate nonce + VGA config hash, and the active native VGA epoch. Any
+ * mismatch revokes it; domain exit detaches it. Absent blob: no outer i8042
+ * access and the inner KBC/status page stay exactly as before. */
+static struct {
+    w98_input_binding_t binding;
+    shz_info_t *info;
+    w98_input_policy_t policy;
+    w98_i8042_t port;
+    uint32_t state,attached;
+} input_epoch;
+static uint8_t input_in(void *unused,uint16_t port){(void)unused;return inb(port);}
+static void input_out(void *unused,uint16_t port,uint8_t value){(void)unused;outb(port,value);}
+static uint64_t input_now(void *unused){(void)unused;return rdtsc();}
+static void input_status(void)
+{
+    if(!input_epoch.info || input_epoch.state==W98_INPUT_STATE_ABSENT)return;
+    const dev_native_observation_t *o=dev_native_observation();
+    w98_input_status_words(&input_epoch.port,input_epoch.state,input_epoch.binding.generation,
+        o?o->key_dropped:0,input_epoch.info->native_input);
+}
+static int input_validate(void *context)
+{
+    const domain_t *d=w98;
+    if(context!=&input_epoch || !input_epoch.attached || !input_epoch.port.ready || !d ||
+       d!=&g_dom[SHZ_DOM_WIN98] || d->id!=SHZ_DOM_WIN98 || d->kind!=DK_WIN98 ||
+       __atomic_load_n(&d->vc.cpu_binding_valid,__ATOMIC_ACQUIRE)!=1 ||
+       d->vc.domain_id!=SHZ_DOM_WIN98 || !vga.active || vga.failed)return SHZ_REVOKED;
+    const w98_input_binding_t live={d,d->vc.vmcs_pa,d->generation,d->vc.owner_cpu};
+    return w98_input_binding_current(&input_epoch.binding,&live,
+        d->state==SHZ_DS_RUNNABLE || d->state==SHZ_DS_WAITING)?SHZ_REVOKED:SHZ_DRIVER_OK;
+}
+static int input_poll(void *context)
+{
+    if(input_validate(context))return SHZ_REVOKED;
+    return w98_i8042_poll(&input_epoch.port)<0?SHZ_IO:SHZ_DRIVER_OK;
+}
+static void input_revoke(uint32_t state)
+{
+    if(!input_epoch.attached)return;
+    input_epoch.attached=0;
+    (void)dev_native_keyboard_detach(&input_epoch);(void)dev_native_pointer_detach(&input_epoch);
+    w98_i8042_quiesce(&input_epoch.port);
+    input_epoch.state=state;input_status();
+    kprintf("W98INPUT detached state=%u keys=%u packets=%u dropped=%u\n",state,
+        input_epoch.port.key_events,input_epoch.port.mouse_packets,input_epoch.port.dropped);
+}
+/* 0 absent, 1 admitted (attach after publication), -1 refused/failed. */
+static int win98_input_init(domain_t *d,shz_info_t *info)
+{
+    int error=0;uint32_t words[40];const shz_blob_t *b=vga_blob(info,"W98INPT.BIN",&error);
+    if(error)return w98_refused("input",1);
+    if(!b)return 0;
+    input_epoch.info=info;input_epoch.state=W98_INPUT_STATE_REFUSED;
+    /* Admit the gate's frozen, policy-bound copy (SHA in fw_cfg policy bytes 216..247), never the loader buffer. */
+    b=w98_native_device_gate_blob("W98INPT.BIN");
+    if(!b){input_status();return w98_refused("input",2);}
+    if(!vga.active || vga.failed || b->base>~0ull-b->size){input_status();return w98_refused("input",3);}
+    if(w98_native_device_gate_gop_words(words)){input_status();return w98_refused("input",4);}
+    if(w98_input_policy_admit((const void *)(uintptr_t)b->base,b->size,words,&input_epoch.policy)){input_status();return w98_refused("input",5);}
+    const w98_i8042_io_t io={0,input_in,input_out,input_now};
+    if(w98_i8042_init(&input_epoch.port,&io,&input_epoch,info->tsc_hz,input_epoch.policy.flags)){
+        input_epoch.state=W98_INPUT_STATE_INIT_FAILED;input_status();return w98_refused("input",6);
+    }
+    input_epoch.binding.domain=d;input_epoch.binding.vmcs=d->vc.vmcs_pa;
+    input_epoch.binding.generation=d->generation;input_epoch.binding.owner_cpu=d->vc.owner_cpu;
+    return 1;
+}
+static int win98_input_attach(void)
+{
+    const uint32_t flags=input_epoch.policy.flags;
+    /* One drain owner for the shared outer controller: keyboard poll when
+     * selected, otherwise the pointer poll. */
+    const struct dev_native_keyboard_ops k={&input_epoch,input_validate,input_poll};
+    const struct dev_native_pointer_ops m={&input_epoch,input_validate,(flags&W98_INPUT_KEYBOARD)?input_validate:input_poll};
+    input_epoch.attached=1;
+    if(((flags&W98_INPUT_KEYBOARD) && dev_native_keyboard_attach(&k)) ||
+       ((flags&W98_INPUT_MOUSE) && dev_native_pointer_attach(&m))){input_revoke(W98_INPUT_STATE_INIT_FAILED);return w98_refused("input-attach",1);}
+    input_epoch.state=W98_INPUT_STATE_ATTACHED;input_status();
+    kprintf("W98INPUT attached outer-i8042 flags=%x outer-config=%x generation=%u (QMP acceptance is not guest delivery)\n",
+        flags,(unsigned)input_epoch.port.outer_config,input_epoch.binding.generation);
     return 0;
 }
 /* Passive fixed ring: no control, register, memory or delivery writes. */
@@ -175,8 +268,9 @@ static void device_evidence(void)
     const dev_native_observation_t *o=dev_native_observation();
     if(devices_emitted || !o)return;
     devices_emitted=1;
-    kprintf("W98DEVICE passive start-tsc=%llu PIT=%u KBC=%u dropped=%u/%u FIFO-dropped=%u terminal-seen=%u interval-open=%u restored=%u no-host-key-input\n",
-        o->start_tsc,o->pit_count,o->kbc_count,o->pit_dropped,o->kbc_dropped,o->kbc_reply_dropped,o->pit2_terminal_seen,o->pit2_interval_open,o->pit2_restored_after_terminal);
+    kprintf("W98DEVICE passive start-tsc=%llu PIT=%u KBC=%u dropped=%u/%u FIFO-dropped=%u terminal-seen=%u interval-open=%u restored=%u %s\n",
+        o->start_tsc,o->pit_count,o->kbc_count,o->pit_dropped,o->kbc_dropped,o->kbc_reply_dropped,o->pit2_terminal_seen,o->pit2_interval_open,o->pit2_restored_after_terminal,
+        input_epoch.state==W98_INPUT_STATE_ABSENT?"no-host-key-input":"owned-i8042-input");
     for(unsigned group=0;group<2;++group) {
         const dev_native_io_record_t *records=group?o->kbc:o->pit;
         const unsigned count=group?o->kbc_count:o->pit_count;
@@ -211,6 +305,7 @@ int win98_domain_create(shz_info_t *info,const shz_caps_t *caps)
 {
     domain_t *d=&g_dom[SHZ_DOM_WIN98];vmx_cfg_t cfg;uint8_t *ram;
     if(persistence.device.owned){log_capture(info->last_error,sizeof info->last_error,"owned persistence DMA lifetime remains retained");return -1;}
+    input_revoke(W98_INPUT_STATE_DETACHED);memset(&input_epoch,0,sizeof input_epoch);
     rom=find_rom(info);
     if(!(info->loader_flags&SHZ_LOADER_NATIVE_WIN98) || !rom || rom->size!=W98_ROM_BYTES ||
        (rom->base&4095) || !info->guest_ram_base || (info->guest_ram_base&4095) ||
@@ -250,8 +345,10 @@ int win98_domain_create(shz_info_t *info,const shz_caps_t *caps)
     memset(d->io_bitmap_a,0xff,4096);memset(d->io_bitmap_b,0xff,4096);memset(d->msr_bitmap,0xff,4096);
     G.info=info;G.vc=&d->vc;G.ram_base=d->ram_base;G.ram_size=d->ram_size;G.tsc_hz=info->tsc_hz;
     dev_init(info->tsc_hz,d->ram_size);dev_native_win98_enable();dev_uart_tx_hook=uart_tx;
-    if(w98_ata_init(&ata,(uint8_t *)(uintptr_t)info->disk_base,info->disk_size,ata_irq,0)) return -1;
+    if(w98_ata_init(&ata,(uint8_t *)(uintptr_t)info->disk_base,info->disk_size,ata_irq,0)) return w98_refused("ata",1);
     if(w98_native_device_gate(info,caps)){
+        uint32_t epoch_io=0,port_io=0;const uint32_t stage=w98_native_device_gate_refusal(&epoch_io,&port_io);
+        kprintf("W98GATE refused stage=%u epoch-io=%u port-io=%u\n",stage,epoch_io,port_io);
         log_capture(info->last_error,sizeof info->last_error,"optional native device epoch policy/grant refused before device initialization");return -1;
     }
     if(win98_vga_init(d,info,caps)) {
@@ -260,13 +357,21 @@ int win98_domain_create(shz_info_t *info,const shz_caps_t *caps)
     cfg.io_bitmap_a=d->io_bitmap_a;cfg.io_bitmap_b=d->io_bitmap_b;cfg.msr_bitmap=d->msr_bitmap;
     cfg.mode=VMODE_REAL;cfg.eptp=ept_pointer(&d->ept);cfg.vpid=SHZ_DOM_WIN98;
     cfg.cs_sel=0xf000;cfg.rip=0xfff0;cfg.rsp=0;cfg.cr3=0;
-    if(vmx_vcpu_init(&d->vc,info,caps,&cfg)) return -1;
+    if(vmx_vcpu_init(&d->vc,info,caps,&cfg)) return w98_refused("vmcs",1);
     if(win98_persistence_init(d,info,caps)){
         log_capture(info->last_error,sizeof info->last_error,"explicit persistence device/member admission failed; no RAM fallback");return -1;
     }
     gop_epoch.domain=d;gop_epoch.vmcs=d->vc.vmcs_pa;
     gop_epoch.generation=d->generation;gop_epoch.owner_cpu=d->vc.owner_cpu;
+    const int input=win98_input_init(d,info);
+    if(input<0){
+        log_capture(info->last_error,sizeof info->last_error,"explicit owned i8042 input policy/controller admission failed");return -1;
+    }
     w98=d;d->state=SHZ_DS_RUNNABLE;
+    if(input>0 && win98_input_attach()){
+        w98=0;d->state=SHZ_DS_FAILED;
+        log_capture(info->last_error,sizeof info->last_error,"owned i8042 input attach refused");return -1;
+    }
     info->domains[d->id].kind=d->kind;info->domains[d->id].generation=d->generation;info->domains[d->id].state=d->state;
     kprintf("SHZ: real Win98 VMCS created RAM=%lluMiB SeaBIOS=%llu owned ATA=%llu bytes (boot unverified)\n",d->ram_size>>20,rom->size,ata.bytes);
     return 0;
@@ -441,7 +546,12 @@ int win98_ready(domain_t *d,uint64_t now)
 void win98_housekeeping(void)
 {
     if(!w98)return;
-    if(w98->state==SHZ_DS_FAILED || w98->state==SHZ_DS_EXITED){(void)win98_persistence_finalize();return;}
+    if(w98->state==SHZ_DS_FAILED || w98->state==SHZ_DS_EXITED){
+        input_revoke(W98_INPUT_STATE_DETACHED);(void)win98_persistence_finalize();return;
+    }
+    if(input_epoch.attached){
+        if(input_validate(&input_epoch))input_revoke(W98_INPUT_STATE_REVOKED);else input_status();
+    }
     const dev_native_observation_t *o=dev_native_observation();
     if(!devices_emitted && o && o->pit2_restored_after_terminal && !o->pit2_interval_open && (rdtsc()-o->start_tsc)/G.tsc_hz>=10)
         device_evidence(); /* observed terminal read followed by post-calibration port61 restore */

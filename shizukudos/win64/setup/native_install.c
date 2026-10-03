@@ -5,6 +5,14 @@
 #include "gpt.h"
 #include "textparse.h"
 #include <string.h>
+/* Single-TU build of the reviewed SZOU leaf modules and the existing accounts
+ * SHA-256 core: SHZSETUP (win64/build.py setup glob of *.c) and every existing
+ * host link set that names native_install.c receive exactly one copy without
+ * changing their file lists. native_runtime_sha.c no longer duplicates it. */
+#include "../../accounts/sha256.c"
+#include "native_install/szou_manifest.c"
+#include "native_install/szou_stage.c"
+#include "native_install/szou_fat32.c"
 
 #define SECTOR 512u
 #define BLOCK 4096u
@@ -20,11 +28,11 @@ typedef struct native_context {
     const native_setup_ops_v1_t *ops;
     const native_setup_request_v1_t *request;
     native_setup_result_v1_t *result;
-    void *source[2], *claim;
-    uint64_t source_bytes[2], image_bytes, first, last;
+    void *source[3], *claim;   /* [0] manifest, [1] SIM, [2] explicit SZOU phase only */
+    uint64_t source_bytes[3], image_bytes, first, last;
     native_setup_target_v1_t target;
     native_setup_overlay_v1_t overlays[2], frozen[2];
-    int plan_ready, admitted[2];
+    int plan_ready, admitted[3];
     uint8_t *buffer, *scratch;
     char *manifest;
     json_t json;
@@ -33,6 +41,17 @@ typedef struct native_context {
     uint64_t first_data, backup_offset, fsinfo_offset, backup_fsinfo_offset;
     member_t members[8];
     unsigned seen_files, seen_dirs, directory_work;
+    const native_setup_szou_ops_v1_t *szou_ops;
+    const native_setup_szou_request_v1_t *szou_request;
+    native_setup_szou_result_v1_t *szou;
+    szou_header_t szou_header;
+    szou_entry_t *szou_entries;
+    uint32_t *szou_order;
+    szou_name_t *szou_names;      /* v2 SZLN records (NULL for v1) */
+    uint32_t szou_name_count;
+    uint8_t *szou_table;
+    uint64_t szou_pin_bytes;
+    uint8_t szou_pin[32];
 } native_context_t;
 
 static const char *const names[8] = {
@@ -122,7 +141,7 @@ static int valid_disk(const plat_disk_t *d)
 static int guard(native_context_t *c)
 {
     unsigned i;
-    for (i = 0; i < 2; ++i)
+    for (i = 0; i < 3; ++i)
         if (c->source[i] && c->admitted[i] && c->ops->check_source(c->ops->ctx, c->source[i]))
             return fail(c, "native input identity, namespace or read custody changed");
     if (c->plan_ready && memcmp(c->overlays, c->frozen, sizeof c->frozen))
@@ -139,7 +158,7 @@ static int guard(native_context_t *c)
 
 static int read_source(native_context_t *c, unsigned i, uint64_t off, void *p, uint32_t n)
 {
-    if (i >= 2 || !c->source[i] || off > c->source_bytes[i] || n > c->source_bytes[i] - off)
+    if (i >= 3 || !c->source[i] || off > c->source_bytes[i] || n > c->source_bytes[i] - off)
         return fail(c, "native source extent differs");
     if (guard(c) || c->p->file_read(c->p->ctx, c->source[i], off, p, n) || guard(c))
         return fail(c, "native source exact read failed");
@@ -700,17 +719,257 @@ static int wipe(native_context_t *c)
     return 0;
 }
 
-void native_install_run(const plat_t *p, const native_setup_ops_v1_t *ops,
-                        const native_setup_request_v1_t *request, native_setup_result_v1_t *result)
+/* ---- Explicit original-userland (SZOU v1) phase ---------------------------
+ * Only native_install_run_original_userland/_resume reach this code; the
+ * strict v1 path leaves c->szou NULL and every helper below unreachable. */
+#define SZOU_STAGE_ROOT "SZSTAGE.NEW"
+typedef struct szou_src { native_context_t *c; } szou_src_t;
+static int szou_fail(native_context_t *c, const char *reason)
+{
+    if (c->szou && !c->szou->reason[0]) copy_string(c->szou->reason, sizeof c->szou->reason, reason);
+    return fail(c, reason);
+}
+static int szou_src_read(void *ctx, uint64_t off, void *buf, uint32_t n)
+{
+    szou_src_t *s = ctx;
+    return read_source(s->c, 2, off, buf, n) ? SZOU_E_IO : 0;
+}
+static int szou_guard(void *ctx) { return guard((native_context_t *)ctx); }
+
+/* Phase admission precedes every source open and target I/O. */
+static int szou_request_check(native_context_t *c)
+{
+    const native_setup_szou_request_v1_t *q = c->szou_request;
+    const native_setup_szou_ops_v1_t *o = c->szou_ops;
+    if (!q || q->version != NATIVE_SETUP_SZOU_VERSION || q->bytes != sizeof *q ||
+        !bounded_text(q->szou_path, NATIVE_SETUP_PATH_MAX) || !bounded_text(q->target_root, NATIVE_SETUP_SZOU_ROOT_MAX))
+        return szou_fail(c, "explicit SZOU original-userland request (version, source name, target root) required");
+    if (!o || o->version != NATIVE_SETUP_SZOU_VERSION || o->bytes != sizeof *o || !o->phase_pin)
+        return szou_fail(c, "SZOU original-userland phase admission provider unavailable");
+    if (o->phase_pin(o->ctx, NATIVE_SETUP_SZOU_ROLE, &c->szou_pin_bytes, c->szou_pin) || !c->szou_pin_bytes ||
+        c->szou_pin_bytes > NATIVE_SETUP_IMAGE_MAX || !nonzero(c->szou_pin, 32))
+        return szou_fail(c, "independently admitted original-userland phase record (role 2) absent; no SZOU source opened, no target I/O");
+    c->szou->phase_record_present = 1;
+    return 0;
+}
+
+/* Every relocated final and staged path must be creatable by the setup-side
+ * FAT32 writer (8.3 components, < 4 GiB) before the destructive pass. */
+static int szou_names(native_context_t *c, const szou_plan_opts_t *o)
+{
+    char out[SZOU_PATH_FIELD];
+    uint8_t name[11];
+    uint32_t i;
+    int staged;
+    for (i = 0; i < c->szou_header.entry_count; ++i) {
+        const szou_entry_t *e = &c->szou_entries[i];
+        if (e->size > 0xFFFFFFFFull) return szou_fail(c, "SZOU entry of 4 GiB or more is unsupported by FAT32");
+        for (staged = 0; staged < 2; ++staged) {
+            size_t a = 0, b;
+            if (szou_plan_path(o, e->path, staged, out)) return szou_fail(c, "SZOU relocated path refused");
+            for (;;) {
+                for (b = a; out[b] && out[b] != '\\'; ++b) {}
+                if (to83(out + a, b - a, name))
+                    return szou_fail(c, "SZOU short path is not a valid 8.3 alias (long names come only from SZOU v2 SZLN records)");
+                if (!out[b]) break;
+                a = b + 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int szou_admit(native_context_t *c)
+{
+    const native_setup_szou_request_v1_t *q = c->szou_request;
+    szou_plan_opts_t o;
+    szou_src_t src;
+    uint8_t got[32];
+    size_t table_bytes;
+    uint32_t i;
+    int rc;
+    if (c->p->file_open(c->p->ctx, q->szou_path, &c->source[2], &c->source_bytes[2]) || !c->source[2] ||
+        c->source_bytes[2] != c->szou_pin_bytes ||
+        c->ops->admit_source(c->ops->ctx, c->source[2], q->szou_path, c->source_bytes[2], c->szou_pin))
+        return szou_fail(c, "actual admitted SZOU source extent, SHA or custody differs");
+    c->admitted[2] = 1;
+    if (hash_source(c, 2, got) || memcmp(got, c->szou_pin, 32))
+        return szou_fail(c, "actual admitted SZOU source SHA differs");
+    memcpy(c->szou->szou_sha256, got, 32);
+    c->szou->source_bytes = c->source_bytes[2]; c->szou->source_admitted = 1;
+    if (read_source(c, 2, 0, c->buffer, SZOU_HEADER_BYTES) ||
+        szou_parse_header(c->buffer, c->source_bytes[2], &c->szou_header))
+        return szou_fail(c, "SZOU original-userland header refused");
+    table_bytes = (size_t)c->szou_header.entry_count * SZOU_ENTRY_BYTES;
+    c->szou_table = c->p->alloc(c->p->ctx, table_bytes);
+    c->szou_entries = c->p->alloc(c->p->ctx, (size_t)c->szou_header.entry_count * sizeof *c->szou_entries);
+    c->szou_order = c->p->alloc(c->p->ctx, (size_t)c->szou_header.entry_count * sizeof *c->szou_order);
+    if (!c->szou_table || !c->szou_entries || !c->szou_order) return szou_fail(c, "SZOU bounded table allocation failed");
+    if (read_source(c, 2, c->szou_header.table_offset, c->szou_table, (uint32_t)table_bytes) ||
+        (rc = szou_parse_table(&c->szou_header, c->szou_table, table_bytes, c->szou_entries, c->szou_order)))
+        return szou_fail(c, "SZOU original-userland entry table refused");
+    if (c->szou_header.version == SZOU_VERSION_NAMES) {   /* v2: SZLN long names + directory list */
+        szou_names_header_t nh;
+        uint8_t *raw;
+        uint32_t *scratch;
+        size_t rb;
+        if (read_source(c, 2, c->szou_header.names_offset, c->buffer, SZLN_HEADER_BYTES) ||
+            szou_parse_names_header(&c->szou_header, c->buffer, c->source_bytes[2], &nh))
+            return szou_fail(c, "SZOU v2 SZLN extension header refused");
+        rb = (size_t)nh.record_count * SZLN_RECORD_BYTES;
+        raw = c->p->alloc(c->p->ctx, rb);
+        scratch = c->p->alloc(c->p->ctx, SZOU_NAMES_SCRATCH(c->szou_header.entry_count, nh.record_count) * sizeof *scratch);
+        c->szou_names = c->p->alloc(c->p->ctx, (size_t)nh.record_count * sizeof *c->szou_names);
+        if (!raw || !scratch || !c->szou_names) {
+            if (raw) c->p->free(c->p->ctx, raw);
+            if (scratch) c->p->free(c->p->ctx, scratch);
+            return szou_fail(c, "SZOU v2 bounded name table allocation failed");
+        }
+        rc = read_source(c, 2, nh.records_offset, raw, (uint32_t)rb) ? SZOU_E_IO :
+             szou_parse_names(&c->szou_header, &nh, raw, rb, c->szou_entries, c->szou_order, c->szou_names, scratch);
+        c->p->free(c->p->ctx, raw); c->p->free(c->p->ctx, scratch);
+        if (rc) return szou_fail(c, "SZOU v2 long-name/directory records refused");
+        c->szou_name_count = nh.record_count;
+    }
+    o.target_root = q->target_root; o.stage_root = SZOU_STAGE_ROOT;
+    if (szou_plan_check(&o, c->szou_entries, c->szou_header.entry_count) ||
+        szou_plan_check_names(&o, c->szou_names, c->szou_name_count) || szou_names(c, &o))
+        return szou_fail(c, "SZOU relocation plan refused before target writes");
+    src.c = c;
+    for (i = 0; i < c->szou_header.entry_count; ++i)
+        if (szou_verify_entry(&c->szou_header, &c->szou_entries[i], szou_src_read, &src, c->scratch, IO_BYTES))
+            return szou_fail(c, "SZOU member payload SHA differs");
+    c->szou->entries = c->szou_header.entry_count;
+    c->szou->preflight_verified = 1;
+    return guard(c);
+}
+
+static int szou_mount(native_context_t *c, szou_fat32_t *fs, szou_sink_ops_t *sink)
+{
+    static szou_plat_blk_t pb;   /* referenced by dev for the mount lifetime */
+    szou_blkdev_t dev;
+    memset(&pb, 0, sizeof pb);
+    pb.p = c->p; pb.index = c->target.index; pb.first_lba = c->first; pb.sectors = c->last - c->first + 1;
+    pb.guard = szou_guard; pb.gctx = c;
+    if (!c->claim || szou_blk_from_plat(&pb, &dev, c->target.disk.sector_size, c->p->max_io_sectors) ||
+        szou_fat32_mount(fs, &dev, c->p->alloc, c->p->free, c->p->ctx, 0, 0))
+        return szou_fail(c, "SZOU installed FAT32 partition mount refused");
+    szou_fat32_sink(fs, sink);
+    return 0;
+}
+
+/* Re-open every committed final file through the same guarded volume and
+ * compare its content SHA with the admitted entry table. */
+static int szou_final_readback(native_context_t *c, const szou_sink_ops_t *k)
+{
+    szou_plan_opts_t o;
+    char path[SZOU_PATH_FIELD];
+    uint32_t i;
+    o.target_root = c->szou_request->target_root; o.stage_root = SZOU_STAGE_ROOT;
+    for (i = 0; i < c->szou_header.entry_count; ++i) {
+        const szou_entry_t *e = &c->szou_entries[i];
+        sha256_ctx h;
+        uint8_t got[32];
+        uint64_t size = 0, off = 0;
+        void *f = 0;
+        if (szou_plan_path(&o, e->path, 0, path) || k->open(k->ctx, path, &f, &size) || !f || size != e->size) {
+            if (f) k->close(k->ctx, f);
+            return szou_fail(c, "SZOU committed file missing or size differs");
+        }
+        sha256_init(&h);
+        while (off < size) {
+            uint32_t n = size - off < IO_BYTES ? (uint32_t)(size - off) : IO_BYTES;
+            if (k->read(k->ctx, f, off, c->scratch, n)) { k->close(k->ctx, f); return szou_fail(c, "SZOU committed file readback failed"); }
+            sha256_update(&h, c->scratch, n);
+            off += n;
+        }
+        sha256_final(&h, got);
+        if (k->close(k->ctx, f) || memcmp(got, e->sha256, 32)) return szou_fail(c, "SZOU committed file SHA differs");
+        c->szou->bytes_read_back += size;
+    }
+    c->szou->final_readback_verified = 1;
+    return 0;
+}
+
+static void szou_account(native_context_t *c, const szou_stage_result_t *r)
+{
+    c->szou->files_staged += r->files_staged; c->szou->files_committed += r->files_committed;
+    c->szou->files_already_final += r->files_already_final; c->szou->dirs_created += r->dirs_created;
+    c->szou->bytes_written += r->bytes_written;
+}
+
+/* Runs only after the native image, full readback and GPT readback succeeded,
+ * while the exclusive claim is held. */
+static int szou_phase(native_context_t *c)
+{
+    static szou_fat32_t fs;      /* sector cache + handles; kept off the stack */
+    szou_sink_ops_t sink;
+    szou_plan_opts_t o;
+    szou_stage_result_t r;
+    szou_src_t src;
+    uint8_t got[32];
+    int rc;
+    if (szou_mount(c, &fs, &sink)) return -1;
+    memset(&r, 0, sizeof r);
+    rc = szou_commit_pending(&sink, c->buffer, IO_BYTES, &r);     /* setup resume of an earlier marker */
+    if (rc == 0) { c->szou->resumed_pending = 1; szou_account(c, &r); }
+    else if (rc != SZOU_ABSENT) { (void)szou_fat32_unmount(&fs); return szou_fail(c, "SZOU pending marker roll-forward failed"); }
+    o.target_root = c->szou_request->target_root; o.stage_root = SZOU_STAGE_ROOT;
+    src.c = c; memset(&r, 0, sizeof r);
+    if (szou_stage_named(&o, &c->szou_header, c->szou_entries, c->szou_names, c->szou_name_count,
+                         szou_src_read, &src, &sink, c->buffer, IO_BYTES, &r)) {
+        szou_account(c, &r); (void)szou_fat32_unmount(&fs);
+        return szou_fail(c, "SZOU staging into installed FAT32 volume failed");
+    }
+    szou_account(c, &r); c->szou->staged = 1;
+    memset(&r, 0, sizeof r);
+    if (szou_commit_pending(&sink, c->buffer, IO_BYTES, &r)) { (void)szou_fat32_unmount(&fs); return szou_fail(c, "SZOU commit failed"); }
+    szou_account(c, &r); c->szou->committed = 1;
+    if (szou_final_readback(c, &sink)) { (void)szou_fat32_unmount(&fs); return -1; }
+    if (szou_fat32_unmount(&fs) || flush(c) || hash_source(c, 2, got) || memcmp(got, c->szou->szou_sha256, 32))
+        return szou_fail(c, "SZOU unmount, flush or final source SHA verification failed");
+    return guard(c);
+}
+
+/* Resume: verify the exact single-ESP GPT this installer wrote at [first,last]
+ * and roll a persisted marker forward. No image write, no wipe. */
+static int szou_resume(native_context_t *c)
+{
+    static szou_fat32_t fs;
+    szou_sink_ops_t sink;
+    szou_stage_result_t r;
+    const uint8_t *e;
+    int rc;
+    if (disk_io(c, 0, 1, 1 + GPT_ARRAY_BYTES / SECTOR, c->scratch) ||
+        gpt_check(c->scratch, c->scratch + SECTOR, SECTOR, 1, c->target.disk.sectors))
+        return szou_fail(c, "SZOU resume: installed primary GPT refused");
+    e = c->scratch + SECTOR;
+    if (memcmp(e, GPT_TYPE_ESP, 16) || u64(e + 32) != c->first || u64(e + 40) != c->last)
+        return szou_fail(c, "SZOU resume: installed ESP interval differs from reviewed plan");
+    if (szou_mount(c, &fs, &sink)) return -1;
+    memset(&r, 0, sizeof r);
+    rc = szou_commit_pending(&sink, c->buffer, IO_BYTES, &r);
+    if (rc == SZOU_ABSENT) { (void)szou_fat32_unmount(&fs); return szou_fail(c, "SZOU resume: no pending SZOUPEND.SYS marker"); }
+    if (rc) { (void)szou_fat32_unmount(&fs); return szou_fail(c, "SZOU resume: pending marker roll-forward failed"); }
+    szou_account(c, &r); c->szou->resumed_pending = 1; c->szou->committed = 1;
+    if (szou_fat32_unmount(&fs) || flush(c)) return szou_fail(c, "SZOU resume: unmount/flush failed");
+    return guard(c);
+}
+
+enum { RUN_STRICT_V1 = 0, RUN_SZOU_INSTALL = 1, RUN_SZOU_RESUME = 2 };
+static void run(const plat_t *p, const native_setup_ops_v1_t *ops, const native_setup_szou_ops_v1_t *sops,
+                const native_setup_request_v1_t *request, const native_setup_szou_request_v1_t *sreq,
+                native_setup_result_v1_t *result, native_setup_szou_result_v1_t *sres, int mode)
 {
     native_context_t c;
     uint8_t original[32], relocated[32], sim_sha[32], got[32], sectors[4][SECTOR];
     uint8_t *gpt_bytes = 0;
     unsigned i;
     int completed = 0;
-    if (!result) return;
+    if (!result || (mode != RUN_STRICT_V1 && !sres)) return;
     memset(result, 0, sizeof *result); memset(&c, 0, sizeof c);
     c.p = p; c.ops = ops; c.request = request; c.result = result;
+    if (mode != RUN_STRICT_V1) { memset(sres, 0, sizeof *sres); c.szou = sres; c.szou_ops = sops; c.szou_request = sreq; }
     if (!p || !request || request->version != NATIVE_SETUP_VERSION || request->bytes != sizeof *request ||
         !bounded_text(request->manifest_path, NATIVE_SETUP_PATH_MAX) || !bounded_text(request->sim_path, NATIVE_SETUP_PATH_MAX) ||
         !nonzero(request->admitted_manifest_sha256, 32) || !request->confirmation || strcmp(request->confirmation, "ERASE")) {
@@ -726,6 +985,7 @@ void native_install_run(const plat_t *p, const native_setup_ops_v1_t *ops,
         !p->disk_write || !p->disk_flush || !p->random || !p->max_io_sectors || p->max_io_sectors > 2048) {
         fail(&c, "native platform exact I/O capability unavailable"); goto out;
     }
+    if (mode == RUN_SZOU_INSTALL && szou_request_check(&c)) goto out;
     c.buffer = p->alloc(p->ctx, IO_BYTES); c.scratch = p->alloc(p->ctx, IO_BYTES);
     gpt_bytes = p->alloc(p->ctx, GPT_ARRAY_BYTES + 3 * SECTOR);
     if (!c.buffer || !c.scratch || !gpt_bytes) { fail(&c, "native bounded work allocation failed"); goto out; }
@@ -753,9 +1013,17 @@ void native_install_run(const plat_t *p, const native_setup_ops_v1_t *ops,
         fail(&c, "actual native sparse source SHA differs"); goto out;
     }
     memcpy(result->sim_sha256, got, 32);
+    if (mode == RUN_SZOU_INSTALL && szou_admit(&c)) goto out;
     if (sim_table(&c) || geometry(&c, sectors) || inventory(&c, c.root_cluster, "", 0) ||
         c.seen_files != 255 || c.seen_dirs != 15 || select_target(&c) || relocation(&c, sectors)) {
         fail(&c, "native complete input/member/target preflight failed"); goto out;
+    }
+    if (mode == RUN_SZOU_RESUME) {
+        if (szou_resume(&c) || hash_source(&c, 0, got) || memcmp(got, result->manifest_sha256, 32) ||
+            hash_source(&c, 1, got) || memcmp(got, result->sim_sha256, 32) || guard(&c)) {
+            szou_fail(&c, "SZOU resume or final source verification failed"); goto out;
+        }
+        completed = 1; goto out;
     }
     if (stream_image(&c, 0, original, relocated) || memcmp(original, result->original_sha256, 32) ||
         !memcmp(original, relocated, 32) || gpt(&c, 0, gpt_bytes)) {
@@ -770,10 +1038,11 @@ void native_install_run(const plat_t *p, const native_setup_ops_v1_t *ops,
         hash_source(&c, 1, got) || memcmp(got, result->sim_sha256, 32) || guard(&c) || gpt(&c, 1, gpt_bytes)) {
         fail(&c, "native second pass, full target readback or final source/GPT verification failed"); goto out;
     }
+    if (mode == RUN_SZOU_INSTALL && szou_phase(&c)) goto out;
     completed = 1;
 out:
     if (ops && ops->check_source && ops->close_source) {
-        for (i = 0; i < 2; ++i) {
+        for (i = 0; i < 3; ++i) {
             if (!c.source[i]) continue;
             if (ops->check_source(ops->ctx, c.source[i])) { fail(&c, "native final source custody check failed"); completed = 0; }
             if (ops->close_source(ops->ctx, c.source[i])) { fail(&c, "native mandatory source close/finalization failed"); completed = 0; }
@@ -791,8 +1060,23 @@ out:
         if (c.buffer) p->free(p->ctx, c.buffer);
         if (c.scratch) p->free(p->ctx, c.scratch);
         if (gpt_bytes) p->free(p->ctx, gpt_bytes);
+        if (c.szou_table) p->free(p->ctx, c.szou_table);
+        if (c.szou_names) p->free(p->ctx, c.szou_names);
+        if (c.szou_entries) p->free(p->ctx, c.szou_entries);
+        if (c.szou_order) p->free(p->ctx, c.szou_order);
     }
     result->ok = completed && !result->reason[0];
+    if (mode != RUN_STRICT_V1) {
+        if (!sres->reason[0] && result->reason[0]) copy_string(sres->reason, sizeof sres->reason, result->reason);
+        sres->ok = result->ok && !sres->reason[0] &&
+                   (mode == RUN_SZOU_RESUME ? sres->committed : sres->final_readback_verified);
+        if (p && p->out) {
+            p->out(p->ctx, sres->ok ? (mode == RUN_SZOU_RESUME ? "NATIVE-SZOU-RESULT: PENDING_MARKER_ROLLED_FORWARD_NOT_BOOTED\n" :
+                                       "NATIVE-SZOU-RESULT: ORIGINAL_USERLAND_STAGED_COMMITTED_READBACK_VERIFIED_NOT_BOOTED\n")
+                                    : "NATIVE-SZOU-RESULT: FAIL ");
+            if (!sres->ok) { p->out(p->ctx, sres->reason); p->out(p->ctx, "\n"); }
+        }
+    }
     if (p && p->out) {
         if (result->ok) p->out(p->ctx, "NATIVE-SETUP-RESULT: TARGET_WRITTEN_READBACK_VERIFIED_NOT_BOOTED\n");
         else { p->out(p->ctx, "NATIVE-SETUP-RESULT: FAIL "); p->out(p->ctx, result->reason); p->out(p->ctx, "\n"); }
@@ -804,4 +1088,23 @@ void setup_run_native(const plat_t *p, const native_setup_ops_v1_t *ops,
                       const native_setup_request_v1_t *request, native_setup_result_v1_t *result)
 {
     native_install_run(p, ops, request, result);
+}
+
+void native_install_run(const plat_t *p, const native_setup_ops_v1_t *ops,
+                        const native_setup_request_v1_t *request, native_setup_result_v1_t *result)
+{
+    run(p, ops, 0, request, 0, result, 0, RUN_STRICT_V1);
+}
+
+void native_install_run_original_userland(const plat_t *p, const native_setup_ops_v1_t *ops,
+    const native_setup_szou_ops_v1_t *sops, const native_setup_request_v1_t *request,
+    const native_setup_szou_request_v1_t *sreq, native_setup_result_v1_t *result, native_setup_szou_result_v1_t *sres)
+{
+    run(p, ops, sops, request, sreq, result, sres, RUN_SZOU_INSTALL);
+}
+
+void native_install_resume_original_userland(const plat_t *p, const native_setup_ops_v1_t *ops,
+    const native_setup_request_v1_t *request, native_setup_result_v1_t *result, native_setup_szou_result_v1_t *sres)
+{
+    run(p, ops, 0, request, 0, result, sres, RUN_SZOU_RESUME);
 }

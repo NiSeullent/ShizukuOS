@@ -22,6 +22,9 @@
 #define SHZ_MAX_BLOBS 8
 /* Explicit opt-in installed Win98/SeaBIOS profile; absent flag preserves DOS. */
 #define SHZ_LOADER_NATIVE_WIN98 1u
+/* Explicit BOOT.INI k64_display=yes: the Supervisor may grant the GOP framebuffer to Kernel64 (display_grant.c);
+ * absent flag preserves the Supervisor DOS text console on GOP. Never combined with SHZ_LOADER_NATIVE_WIN98. */
+#define SHZ_LOADER_K64_DISPLAY 2u
 
 enum shz_stage {
     SHZ_STAGE_NONE = 0,
@@ -114,7 +117,7 @@ typedef struct {
     uint64_t domain_generation;
     char last_error[128];
     shz_domain_info_t domains[SHZ_MAX_DOMAINS];
-    uint32_t pad[8];
+    uint32_t native_input[8];           /* W98INPT owned-i8042 status (native_input.h); zero when absent */
 } shz_info_t;
 
 _Static_assert(sizeof(shz_info_t) <= SHZ_INFO_BYTES, "info must fit the two-page block");

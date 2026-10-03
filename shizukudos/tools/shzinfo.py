@@ -58,7 +58,7 @@ class Info(ctypes.Structure):
         ("exit_count", u64 * 64), ("total_exits", u64), ("hypercalls", u64), ("io_exits", u64),
         ("io_unhandled", u64), ("injected_irqs", u64), ("guest_console_bytes", u64),
         ("guest_exit_code", u32), ("guest_exit_requested", u32), ("domain_generation", u64),
-        ("last_error", ctypes.c_char * 128), ("domains", DomainInfo * 8), ("pad", u32 * 8),
+        ("last_error", ctypes.c_char * 128), ("domains", DomainInfo * 8), ("native_input", u32 * 8),
     ]
 
     @classmethod
@@ -66,6 +66,16 @@ class Info(ctypes.Structure):
         if len(raw) < ctypes.sizeof(cls):
             raise ValueError("short info page")
         return cls.from_buffer_copy(raw)
+
+    def native_input_status(self):
+        """Decode the W98INPT owned-i8042 status words (native_input.h); None when no opt-in."""
+        w = list(self.native_input)
+        if w[0] != NATIVE_INPUT_MAGIC:
+            return None
+        return {"state": NATIVE_INPUT_STATES.get(w[1] & 0xff, w[1] & 0xff), "flags": w[1] >> 8 & 0xff,
+                "outer_config": w[1] >> 16 & 0xff, "ready": bool(w[1] >> 24 & 1), "generation": w[2],
+                "key_events": w[3], "mouse_packets": w[4], "dropped": w[5], "parity_timeout": w[6] & 0xffff,
+                "malformed": w[6] >> 16, "outer_responses": w[7] & 0xffff, "init_error": w[7] >> 16}
 
     def caps(self):
         return sorted(n for n, b in CAP_BITS.items() if self.cap_bits >> b & 1)
@@ -97,12 +107,15 @@ class Info(ctypes.Structure):
             elif isinstance(value, bytes):
                 value = value.split(b"\0", 1)[0].decode("ascii", "replace")
             out[name] = value
+        out["native_input_status"] = self.native_input_status()
         out["stage_name"] = self.stage_name()
         out["caps"] = self.caps()
         return out
 
 
 INFO_BYTES = 8192
+NATIVE_INPUT_MAGIC = 0x31504E49  # INP1
+NATIVE_INPUT_STATES = {0: "absent", 1: "attached", 2: "detached", 3: "revoked", 4: "init-failed", 5: "refused"}
 
 
 def selfcheck(repo):

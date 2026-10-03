@@ -25,7 +25,7 @@ typedef struct shz_native_provider {
     plat_t platform, base;
     native_setup_ops_v1_t ops;
     shz_native_provider_backend_v1_t backend;
-    void *source[2], *claim;
+    void *source[3], *claim; /* roles 0,1 + 2 (SZOU) */
     unsigned admitted[2], opened, claim_attempted, started, initialized, io_failed;
     native_setup_target_v1_t target;
 } shz_native_provider_t;
@@ -46,4 +46,8 @@ int shz_native_provider_init(shz_native_provider_t *, const plat_t *,
  * neither source closure nor claim release is represented as disk rollback. */
 void shz_native_provider_run(shz_native_provider_t *, const native_setup_request_v1_t *,
                              native_setup_result_v1_t *);
+/* Same single-use provider, explicit SZOU phase or marker resume (sreq NULL). */
+void shz_native_provider_run_original_userland(shz_native_provider_t *, const native_setup_szou_ops_v1_t *,
+    const native_setup_request_v1_t *, const native_setup_szou_request_v1_t *,
+    native_setup_result_v1_t *, native_setup_szou_result_v1_t *);
 #endif

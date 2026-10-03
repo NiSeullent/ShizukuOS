@@ -3,26 +3,26 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#eef3f8">
+  <meta name="theme-color" content="#edf4f3">
   <meta name="description" content="ShizukuOS application progress, with original evidence distinguishing limited Windows 98 trials from independent component tests.">
   <title>Application support · ShizukuOS</title>
   <link rel="icon" href="../favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="../styles.css?v=20261003-rebuild1">
+  <link rel="stylesheet" href="../styles.css?v=20261003-slade1">
   <link rel="alternate" hreflang="ko" href="https://m98.nyase.kr/apps.html">
   <link rel="alternate" hreflang="en" href="https://m98.nyase.kr/en/apps.html">
 </head>
 <body class="guide-page">
 <a class="skip" href="#main">Skip to content</a>
 
-<header class="top site-header"><a class="brand" href="./index.html"><span class="brand-mark" aria-hidden="true">S</span><span><strong>ShizukuOS</strong><small>1.0.0 in development</small></span></a><nav class="site-nav" aria-label="Main navigation"><a href="./index.html">Project</a><a href="./downloads.html">Downloads</a><a href="./install.html">Setup</a><a href="./apps.html" aria-current="page">App support</a><a href="./develop.html">Development</a><a class="language-link" href="../apps.html" lang="ko" hreflang="ko">한국어</a></nav></header>
+<header class="top site-header"><a class="brand" href="./index.html"><span class="brand-mark" aria-hidden="true">S</span><span><strong>ShizukuOS</strong><small>ShizukuOS Core</small></span></a><nav class="site-nav" aria-label="Main navigation"><a href="./index.html">Home</a><a href="./downloads.html">Downloads</a><a href="./preview.html">Records</a><a href="./develop.html">Source</a><a class="language-link" href="../apps.html" lang="ko" hreflang="ko">한국어</a></nav></header>
 
 <main id="main">
 
 <section class="page-hero"><p class="eyebrow">Application support · Records dated 2026-10-01</p><h1>A separate status for every app.</h1><p class="lead">Check observed behavior and remaining work. Versions identify test inputs, rather than current releases.</p></section>
 
-<section class="scope-note"><h2>Windows 98 integration is still in development.</h2><p>Notepad++ and VLC trials use the original DOS boot path as a control. Independent Kernel64 results also do not establish completed app support in a hybrid OS with Windows 98 userland connected to ShizukuCore.</p></section>
+<section class="scope-note"><h2>Historical trials are preserved here.</h2><p>These Windows 98 and standalone component trials were recorded on October 1, 2026. Notepad++ and VLC use the original DOS boot path as controls. Verified functions and failures remain together; they do not establish completion of the new ShizukuOS system or its native app baseline. See the separate <a href="./develop.html#native-apps">current native app goals</a>.</p></section>
 
-<section class="section-block"><h2>Observed behavior and remaining work</h2><div class="table-wrap" role="region" aria-labelledby="support-title" tabindex="0">
+<section class="section-block"><h2 id="support-title">Observed behavior and remaining work</h2><div class="table-wrap" role="region" aria-labelledby="support-title" tabindex="0">
       <table>
         <caption>Public evidence dated 2026-10-01 · Final acceptance on Windows 98 with ShizukuDOS remains incomplete for every app</caption>
 
@@ -39,28 +39,28 @@
 <tr><th scope="row">VLC<br><span class="small">3.0.24</span></th><td><span class="status-pill component">Partial functionality</span><p>Windows 98 GOP: Qt menus, playback controls and changing 160 × 120 test video.</p></td><td>RPCRT4 exit error, audible audio, preceding diagnostic effects on a separate boot and full functionality.</td><td><a href="./preview.html?view=vlc-qt-video-gop">Qt player trial</a><br><a href="./preview.html?view=vlc-first-startup">First startup failure</a></td></tr>
 
 
-<tr><th scope="row">Google Chrome<br><span class="small">154.0.8037.93</span></th><td><span class="status-pill pending">Input verification</span><p>Official Enterprise x64 MSI: 267 original files and their PE versions verified.</p></td><td>Windows 98 execution, browsing, login and exit. MSI updater and app versions differ.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/shizukudos10/reports/checkpoint-20261001/google-chrome-extraction.json">Extraction record</a></td></tr>
+<tr><th scope="row">Google Chrome<br><span class="small">154.0.8037.93</span></th><td><span class="status-pill pending">Input verification</span><p>Official Enterprise x64 MSI: 267 original files and their PE versions verified.</p></td><td>Windows 98 execution, browsing, login and exit. MSI updater and app versions differ.</td><td><a href="https://github.com/NiSeullent/ShizukuOS/blob/main/docs/shizukudos10/reports/checkpoint-20261001/google-chrome-extraction.json">Extraction record</a></td></tr>
 
 
-<tr><th scope="row">Firefox<br><span class="small">157.0</span></th><td><span class="status-pill pending">Startup failure preserved</span><p>Official package verified. Earlier independent Kernel64 run stopped at OpenProcessToken.</p></td><td>Retry browsing, profiles, multiple processes and exit after API changes; connect to Windows 98.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/shizukudos10/reports/checkpoint-20261001/application-status.json">Execution record</a></td></tr>
+<tr><th scope="row">Firefox<br><span class="small">157.0</span></th><td><span class="status-pill pending">Startup failure preserved</span><p>Official package verified. Earlier independent Kernel64 run stopped at OpenProcessToken.</p></td><td>Retry browsing, profiles, multiple processes and exit after API changes; connect to Windows 98.</td><td><a href="https://github.com/NiSeullent/ShizukuOS/blob/main/docs/shizukudos10/reports/checkpoint-20261001/application-status.json">Execution record</a></td></tr>
 
 
-<tr><th scope="row">Chromium<br><span class="small">GUI 157.0.8079.0 · revision 1706750<br>Input pin 157.0.8081.0 · revision 1708403</span></th><td><span class="status-pill component">Independent runtime trial</span><p>Independent Kernel64 headless: DOM result 42 and exit. GUI V2 displayed a toolbar but failed to load a page.</p></td><td>Shared-memory corruption, c0000005 exit, hash-bound retesting and Windows 98 integration. Earlier headless EXE and full-tree hashes were missing.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/shizukudos10/reports/checkpoint-20261001/application-status.json">GUI and headless records</a><br><a href="./preview.html?view=native-app-foundations">Win98 common-function trials</a></td></tr>
+<tr><th scope="row">Chromium<br><span class="small">GUI 157.0.8079.0 · revision 1706750<br>Input pin 157.0.8081.0 · revision 1708403</span></th><td><span class="status-pill component">Independent runtime trial</span><p>Independent Kernel64 headless: DOM result 42 and exit. GUI V2 displayed a toolbar but failed to load a page.</p></td><td>Shared-memory corruption, c0000005 exit, hash-bound retesting and Windows 98 integration. Earlier headless EXE and full-tree hashes were missing.</td><td><a href="https://github.com/NiSeullent/ShizukuOS/blob/main/docs/shizukudos10/reports/checkpoint-20261001/application-status.json">GUI and headless records</a><br><a href="./preview.html?view=native-app-foundations">Win98 common-function trials</a></td></tr>
 
 
 <tr><th scope="row">Legcord / Discord<br><span class="small">Legcord 1.3.0</span></th><td><span class="status-pill component">Independent setup UI</span><p>Independent 64-bit runtime displayed the original Welcome and setup screens.</p></td><td>Relaunch, Discord login, chat, voice, exit and Windows 98 display/input integration.</td><td><a href="./preview.html?view=legcord-runtime-setup">Setup captures and scope</a></td></tr>
 
 
-<tr><th scope="row">LibreOffice<br><span class="small">Package 26.8.0 · app 26.8.0.3</span></th><td><span class="status-pill pending">Startup failure preserved</span><p>Official MSI and app files verified. Earlier independent Kernel64 run stopped at SetSearchPathMode.</p></td><td>Retry opening, editing, saving, PDF and exit after API changes; connect to Windows 98.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/shizukudos10/reports/checkpoint-20261001/application-status.json">Startup failure record</a></td></tr>
+<tr><th scope="row">LibreOffice<br><span class="small">Package 26.8.0 · app 26.8.0.3</span></th><td><span class="status-pill pending">Startup failure preserved</span><p>Official MSI and app files verified. Earlier independent Kernel64 run stopped at SetSearchPathMode.</p></td><td>Retry opening, editing, saving, PDF and exit after API changes; connect to Windows 98.</td><td><a href="https://github.com/NiSeullent/ShizukuOS/blob/main/docs/shizukudos10/reports/checkpoint-20261001/application-status.json">Startup failure record</a></td></tr>
 
 
-<tr><th scope="row">Steam<br><span class="small">win64 manifest 1788652215<br>Input pin dated 2026-09-30</span></th><td><span class="status-pill pending">Loader diagnosis</span><p>Official bootstrap hash and AMD64 verified. Existing independent client reached the loader; Module32Next API fixture added.</p></td><td>Fresh installation, complete client dependencies, CEF, login, games, exit and Windows 98 integration.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/TARGET_APPS.md">Official input pin</a><br><a href="../continuation/modern-apps-guide.md">Client handoff record</a></td></tr>
+<tr><th scope="row">Steam<br><span class="small">win64 manifest 1788652215<br>Input pin dated 2026-09-30</span></th><td><span class="status-pill pending">Loader diagnosis</span><p>Official bootstrap hash and AMD64 verified. Existing independent client reached the loader; Module32Next API fixture added.</p></td><td>Fresh installation, complete client dependencies, CEF, login, games, exit and Windows 98 integration.</td><td><a href="https://github.com/NiSeullent/ShizukuOS/blob/main/docs/TARGET_APPS.md">Official input pin</a><br><a href="../continuation/modern-apps-guide.md">Client handoff record</a></td></tr>
 
 
-<tr><th scope="row">Supermium<br><span class="small">144.0.7559.256 R5 · x86<br>Target pin dated 2026-09-30</span></th><td><span class="status-pill pending">Loader failure preserved</span><p>Earlier KernelEx Windows 98 control stopped at missing NTDLL.LdrGetProcedureAddress.</p></td><td>Pin inputs and retry browsing, exit and ShizukuCore integration through the new compatibility path.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/benchmarks/app-guest-checkpoint-provider19.json">Earlier loader failure</a><br><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/TARGET_APPS.md">Target version and scope</a></td></tr>
+<tr><th scope="row">Supermium<br><span class="small">144.0.7559.256 R5 · x86<br>Target pin dated 2026-09-30</span></th><td><span class="status-pill pending">Loader failure preserved</span><p>Earlier KernelEx Windows 98 control stopped at missing NTDLL.LdrGetProcedureAddress.</p></td><td>Pin inputs and retry browsing, exit and ShizukuCore integration through the new compatibility path.</td><td><a href="https://github.com/NiSeullent/ShizukuOS/blob/main/benchmarks/app-guest-checkpoint-provider19.json">Earlier loader failure</a><br><a href="https://github.com/NiSeullent/ShizukuOS/blob/main/docs/TARGET_APPS.md">Target version and scope</a></td></tr>
 
 
-<tr><th scope="row">Visual Studio Code<br><span class="small">1.140.0 · x64<br>Input pin dated 2026-09-30</span></th><td><span class="status-pill pending">Input verification</span><p>Official archive, Microsoft hash and Code.exe x64 verified. Execution unverified.</p></td><td>Actual app editing, saving, extensions, terminal, exit and Windows 98 integration. VSCodium trials are separate.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/TARGET_APPS.md#current-publisher-targets--2026-09-30">Download, hashes and current target</a></td></tr>
+<tr><th scope="row">Visual Studio Code<br><span class="small">1.140.0 · x64<br>Input pin dated 2026-09-30</span></th><td><span class="status-pill pending">Input verification</span><p>Official archive, Microsoft hash and Code.exe x64 verified. Execution unverified.</p></td><td>Actual app editing, saving, extensions, terminal, exit and Windows 98 integration. VSCodium trials are separate.</td><td><a href="https://github.com/NiSeullent/ShizukuOS/blob/main/docs/TARGET_APPS.md#current-publisher-targets--2026-09-30">Download, hashes and current target</a></td></tr>
 
         </tbody>
 
@@ -68,7 +68,7 @@
     </div></section>
 
 <section class="section-block" id="evidence"><h2>Original records</h2><p>13 collections and 48 actual captures record each environment and its errors.</p><div class="hero-actions"><a class="button primary" href="./preview.html?view=latest-npp-gop">Notepad++</a><a class="button secondary" href="./preview.html?view=vlc-qt-video-gop">VLC</a><a href="./preview.html">All records</a></div>
-<details><summary>Input versions and detailed trial records</summary><p><a href="./evidence/preview.json">Capture manifest</a> · <a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/shizukudos10/reports/checkpoint-20261001/publisher-input-pins.json">Official input pins</a> · <a href="../continuation/modern-apps-guide.md">Application handoff (Korean)</a></p><p>Original applications are excluded from compatibility ZIPs.</p></details>
+<details><summary>Input versions and detailed trial records</summary><p><a href="./evidence/preview.json">Capture manifest</a> · <a href="https://github.com/NiSeullent/ShizukuOS/blob/main/docs/shizukudos10/reports/checkpoint-20261001/publisher-input-pins.json">Official input pins</a> · <a href="../continuation/modern-apps-guide.md">Application handoff (Korean)</a></p><p>Original applications are excluded from compatibility ZIPs.</p></details>
 </section>
 
 </main>

@@ -1,0 +1,102 @@
+--- a/sal/osl/w32/file.cxx
++++ b/sal/osl/w32/file.cxx
+@@ -29,6 +29,7 @@
+ #include "file-impl.hxx"
+ #include "file_url.hxx"
+ #include "file_error.hxx"
++#include "win98_offsal.h"
+ 
+ #include <atomic>
+ #include <cassert>
+--- a/sal/osl/w32/module.cxx
++++ b/sal/osl/w32/module.cxx
+@@ -20,6 +20,7 @@
+ #include "system.h"
+ 
+ #include "file_url.hxx"
++#include "win98_offsal.h"
+ #include "path_helper.hxx"
+ 
+ #include <osl/module.h>
+--- a/sal/osl/w32/process.cxx
++++ b/sal/osl/w32/process.cxx
+@@ -33,6 +33,7 @@
+ #include "filetime.hxx"
+ #include "nlsupport.hxx"
+ #include "procimpl.hxx"
++#include "win98_offsal.h"
+ #include "file_url.hxx"
+ #include "path_helper.hxx"
+ #include <rtl/alloc.h>
+@@ -152,6 +153,10 @@
+     {
+         pProcImpl = static_cast< oslProcessImpl*>( malloc(sizeof(oslProcessImpl)) );
+         assert(pProcImpl && "Don't handle OOM conditions");
++#if defined(LIBO_WIN98) && LIBO_WIN98
++        // Windows 98 has no GetProcessId: remember the pid this handle was opened for.
++        OfsRegisterProcessHandle(hProcess, static_cast<DWORD>(Ident));
++#endif
+         pProcImpl->m_hProcess  = hProcess;
+         pProcImpl->m_IdProcess = Ident;
+     }
+@@ -165,6 +170,9 @@
+ {
+     if (Process != nullptr)
+     {
++#if defined(LIBO_WIN98) && LIBO_WIN98
++        OfsForgetProcessHandle(static_cast<oslProcessImpl*>(Process)->m_hProcess);
++#endif
+         CloseHandle(static_cast<oslProcessImpl*>(Process)->m_hProcess);
+ 
+         free(Process);
+--- a/sal/osl/w32/salinit.cxx
++++ b/sal/osl/w32/salinit.cxx
+@@ -21,6 +21,7 @@
+ 
+ #include "system.h"
+ #include "time.hxx"
++#include "win98_offsal.h"
+ 
+ #include <osl/process.h>
+ #include <sal/main.h>
+--- a/sal/osl/w32/win98_offsal.h
++++ b/sal/osl/w32/win98_offsal.h
+@@ -0,0 +1,38 @@
++/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
++/*
++ * Windows 98 routing for SAL calls that KERNEL32 on Windows 98 does not export.
++ * Added by the ShizukuOS LIBO_WIN98 port; the providers live in OFFSAL.DLL
++ * (ntwin32/office_sal) and fail with a truthful Win32 error where Windows 98
++ * cannot honour the request.
++ *
++ * This Source Code Form is subject to the terms of the Mozilla Public
++ * License, v. 2.0. If a copy of the MPL was not distributed with this
++ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
++ */
++
++#pragma once
++
++#if defined(LIBO_WIN98) && LIBO_WIN98
++extern "C" {
++BOOL WINAPI OfsSetProcessDEPPolicy(DWORD);
++BOOL WINAPI OfsSetDllDirectoryW(LPCWSTR);
++BOOL WINAPI OfsSetSearchPathMode(DWORD);
++DWORD WINAPI OfsGetProcessId(HANDLE);
++BOOL WINAPI OfsRegisterProcessHandle(HANDLE, DWORD);
++BOOL WINAPI OfsForgetProcessHandle(HANDLE);
++BOOL WINAPI OfsGetModuleHandleExW(DWORD, LPCWSTR, HMODULE*);
++BOOL WINAPI OfsGetFileSizeEx(HANDLE, LARGE_INTEGER*);
++BOOL WINAPI OfsSetFilePointerEx(HANDLE, LARGE_INTEGER, LARGE_INTEGER*, DWORD);
++BOOL WINAPI OfsReplaceFileW(LPCWSTR, LPCWSTR, LPCWSTR, DWORD, LPVOID, LPVOID);
++}
++#define SetProcessDEPPolicy OfsSetProcessDEPPolicy
++#define SetDllDirectoryW OfsSetDllDirectoryW
++#define SetSearchPathMode OfsSetSearchPathMode
++#define GetProcessId OfsGetProcessId
++#define GetModuleHandleExW OfsGetModuleHandleExW
++#define GetFileSizeEx OfsGetFileSizeEx
++#define SetFilePointerEx OfsSetFilePointerEx
++#define ReplaceFileW OfsReplaceFileW
++#endif
++
++/* vim:set shiftwidth=4 softtabstop=4 expandtab: */

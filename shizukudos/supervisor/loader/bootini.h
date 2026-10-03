@@ -46,6 +46,8 @@ typedef struct {
     int mode_set, csm_path_set, auto_kernel64_set, menu_timeout_set;  /* which keys the file provided */
     int win98_vga_set;
     int win98_persistence_set;
+    int win98_input, win98_input_set;     /* separate W98INPT.BIN owned-i8042 input opt-in, default no */
+    int k64_display, k64_display_set;     /* explicit Supervisor->Kernel64 GOP grant, default no */
 } bootini_policy_t;
 
 /* Built-in policy used when BOOT.INI does not exist: mode=auto, default csm_path, auto_kernel64=no, no menu. */

@@ -31,6 +31,7 @@
 #include "gfx_auth.h"
 #include "../dead_screen/native.h"
 #include "pci.h"
+#include "laptop_input_native.h"
 #include "../win64/include/shzpointer.h"
 #include "../win64/include/shzkbd.h"
 
@@ -221,6 +222,56 @@ static void arrow_init(void)
 }
 #endif
 
+#ifdef SHZ_STANDALONE
+/* PS/2 Synaptics transport for laptop_input_native.c (the i8042 aux port). Elapsed-time bounded; IRQ 12 must still be masked
+ * (before the final 0x60 write of gin_init) so no other reader steals the replies. */
+static int ps2_wait(uint8_t mask, int want, uint32_t us)
+{
+    const uint64_t end = shz_time_ns() + (uint64_t)us * 1000u;
+    for (;;) {
+        if (((k_inb(I8042_STAT) & mask) != 0) == want) return 0;
+        if (shz_time_ns() >= end) return -1;
+    }
+}
+static int ps2_write_aux(void *c, uint8_t v, uint32_t us)
+{
+    (void)c;
+    if (ps2_wait(2, 0, us)) return -1;
+    k_outb(I8042_STAT, 0xD4);
+    if (ps2_wait(2, 0, us)) return -1;
+    k_outb(I8042_DATA, v);
+    return 0;
+}
+static int ps2_read_aux(void *c, uint8_t *b, uint32_t us)
+{
+    const uint64_t end = shz_time_ns() + (uint64_t)us * 1000u;
+    (void)c;
+    for (;;) {
+        const uint8_t st = k_inb(I8042_STAT);
+        if (st & 1) {
+            const uint8_t v = k_inb(I8042_DATA);
+            if (st & 0x20) { *b = v; return 0; }            /* keyboard bytes are dropped, as in dat_read(1) */
+        } else if (shz_time_ns() >= end) return -1;
+    }
+}
+static int ps2_drain(void *c, uint32_t us)
+{
+    const uint64_t end = shz_time_ns() + (uint64_t)us * 1000u;
+    (void)c;
+    while (k_inb(I8042_STAT) & 1) { (void)k_inb(I8042_DATA); if (shz_time_ns() >= end) return -1; }
+    return 0;
+}
+/* NOT called by gin_init (the i8042 bring-up belongs to the core integrator). Contract: call once after the aux "F6 defaults"
+ * ACK and BEFORE the IntelliMouse knock, with IRQ 12 still masked. Returns 0: Synaptics absolute mode is active and
+ * mouse_byte routes aux bytes to it (skip the knock; mpkt_len stays 3). Otherwise (>0 not Synaptics, <0 error) the standard
+ * relative path is untouched: resend aux_send(0xF6) (and F4 after the knock) because the probe left the device streaming. */
+int gin_ps2_touchpad_probe(void)
+{
+    static const struct k64_lin_ps2_transport t = { 0, ps2_write_aux, ps2_read_aux, ps2_drain };
+    return k64_laptop_ps2_open(&t);
+}
+#endif
+
 void gin_init(void)
 {
 #ifdef SHZ_STANDALONE
@@ -228,6 +279,7 @@ void gin_init(void)
     g_ptr_x = (int32_t)g_fb.width / 2;
     g_ptr_y = (int32_t)g_fb.height / 2;
     arrow_init();
+    k64_laptop_input_init();                                /* USB HID pointer thread (xHCI); independent of the i8042 */
     ctl_cmd(0xAD);                                          /* keyboard port off */
     ctl_cmd(0xA7);                                          /* mouse port off */
     while (k_inb(I8042_STAT) & 1) (void)k_inb(I8042_DATA);
@@ -243,7 +295,13 @@ void gin_init(void)
     if (dat_read(0) == 0xFA) g_info |= SHZ_INFO_KEYBOARD;
     ds_native_keyboard_ready((g_info & SHZ_INFO_KEYBOARD) != 0);
     if (aux_send(0xF6) == 0xFA) {                           /* mouse: defaults */
+        /* shz.touchpad=synaptics (explicit opt-in; default PS/2 path byte-identical): IRQ 12 is still masked here.
+         * 0 = Synaptics absolute mode active (probe already sent F4; mouse_byte feeds k64_laptop_ps2_feed, no knock);
+         * >0 standard mouse / <0 error: F6 defaults again, then the unchanged relative path. */
+        const int tp = k64_cmdline_has("shz.touchpad=synaptics") ? gin_ps2_touchpad_probe() : 1;
         g_info |= SHZ_INFO_MOUSE;
+        if (tp != 0) {
+        if (k64_cmdline_has("shz.touchpad=synaptics")) aux_send(0xF6);
         aux_send(0xF3); aux_send(200);                      /* the IntelliMouse knock: sample rates 200, 100, 80 */
         aux_send(0xF3); aux_send(100);
         aux_send(0xF3); aux_send(80);
@@ -253,6 +311,8 @@ void gin_init(void)
         }
         aux_send(0xF3); aux_send(100);                      /* back to a normal sample rate */
         aux_send(0xF4);                                     /* data reporting on */
+        }
+        kprintf("K64 gfx: PS/2 aux route %s (probe=%d)\n", tp == 0 ? "synaptics-absolute" : "relative", tp);
     }
     while (k_inb(I8042_STAT) & 1) (void)k_inb(I8042_DATA);
     ctl_cmd(0x60);
@@ -661,6 +721,28 @@ static void mouse_input(int32_t dx, int32_t dy, int absolute, uint32_t buttons, 
     if (hwheel) post_wheel(WM_MOUSEHWHEEL, hwheel, extra);
 }
 
+/* A USB HID pointer (laptop_input_native.c): the adapter's relative motion + MK button bits 0..2 (L,R,M). Thread context. */
+/* gfx_lock held (the "gfxin" thread decoding the i8042 aux stream). Same semantics as gin_pointer_inject. */
+int gin_pointer_inject_locked(int32_t dx, int32_t dy, uint8_t buttons)
+{
+    uint32_t btn;
+    if (buttons > 7u) return -1;
+    btn = (g_buttons & (MK_XBUTTON1 | MK_XBUTTON2)) | ((buttons & 1u) ? MK_LBUTTON : 0) | ((buttons & 2u) ? MK_RBUTTON : 0) |
+          ((buttons & 4u) ? MK_MBUTTON : 0);
+    g_info |= SHZ_INFO_MOUSE;
+    mouse_input(dx, dy, 0, btn, 0, 0, 0);
+    return 0;
+}
+int gin_pointer_inject(int32_t dx, int32_t dy, uint8_t buttons)
+{
+    int r;
+    if (buttons > 7u) return -1;
+    mutex_lock(&gfx_lock);
+    r = gin_pointer_inject_locked(dx, dy, buttons);
+    mutex_unlock(&gfx_lock);
+    return r;
+}
+
 #ifdef SHZ_STANDALONE
 static uint8_t mpkt[4];
 static int mpos;
@@ -668,6 +750,7 @@ static void mouse_byte(uint8_t b)
 {
     int dx, dy, dz;
     uint32_t btn;
+    if (k64_laptop_ps2_feed(b)) return;                     /* Synaptics absolute route owns this byte: never decoded twice */
     if (mpos == 0 && !(b & 0x08)) return;                   /* resynchronise: bit 3 of the first byte is always set */
     mpkt[mpos++] = b;
     if (mpos < mpkt_len) return;

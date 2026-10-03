@@ -95,4 +95,48 @@ void setup_run_native(const plat_t *, const native_setup_ops_v1_t *,
 void native_install_run(const plat_t *, const native_setup_ops_v1_t *,
                         const native_setup_request_v1_t *, native_setup_result_v1_t *);
 
+/* Explicit original-Windows-userland (SZOU v1) phase. A distinct, versioned
+ * request/ops/result triple: the strict private-native-install-payload.v1 path
+ * (native_install_run/setup_run_native) keeps its exact v1 ABI and behaviour.
+ * The SZOU image byte count and SHA come only from phase_pin, i.e. a compiled,
+ * independently admitted kernel phase record for role NATIVE_SETUP_SZOU_ROLE,
+ * never from caller JSON/INI/command line. Absent record refuses before any
+ * source open or target I/O. The source is then opened, admitted and read via
+ * the same plat file_open/ops->admit_source/check_source custody as the
+ * manifest and SIM, and staged into the installed FAT32 partition while the
+ * exclusive whole-target claim is held, through guarded plat sector I/O. */
+#define NATIVE_SETUP_SZOU_VERSION 1u
+#define NATIVE_SETUP_SZOU_ROLE 2u
+#define NATIVE_SETUP_SZOU_ROOT_MAX 64u
+typedef struct native_setup_szou_request_v1 {
+    uint32_t version, bytes;
+    const char *szou_path;   /* retained-source name; custody/pin from provider */
+    const char *target_root; /* relative 8.3 directory path on the installed volume, e.g. "WINDOWS" */
+} native_setup_szou_request_v1_t;
+typedef struct native_setup_szou_ops_v1 {
+    uint32_t version, bytes;
+    void *ctx;
+    /* 0 only when an independently compiled admission record exists for role. */
+    int (*phase_pin)(void *, unsigned role, uint64_t *bytes, uint8_t sha256[32]);
+} native_setup_szou_ops_v1_t;
+typedef struct native_setup_szou_result_v1 {
+    int ok, phase_record_present, source_admitted, preflight_verified;
+    int staged, committed, final_readback_verified, resumed_pending;
+    uint32_t entries, files_staged, files_committed, files_already_final, dirs_created;
+    uint64_t source_bytes, bytes_written, bytes_read_back;
+    uint8_t szou_sha256[32];
+    char reason[160];
+} native_setup_szou_result_v1_t;
+
+/* Full native install followed by the SZOU phase. result->ok requires both. */
+void native_install_run_original_userland(const plat_t *, const native_setup_ops_v1_t *,
+    const native_setup_szou_ops_v1_t *, const native_setup_request_v1_t *,
+    const native_setup_szou_request_v1_t *, native_setup_result_v1_t *, native_setup_szou_result_v1_t *);
+/* Setup resume: same admitted manifest/SIM claim path, no wipe or image write.
+ * Verifies the exact GPT/ESP interval already on the target, mounts that FAT32
+ * volume and rolls a persisted SZOUPEND.SYS marker forward (szou_commit_pending).
+ * No SZOU source is needed; an absent marker is reported, not invented. */
+void native_install_resume_original_userland(const plat_t *, const native_setup_ops_v1_t *,
+    const native_setup_request_v1_t *, native_setup_result_v1_t *, native_setup_szou_result_v1_t *);
+
 #endif

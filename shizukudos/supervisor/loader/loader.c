@@ -42,6 +42,7 @@
 #include "ap_prepare.h"
 #include "../native_win98/l1_vga.h"
 #include "../native_win98/persistence_config.h"
+#include "../native_win98/input_policy.h"
 
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st);
 /* A real absolute address keeps a base-relocation section in the PE image. */
@@ -526,7 +527,7 @@ static EFI_STATUS csm_boot(EFI_HANDLE image, EFI_BOOT_SERVICES *bs, const bootin
  * Physical layout (identical to kernel64/standalone/boot32.c and the Supervisor's kdom.c):
  *   0x1000 PML4, 0x2000 PDPT (low), 0x3000 PD (2 MiB pages), 0x4000 PDPT (high half)
  *   0x5000 trampoline, 0x5800 GDT, 0x5820 GDTR, 0x6000-0x6fff trampoline stack
- *   0x7000 shz_bootinfo_t, 1 MiB kernel image (+ bss up to 3 MiB), 32 MiB initrd
+ *   0x7000 shz_bootinfo_t, 1 MiB kernel image (+ bss up to 4 MiB, memholes.h SHZ_K64_KERNEL_END), 32 MiB initrd
  * Every one of those ranges is taken with AllocatePages(AllocateAddress) before any byte
  * is written, so the firmware proves nothing live (this loader, its stack, the firmware's
  * page tables) is there. Kernel64 owns guest-physical [0, ram_size), so ram_size is the end
@@ -540,9 +541,11 @@ static const char g_private_native_profile[] __attribute__((used)) =
     SHZ_PROFILE_STRING(SHZ_PRIVATE_NATIVE_ARCHIVE_BYTES) ":"
     SHZ_PROFILE_STRING(SHZ_PRIVATE_NATIVE_RAM_BYTES);
 #endif
-#define K64_KERNEL_PA 0x100000ull
-#define K64_KERNEL_WINDOW 0x200000ull           /* zeroed [1 MiB, 3 MiB): image + bss, as boot32.c */
-#define K64_KERNEL_MAX 0x100000ull              /* image file limit, as boot32.c */
+#define K64_KERNEL_PA ((uint64_t)SHZ_K64_KERNEL_GPA)
+#define K64_KERNEL_WINDOW ((uint64_t)SHZ_K64_KERNEL_WINDOW)  /* zeroed [1 MiB, 4 MiB): image + bss, as boot32.c */
+#define K64_KERNEL_MAX ((uint64_t)SHZ_K64_KERNEL_FILE_MAX)   /* image file limit (3 MiB), as boot32.c */
+_Static_assert(K64_KERNEL_PA + K64_KERNEL_WINDOW == SHZ_K64_HEAP_GPA && K64_KERNEL_MAX <= K64_KERNEL_WINDOW &&
+               !(K64_KERNEL_WINDOW & 0xfffull), "Kernel64 direct boot uses the memholes.h kernel window");
 #define K64_INITRD_PA 0x2000000ull
 #define K64_INITRD_MAX SHZ_NATIVE_ARCHIVE_DEFAULT_BYTES
 #define K64_LOW_PA 0x1000ull
@@ -808,7 +811,7 @@ static EFI_STATUS k64_prepare(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
         root->close(root);
         say("REFUSED: \\SHZDOS\\KERNEL64S.BIN is ");
         say_dec(g_k64.ksize);
-        say(" bytes; the kernel image (file + bss) must fit [1 MiB, 3 MiB), at most 1 MiB of file.\n"
+        say(" bytes; the kernel image (file + bss) must fit [1 MiB, 4 MiB), at most 3 MiB of file.\n"
             "Nothing was started. Returning to firmware.\n");
         return EFI_LOAD_ERROR;
     }
@@ -880,8 +883,8 @@ static EFI_STATUS k64_prepare(EFI_HANDLE image, EFI_BOOT_SERVICES *bs)
         say_hex(g_k64.plan.at);
         if (!g_k64.plan.at_is_size)
             say_owner(map, map_size, stride, g_k64.plan.at, g_k64.plan.at + 0x1000);
-        say(".\nKernel64 needs RAM usable after ExitBootServices at [0x1000, 0x8000) (boot structures), [1 MiB, 3 MiB) "
-            "(kernel image) and under its initial RAM image at 32 MiB, at least 8 MiB of its heap window [3 MiB, "
+        say(".\nKernel64 needs RAM usable after ExitBootServices at [0x1000, 0x8000) (boot structures), [1 MiB, 4 MiB) "
+            "(kernel image) and under its initial RAM image at 32 MiB, at least 8 MiB of its heap window [4 MiB, "
             "15 MiB), and 64 MiB in all; other firmware holes are kept out of its allocators.\n"
             "Nothing was started. Returning to firmware.\n");
         bs->free_pool(map);
@@ -1273,6 +1276,9 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     if(g_policy.win98_persistence && g_policy.mode!=BOOT_MODE_SUPERVISOR){
         say("REFUSED: explicit persistence policy cannot switch boot mode.\n");return EFI_INVALID_PARAMETER;
     }
+    if(g_policy.win98_input && g_policy.mode!=BOOT_MODE_SUPERVISOR){
+        say("REFUSED: explicit native input policy cannot switch boot mode.\n");return EFI_INVALID_PARAMETER;
+    }
     if (g_policy.mode == BOOT_MODE_CSM)
         return csm_boot(image, bs, &g_policy, "mode=csm");
 
@@ -1355,8 +1361,14 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     if(g_policy.win98_vga && !native_win98){
         say("REFUSED: explicit VGA requires installed-Win98 opt-in config.\n");return EFI_INVALID_PARAMETER;
     }
+    if(g_policy.k64_display && native_win98){
+        say("REFUSED: k64_display=yes cannot share the display with the installed-Win98 profile.\n");return EFI_INVALID_PARAMETER;
+    }
     if(g_policy.win98_persistence && !native_win98){
         say("REFUSED: explicit persistence requires installed-Win98 opt-in config.\n");return EFI_INVALID_PARAMETER;
+    }
+    if(g_policy.win98_input && (!native_win98 || !g_policy.win98_vga)){
+        say("REFUSED: explicit native input requires the installed-Win98 VGA opt-in.\n");return EFI_INVALID_PARAMETER;
     }
 
     /* 2. Display. */
@@ -1399,7 +1411,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
         static const struct { const char *name; uint64_t max; } wanted[] = {
             {"KERNEL32.BIN", 8ull << 20}, {"KERNEL64.BIN", 16ull << 20}, {"WIN64.IMG", 64ull << 20}, {"SEABIOS.BIN", W98_ROM_BYTES},
             {"VGACFG.BIN",sizeof(w98_vga_config_t)}, {"VGAROM.BIN",W98_VGA_ROM_BYTES},
-            {"W98PERS.BIN",sizeof(w98_persist_config_t)}};
+            {"W98PERS.BIN",sizeof(w98_persist_config_t)}, {"W98INPT.BIN",sizeof(w98_input_policy_t)}};
         size_t w, slot = 0;
         for (w = 0; w < sizeof wanted / sizeof wanted[0]; ++w) {
             uint64_t base = 0, size = 0;
@@ -1407,6 +1419,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
             if (w == 3 && !native_win98) continue;
             if ((w == 4 || w == 5) && !g_policy.win98_vga) continue;
             if (w == 6 && !g_policy.win98_persistence) continue;
+            if (w == 7 && !g_policy.win98_input) continue;
             status = load_file(image, bs, wanted[w].name, &base, &size, wanted[w].max);
             if (status == EFI_NOT_FOUND && w < 4 && (w != 3 || !native_win98))
                 continue;
@@ -1422,6 +1435,9 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
             }
             if(w==6 && size!=sizeof(w98_persist_config_t)){
                 say("REFUSED: exact separate 192-byte persistence binding required.\n");return EFI_INVALID_PARAMETER;
+            }
+            if(w==7 && size!=sizeof(w98_input_policy_t)){
+                say("REFUSED: exact separate 96-byte input policy required.\n");return EFI_INVALID_PARAMETER;
             }
             if(slot>=SHZ_MAX_BLOBS){say("REFUSED: Supervisor named blob slots exhausted.\n");return EFI_INVALID_PARAMETER;}
             for (k = 0; wanted[w].name[k] && k < 15; ++k)
@@ -1463,6 +1479,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     info->guest_ram_base = guest;
     info->guest_ram_size = (uint64_t)(native_win98 ? W98_RAM_MIB : GUEST_RAM_MIB) << 20;
     if (native_win98) info->loader_flags |= SHZ_LOADER_NATIVE_WIN98;
+    if (g_policy.k64_display) info->loader_flags |= SHZ_LOADER_K64_DISPLAY;   /* Supervisor validates + grants */
     info->disk_base = disk_base;
     info->disk_size = disk_size;
     info->region_base = SHZ_REGION_BASE;

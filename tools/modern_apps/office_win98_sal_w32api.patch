@@ -1,0 +1,64 @@
+--- a/sal/osl/w32/socket.cxx
++++ b/sal/osl/w32/socket.cxx
+@@ -34,6 +34,7 @@
+ #include <comphelper/windowserrorstring.hxx>
+ 
+ #include "sockimpl.hxx"
++#include "win98_offsal2.h"
+ 
+ /*
+     oslSocketAddr is a pointer to a Berkeley struct sockaddr.
+--- a/sal/osl/w32/file_dirvol.cxx
++++ b/sal/osl/w32/file_dirvol.cxx
+@@ -28,6 +28,7 @@
+ #include "file_error.hxx"
+ 
+ #include "path_helper.hxx"
++#include "win98_offsal2.h"
+ 
+ #include <rtl/alloc.h>
+ #include <rtl/ustring.hxx>
+--- /dev/null
++++ b/sal/osl/w32/win98_offsal2.h
+@@ -0,0 +1,41 @@
++/* SPDX-License-Identifier: MPL-2.0
++ * Windows 98 redirection of Windows 2000/XP/Vista APIs used by sal/osl/w32 socket.cxx and file_dirvol.cxx
++ * to the OFFSAL provider (ntwin32/office_sal). Active only with LIBO_WIN98=1. Failures are truthful
++ * Win32/WSA errors (e.g. ERROR_NO_UNICODE_TRANSLATION for paths the ANSI code page cannot hold exactly).
++ */
++#pragma once
++#if defined(LIBO_WIN98) && LIBO_WIN98
++#include <windows.h>
++extern "C" {
++HANDLE WINAPI OfsCreateFileW(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
++DWORD WINAPI OfsGetFileAttributesW(LPCWSTR);
++BOOL WINAPI OfsSetFileAttributesW(LPCWSTR, DWORD);
++BOOL WINAPI OfsCreateDirectoryW(LPCWSTR, LPSECURITY_ATTRIBUTES);
++BOOL WINAPI OfsRemoveDirectoryW(LPCWSTR);
++HANDLE WINAPI OfsFindFirstFileW(LPCWSTR, LPWIN32_FIND_DATAW);
++BOOL WINAPI OfsFindNextFileW(HANDLE, LPWIN32_FIND_DATAW);
++DWORD WINAPI OfsGetLongPathNameW(LPCWSTR, LPWSTR, DWORD);
++UINT WINAPI OfsGetDriveTypeW(LPCWSTR);
++BOOL WINAPI OfsGetVolumeNameForVolumeMountPointW(LPCWSTR, LPWSTR, DWORD);
++INT WINAPI OfsInetPtonW(INT, LPCWSTR, PVOID);
++LPCWSTR WINAPI OfsInetNtopW(INT, const VOID *, LPWSTR, DWORD);
++INT WINAPI OfsGetAddrInfoW(LPCWSTR, LPCWSTR, const void *, void **);
++VOID WINAPI OfsFreeAddrInfoW(void *);
++INT WINAPI OfsGetNameInfoW(const void *, INT, LPWSTR, DWORD, LPWSTR, DWORD, INT);
++}
++#define CreateFileW OfsCreateFileW
++#define GetFileAttributesW OfsGetFileAttributesW
++#define SetFileAttributesW OfsSetFileAttributesW
++#define CreateDirectoryW OfsCreateDirectoryW
++#define RemoveDirectoryW OfsRemoveDirectoryW
++#define FindFirstFileW OfsFindFirstFileW
++#define FindNextFileW OfsFindNextFileW
++#define GetLongPathNameW OfsGetLongPathNameW
++#define GetDriveTypeW OfsGetDriveTypeW
++#define GetVolumeNameForVolumeMountPointW OfsGetVolumeNameForVolumeMountPointW
++#define InetPtonW OfsInetPtonW
++#define InetNtopW OfsInetNtopW
++#define GetAddrInfoW(n, s, h, r) OfsGetAddrInfoW((n), (s), (h), reinterpret_cast<void **>(r))
++#define FreeAddrInfoW(a) OfsFreeAddrInfoW(a)
++#define GetNameInfoW(sa, l, h, hl, s, sl, f) OfsGetNameInfoW((sa), (l), (h), (hl), (s), (sl), (f))
++#endif

@@ -54,7 +54,7 @@ static int32_t hcall(uint32_t op, uint32_t a, uint32_t b, uint32_t *ebx, uint32_
 static void *map_phys(uint32_t phys, uint32_t bytes)
 { CHECK(phys == 0xe0200000u && bytes == sizeof channel); return channel; }
 static const struct ntwv_pages pages = { check, lock, unlock, ptes, enter, leave, write_alias, read_alias };
-static const struct ntwv_hv hv = { present, hcall, map_phys };
+static const struct ntwv_hv hv = { present, hcall, map_phys, 0 };
 static const struct ntwv_dioc request = { .code = NTWV_IOCTL_W64_OPEN,
     .output = 0x00500000, .output_bytes = 64, .returned = 0x00600000 };
 static void *owner(void *unused)

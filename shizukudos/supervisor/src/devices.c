@@ -8,6 +8,7 @@ static dev_native_observation_t native_observation;
 volatile int dev_a20_dirty;
 void (*dev_uart_tx_hook)(uint8_t byte);
 
+static void bump_u32(uint32_t *v){if(*v!=UINT32_MAX)++*v;}
 const dev_native_observation_t *dev_native_observation(void)
 {
     return native_win98?&native_observation:0;
@@ -383,6 +384,10 @@ static uint8_t kbc_out, kbc_cmd_pending, kbc_cmd, kbc_config = 0x45;
 static uint8_t kbc_out_full;
 static uint8_t a20_gate = 1;
 static uint8_t kbc_fifo[16],kbc_fifo_aux[16],kbc_fifo_head,kbc_fifo_count;
+/* Per-queued-byte provenance: FIFO_AUX = pointer port; FIFO_HOST = derived from
+ * a host input event (a command reply/ACK/BAT/ID never carries it). */
+#define FIFO_AUX 1u
+#define FIFO_HOST 2u
 static uint8_t keyboard_pending,keyboard_scanset,keyboard_scanning,keyboard_leds,keyboard_typematic;
 static struct dev_native_pointer_ops pointer_ops;
 static uint8_t pointer_bound,pointer_pending,pointer_enabled,pointer_remote,pointer_wrap;
@@ -392,7 +397,54 @@ static int32_t pointer_x,pointer_y;
 static int32_t pointer_resolution_x,pointer_resolution_y;
 static uint64_t pointer_last_tsc;
 static void native_keyboard_irq(void);
+static void keyboard_purge_host(void);
 static void pointer_flush(uint64_t);
+/* Optional owned keyboard source: whole raw set-2 key sequences wait in a
+ * bounded ring (a real keyboard's buffer) and are encoded for the guest's
+ * current scan set and 8042 translation only when they enter the FIFO. */
+static struct dev_native_keyboard_ops keyboard_ops;
+static uint8_t keyboard_bound,key_ring[16][8],key_ring_len[16],key_ring_head,key_ring_count;
+#define KBC_REPLY_RESERVE 4u
+/* IBM 8042 translation table (also set 2 -> set 1); identity above 0x87. */
+static const uint8_t kbc_translate[0x88]={
+    0xff,0x43,0x41,0x3f,0x3d,0x3b,0x3c,0x58,0x64,0x44,0x42,0x40,0x3e,0x0f,0x29,0x59,
+    0x65,0x38,0x2a,0x70,0x1d,0x10,0x02,0x5a,0x66,0x71,0x2c,0x1f,0x1e,0x11,0x03,0x5b,
+    0x67,0x2e,0x2d,0x20,0x12,0x05,0x04,0x5c,0x68,0x39,0x2f,0x21,0x14,0x13,0x06,0x5d,
+    0x69,0x31,0x30,0x23,0x22,0x15,0x07,0x5e,0x6a,0x72,0x32,0x24,0x16,0x08,0x09,0x5f,
+    0x6b,0x33,0x25,0x17,0x18,0x0b,0x0a,0x60,0x6c,0x34,0x35,0x26,0x27,0x19,0x0c,0x61,
+    0x6d,0x73,0x28,0x74,0x1a,0x0d,0x62,0x6e,0x3a,0x36,0x1c,0x1b,0x75,0x2b,0x63,0x76,
+    0x55,0x56,0x77,0x78,0x79,0x7a,0x0e,0x7b,0x7c,0x4f,0x7d,0x4b,0x47,0x7e,0x7f,0x6f,
+    0x52,0x53,0x50,0x4c,0x4d,0x48,0x01,0x45,0x57,0x4e,0x51,0x4a,0x37,0x49,0x46,0x54,
+    0x80,0x81,0x82,0x41,0x54,0x85,0x86,0x87};
+static unsigned kbc_translate_fold(const uint8_t *in,unsigned n,uint8_t *out)
+{
+    unsigned o=0;uint8_t release=0;
+    for(unsigned i=0;i<n;++i){
+        if(in[i]==0xf0){release=0x80;continue;}
+        out[o++]=(uint8_t)((in[i]<sizeof kbc_translate?kbc_translate[in[i]]:in[i])|release);release=0;
+    }
+    return o;
+}
+static void keyboard_clear(void){key_ring_head=key_ring_count=0;}
+static int keyboard_valid(void)
+{
+    if(!keyboard_bound)return 0;
+    if(keyboard_ops.validate(keyboard_ops.context)==SHZ_DRIVER_OK)return 1;
+    keyboard_bound=0;keyboard_clear();keyboard_purge_host(); /* undelivered events never outlive their source */
+    return 0;
+}
+int dev_native_keyboard_attach(const struct dev_native_keyboard_ops *o)
+{
+    if(!native_win98 || !o || !o->context || !o->validate || !o->poll)return SHZ_INVALID;
+    if(keyboard_ops.context)return SHZ_BUSY;
+    if(o->validate(o->context)!=SHZ_DRIVER_OK)return SHZ_REVOKED;
+    keyboard_ops=*o;keyboard_clear();keyboard_purge_host();keyboard_bound=1;return SHZ_DRIVER_OK;
+}
+int dev_native_keyboard_detach(void *context)
+{
+    if(!native_win98 || !context || keyboard_ops.context!=context)return SHZ_INVALID;
+    keyboard_bound=0;keyboard_clear();keyboard_purge_host();memset(&keyboard_ops,0,sizeof keyboard_ops);return SHZ_DRIVER_OK;
+}
 static void pointer_defaults(void)
 {
     pointer_pending=pointer_enabled=pointer_remote=pointer_wrap=pointer_scale=0;
@@ -400,17 +452,32 @@ static void pointer_defaults(void)
     pointer_resolution_x=pointer_resolution_y=0;
     pointer_buttons=pointer_reported_buttons=0;pointer_last_count=0;pointer_last_tsc=rdtsc();
 }
-static void pointer_remove_bytes(void)
+/* Bounded purge of queued bytes whose (flags&mask)==value. Retained bytes keep
+ * order and provenance; a line is lowered only when its data was removed and the
+ * new head re-asserts the line it belongs to, so OBF/IRQ always match the FIFO. */
+static void kbc_fifo_purge(uint8_t mask,uint8_t value)
 {
-    uint8_t retained[16],count=0;
+    uint8_t keep[16],kflag[16],count=0,dropped_aux=0,dropped_kbd=0;
     for(unsigned i=0;i<kbc_fifo_count;++i) {
-        unsigned slot=(kbc_fifo_head+i)%sizeof kbc_fifo;
-        if(!kbc_fifo_aux[slot])retained[count++]=kbc_fifo[slot];
+        const unsigned slot=(kbc_fifo_head+i)%sizeof kbc_fifo;
+        if((kbc_fifo_aux[slot]&mask)==value) {
+            if(kbc_fifo_aux[slot]&FIFO_AUX)dropped_aux=1;else dropped_kbd=1;
+            continue;
+        }
+        keep[count]=kbc_fifo[slot];kflag[count++]=kbc_fifo_aux[slot];
     }
-    memcpy(kbc_fifo,retained,count);memset(kbc_fifo_aux,0,sizeof kbc_fifo_aux);
+    if(!dropped_aux && !dropped_kbd)return;
+    memcpy(kbc_fifo,keep,count);memcpy(kbc_fifo_aux,kflag,count);
+    memset(kbc_fifo+count,0,sizeof kbc_fifo-count);memset(kbc_fifo_aux+count,0,sizeof kbc_fifo_aux-count);
     kbc_fifo_head=0;kbc_fifo_count=count;
-    pic[1].irr&=(uint8_t)~0x10;pic_refresh_cascade();
+    if(dropped_aux)pic[1].irr&=(uint8_t)~0x10;
+    if(dropped_kbd)pic[0].irr&=(uint8_t)~0x02;
+    pic_refresh_cascade();
+    native_keyboard_irq();
 }
+static void pointer_remove_bytes(void){kbc_fifo_purge(FIFO_AUX,FIFO_AUX);}
+/* Host-derived keyboard bytes only; inner command ACKs/replies stay queued. */
+static void keyboard_purge_host(void){kbc_fifo_purge(FIFO_AUX|FIFO_HOST,FIFO_HOST);}
 static int pointer_valid(void)
 {
     if(!pointer_bound)return 0;
@@ -440,11 +507,12 @@ void dev_native_win98_enable(void)
     kbc_fifo_head=kbc_fifo_count=0;kbc_cmd_pending=0;kbc_out_full=0;kbc_config=0x45;
     keyboard_pending=0;keyboard_scanset=2;keyboard_scanning=1;keyboard_leds=0;keyboard_typematic=0x2b;
     pointer_bound=0;memset(&pointer_ops,0,sizeof pointer_ops);pointer_defaults();
+    keyboard_bound=0;memset(&keyboard_ops,0,sizeof keyboard_ops);keyboard_clear();
 }
 static void native_keyboard_irq(void)
 {
     if(!kbc_fifo_count)return;
-    if(kbc_fifo_aux[kbc_fifo_head]) {
+    if(kbc_fifo_aux[kbc_fifo_head]&FIFO_AUX) {
         if((kbc_config&2) && !(kbc_config&0x20))dev_irq_raise(12);
     } else if((kbc_config&1) && !(kbc_config&0x10))dev_irq_raise(1);
 }
@@ -461,9 +529,9 @@ void dev_a20_set(int enabled)
 static uint8_t kbc_read(uint16_t port)
 {
     if(native_win98) {
-        (void)pointer_valid();
+        (void)pointer_valid();(void)keyboard_valid();
         if(port==0x64)return (uint8_t)(0x14|(kbc_fifo_count?1:0)|
-            (kbc_fifo_count && kbc_fifo_aux[kbc_fifo_head]?0x20:0));
+            (kbc_fifo_count && (kbc_fifo_aux[kbc_fifo_head]&FIFO_AUX)?0x20:0));
         if(!kbc_fifo_count)return 0;
         const uint8_t value=kbc_fifo[kbc_fifo_head];
         kbc_fifo_head=(uint8_t)((kbc_fifo_head+1)%sizeof kbc_fifo);--kbc_fifo_count;
@@ -486,7 +554,7 @@ static void kbc_reply(uint8_t v)
     kbc_fifo[slot]=v;kbc_fifo_aux[slot]=0;++kbc_fifo_count;
     native_keyboard_irq();
 }
-static int pointer_reply(const uint8_t *bytes,unsigned count,int remember)
+static int pointer_reply(const uint8_t *bytes,unsigned count,int remember,int host)
 {
     if(count>sizeof kbc_fifo-kbc_fifo_count) {
         if(native_observation.kbc_reply_dropped!=UINT32_MAX)++native_observation.kbc_reply_dropped;
@@ -494,7 +562,7 @@ static int pointer_reply(const uint8_t *bytes,unsigned count,int remember)
     }
     for(unsigned i=0;i<count;++i) {
         unsigned slot=(kbc_fifo_head+kbc_fifo_count)%sizeof kbc_fifo;
-        kbc_fifo[slot]=bytes[i];kbc_fifo_aux[slot]=1;++kbc_fifo_count;
+        kbc_fifo[slot]=bytes[i];kbc_fifo_aux[slot]=(uint8_t)(FIFO_AUX|(host?FIFO_HOST:0));++kbc_fifo_count;
     }
     if(remember) {
         /* ACK and following ID/BAT/status/data are separate wire packets.
@@ -523,7 +591,7 @@ static int pointer_packet(int ack)
     const int32_t sx=pointer_scaled(x),sy=pointer_scaled(y);
     data[0]=0xfa;data[offset]=(uint8_t)(8|pointer_buttons|(sx<0?16:0)|(sy<0?32:0));
     data[offset+1]=(uint8_t)sx;data[offset+2]=(uint8_t)sy;
-    int r=pointer_reply(data,offset+3,1);if(r)return r;
+    int r=pointer_reply(data,offset+3,1,!ack);if(r)return r;
     pointer_x-=x;pointer_y-=y;pointer_reported_buttons=pointer_buttons;pointer_last_tsc=rdtsc();
     return SHZ_DRIVER_OK;
 }
@@ -557,16 +625,16 @@ static void native_pointer_command(uint8_t value)
 {
     uint8_t data[4]={0xfa,0,0,0};unsigned count=1;
     if(!pointer_valid())return; /* Never manufacture an installed input source. */
-    if(pointer_wrap && value!=0xff && value!=0xec){data[0]=value;(void)pointer_reply(data,1,1);return;}
+    if(pointer_wrap && value!=0xff && value!=0xec){data[0]=value;(void)pointer_reply(data,1,1,0);return;}
     if(value==0xfe) {
-        if(pointer_last_count)(void)pointer_reply(pointer_last,pointer_last_count,0);
-        else {data[0]=0xfe;(void)pointer_reply(data,1,0);}return;
+        if(pointer_last_count)(void)pointer_reply(pointer_last,pointer_last_count,0,0);
+        else {data[0]=0xfe;(void)pointer_reply(data,1,0,0);}return;
     }
     if(pointer_pending) {
         const int rate=value==10 || value==20 || value==40 || value==60 || value==80 || value==100 || value==200;
         const int accepted=pointer_pending==0xe8?value<=3:rate;
-        if(!accepted){data[0]=0xfe;(void)pointer_reply(data,1,0);return;}
-        if(pointer_reply(data,1,1))return;
+        if(!accepted){data[0]=0xfe;(void)pointer_reply(data,1,0,0);return;}
+        if(pointer_reply(data,1,1,0))return;
         if(pointer_pending==0xe8)pointer_resolution=value;else pointer_rate=value;
         pointer_pending=0;pointer_x=pointer_y=pointer_resolution_x=pointer_resolution_y=0;return;
     }
@@ -580,9 +648,9 @@ static void native_pointer_command(uint8_t value)
     case 0xeb:(void)pointer_packet(1);return;
     case 0xe6:case 0xe7:case 0xe8:case 0xea:case 0xee:case 0xec:
     case 0xf0:case 0xf3:case 0xf4:case 0xf5:case 0xf6:break;
-    default:data[0]=0xfe;(void)pointer_reply(data,1,0);return;
+    default:data[0]=0xfe;(void)pointer_reply(data,1,0,0);return;
     }
-    if(pointer_reply(data,count,1))return; /* No state transition on partial response. */
+    if(pointer_reply(data,count,1,0))return; /* No state transition on partial response. */
     if(value==0xff || value==0xf6) {
         /* Defaults must keep the just-published packet available to RESEND. */
         pointer_defaults();unsigned start=count>1?1:0;
@@ -600,7 +668,7 @@ static void native_keyboard_command(uint8_t value)
         const uint8_t command=keyboard_pending;keyboard_pending=0;
         if(command==0xf0) {
             if(value==0){kbc_reply(0xfa);kbc_reply(keyboard_scanset);}
-            else if(value<=3){keyboard_scanset=value;kbc_reply(0xfa);}else kbc_reply(0xfe);
+            else if(value<=3){keyboard_scanset=value;keyboard_clear();kbc_reply(0xfa);}else kbc_reply(0xfe);
         } else if(command==0xed) {
             if(value<=7){keyboard_leds=value;kbc_reply(0xfa);}else kbc_reply(0xfe);
         } else if(command==0xf3) {
@@ -610,7 +678,7 @@ static void native_keyboard_command(uint8_t value)
     }
     switch(value) {
     case 0xff: /* Genuine keyboard wire reset: ACK then BAT, no host keystroke. */
-        keyboard_scanset=2;keyboard_scanning=1;keyboard_leds=0;keyboard_typematic=0x2b;
+        keyboard_scanset=2;keyboard_scanning=1;keyboard_leds=0;keyboard_typematic=0x2b;keyboard_clear();
         kbc_reply(0xfa);kbc_reply(0xaa);break;
     case 0xf2:kbc_reply(0xfa);kbc_reply(0xab);kbc_reply(0x83);break;
     case 0xee:kbc_reply(0xee);break;
@@ -618,8 +686,42 @@ static void native_keyboard_command(uint8_t value)
     case 0xf4:keyboard_scanning=1;kbc_reply(0xfa);break;
     case 0xf5:case 0xf6:
         keyboard_scanset=2;keyboard_leds=0;keyboard_typematic=0x2b;
-        keyboard_scanning=value==0xf6;kbc_reply(0xfa);break;
+        keyboard_scanning=value==0xf6;keyboard_clear();kbc_reply(0xfa);break;
     default:kbc_reply(0xfe);break; /* Unsupported command must not claim ACK. */
+    }
+}
+int dev_native_keyboard_input(void *context,const uint8_t *set2,unsigned bytes)
+{
+    if(!native_win98 || !context || !keyboard_bound || keyboard_ops.context!=context)return SHZ_BUSY;
+    if(!keyboard_valid())return SHZ_REVOKED;
+    if(!set2 || !bytes || bytes>sizeof key_ring[0])return SHZ_INVALID;
+    if(!keyboard_scanning){bump_u32(&native_observation.key_dropped);return SHZ_UNSUPPORTED;} /* F5: device discards */
+    if(key_ring_count==sizeof key_ring/sizeof key_ring[0]){bump_u32(&native_observation.key_dropped);return SHZ_CAPACITY;}
+    const unsigned slot=(key_ring_head+key_ring_count)%(sizeof key_ring/sizeof key_ring[0]);
+    memcpy(key_ring[slot],set2,bytes);key_ring_len[slot]=(uint8_t)bytes;++key_ring_count;
+    return SHZ_DRIVER_OK;
+}
+/* Keyboard wire bytes for the guest-selected set, then the inner 8042's own
+ * translation (config bit 6). Set 3 has no faithful mapping here: refused. */
+static int keyboard_encode(const uint8_t *set2,unsigned bytes,uint8_t out[16])
+{
+    uint8_t wire[16];unsigned count;
+    if(keyboard_scanset==2){memcpy(wire,set2,bytes);count=bytes;}
+    else if(keyboard_scanset==1)count=kbc_translate_fold(set2,bytes,wire);
+    else return -1;
+    if(kbc_config&0x40)return (int)kbc_translate_fold(wire,count,out);
+    memcpy(out,wire,count);return (int)count;
+}
+static void keyboard_flush(void)
+{
+    while(keyboard_bound && key_ring_count && !(kbc_config&0x10)) {
+        uint8_t bytes[16];const int count=keyboard_encode(key_ring[key_ring_head],key_ring_len[key_ring_head],bytes);
+        if(count>0 && (unsigned)count>sizeof kbc_fifo-KBC_REPLY_RESERVE-kbc_fifo_count)return; /* whole sequence later */
+        key_ring_head=(uint8_t)((key_ring_head+1)%(sizeof key_ring/sizeof key_ring[0]));--key_ring_count;
+        if(count<=0){bump_u32(&native_observation.key_dropped);continue;}
+        for(int i=0;i<count;++i){const unsigned slot=(kbc_fifo_head+kbc_fifo_count)%sizeof kbc_fifo;
+            kbc_fifo[slot]=bytes[i];kbc_fifo_aux[slot]=FIFO_HOST;++kbc_fifo_count;}
+        bump_u32(&native_observation.key_delivered);native_keyboard_irq();
     }
 }
 static void native_kbc_write(uint16_t port,uint8_t value)
@@ -827,6 +929,8 @@ int dev_pio_out(uint16_t port, int size, uint32_t value)
 
 void dev_poll(uint64_t now)
 {
+    if(native_win98 && keyboard_valid())(void)keyboard_ops.poll(keyboard_ops.context);
+    if(native_win98)keyboard_flush();
     if(native_win98 && pointer_valid()) {
         (void)pointer_ops.poll(pointer_ops.context);
         pointer_flush(now);

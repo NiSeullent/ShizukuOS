@@ -344,7 +344,7 @@ jobs:
 
       - name: Boot Kernel64 standalone under QEMU TCG with self-tests and every T_*.EXE Win64 app
         timeout-minutes: 15
-        run: python3 shizukudos/tests/run_k64_standalone.py --accel tcg --timeout 600
+        run: python3 shizukudos/tests/run_k64_standalone.py --accel tcg --display bochs --timeout 600
 
       - name: NT driver host under QEMU TCG (load unmodified .sys, IRP/DPC/timer/PCI + user reachability)
         timeout-minutes: 15

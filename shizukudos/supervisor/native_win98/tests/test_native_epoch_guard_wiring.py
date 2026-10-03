@@ -46,7 +46,8 @@ class GuardWiringTests(unittest.TestCase):
     def gate(self, peer, guard, deadline=None):
         gate = object.__new__(host.HostGrant)
         gate.peer = peer
-        gate.attempt = types.SimpleNamespace(original_deadline_ns=deadline or time.monotonic_ns() + 500_000_000)
+        gate.attempt = types.SimpleNamespace(original_deadline_ns=deadline or time.monotonic_ns() + 500_000_000,
+                                             nonce=bytes(range(32)))  # transfer() redacts diagnostics with the live nonce
         gate.exchange_stop_ns = gate.original_exchange_stop_ns = None
         gate.transport_calls = gate.grant_bytes_written = 0
         gate.guard = guard
@@ -376,7 +377,8 @@ class FADAGuardCompatibilityTests(unittest.TestCase):
         gate = object.__new__(self.epoch.HostGrant)
         gate.peer = left
         gate.transport_calls = gate.grant_bytes_written = 0
-        gate.attempt = type('Deadline', (), {'original_deadline_ns': time.monotonic_ns() + 500_000_000})()
+        gate.attempt = type('Deadline', (), {'original_deadline_ns': time.monotonic_ns() + 500_000_000,
+                                              'nonce': bytes(range(32))})()  # transfer() redacts diagnostics with the live nonce
         ticks = []
         gate.check = lambda: None
         def guard():

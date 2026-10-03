@@ -14,6 +14,24 @@ been painted. Cancel, close and failed display issue no authentication request.
 The entry buffer and retired display labels are cleared on every prompt exit;
 the client clears its request after the kernel call.
 
+Consent expires: the displayed request is valid for `SHZ_ELEVATE_CONSENT_MS`
+(120 s, `flow.h`) measured with GetTickCount. A one-second USER timer and a
+second check at acceptance enforce it, so a delayed timer cannot extend consent;
+if the timer cannot be created the prompt refuses. Outcomes are distinct exit
+codes: 0 started, 1 kernel refusal (wrong credential, lockout, non-admin or
+image denied are one kernel status and are not distinguished), 2 usage,
+3 cancelled, 4 expired, 5 not displayable, 6 inconsistent reply. Cancelled,
+expired and undisplayable requests never reach the kernel. After a reported
+launch the client re-queries its own subject from the kernel and requires that
+the child holds a fresh session (elevation: high integrity administrator) that
+the caller does not; otherwise it reports the child as untrusted (exit 6). The
+child is already running at that point; this is a detection, not a rollback.
+
+`sh shizukudos/win64/apps/elevate/host/run_host.sh` compiles the actual
+main/prompt/consent/secret bodies (gcc, clang+ASan/UBSan) against host USER/GDI,
+clock and IPC adapters and checks success, refusal, cancel, expiry (timer,
+acceptance-time, tick wraparound), timer failure and inconsistent replies.
+
 `python3 shizukudos/tests/run_elevate_consent_host.py` runs the literal client,
 prompt, consent builder and secret-buffer code with GCC and Clang sanitizers.
 USER/GDI, events and ASCII conversion are explicit host adapters; the IPC adapter

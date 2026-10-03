@@ -1,6 +1,6 @@
 # 문서 안내
 
-Win98-Modern의 제품명은 **ShizukuOS**입니다. 처음에는 목적에 맞는 안내를 읽고, 구현이나 검증이 필요할 때 원본 기록으로 이동하세요.
+**ShizukuOS**가 최상위 운영체제이며 **ShizukuOS Core**가 공통 실행 기반입니다. 처음에는 목적에 맞는 안내를 읽고, 구현이나 검증이 필요할 때 원본 기록으로 이동하세요.
 
 ## 사용·개발 시작
 
@@ -19,7 +19,9 @@ Win98-Modern의 제품명은 **ShizukuOS**입니다. 처음에는 목적에 맞�
 
 | 범위 | 문서 |
 | --- | --- |
-| ShizukuDOS의 DOS 교체와 실제 Windows 98 연결 | [아키텍처 감사](SHIZUKUDOS_WINDOWS98_ARCHITECTURE.md) · [보완 설계](SHIZUKUOS_ARCHITECTURE_SUPPLEMENT.md) |
+| 최상위 시스템 정의 | [Absolute Architecture Definition](SHIZUKUOS_ARCHITECTURE_CONTRACT.md) |
+| 현재 구현과 전체 승인 | [통합 아키텍처](INTEGRATED_ARCHITECTURE.md) · [목표와 상태](SHIZUKUOS_TARGET.md) · [전체 승인](SHIZUKUOS_FULL_GOAL_ACCEPTANCE.md) |
+| 기존 Windows 98 호환 프로필의 기록 | [기존 아키텍처 감사](SHIZUKUDOS_WINDOWS98_ARCHITECTURE.md) · [증거 보완](SHIZUKUOS_ARCHITECTURE_SUPPLEMENT.md) |
 | Kernel32·Kernel64·Supervisor | [ShizukuDOS](../shizukudos/README.md) |
 | 전체 API 이식과 기능 묶음 | [API 작업 방식](API_PORTING_CAMPAIGN.md) · [호환성 기록](COMPATIBILITY.md) |
 | 펌웨어 GOP와 Windows 98 그래픽 | [펌웨어 안내](../shizukudos/csm/FIRMWARE_GOP.md) · [GOP 드라이버](../drivers/shizuku_gop/README.md) |
@@ -35,6 +37,6 @@ Win98-Modern의 제품명은 **ShizukuOS**입니다. 처음에는 목적에 맞�
 - [미리보기 증거](PREVIEW_EVIDENCE.md): 화면과 검증 기록의 연결·공개 범위.
 - [VM 기록](../vm/README.md), [0.1.7](RELEASE_0_1_7_CHECKPOINT.md), [0.1.8](RELEASE_0_1_8_CHECKPOINT.md): 기존 KernelEx 경로와 과거 릴리스 결과.
 
-호스트 빌드, 정적 PE 검사, 실제 Windows 98 호출, 앱 창 표시, 앱 기능 성공은 각각 다른 결과입니다. 원래 DOS로 부팅한 Windows 98과 독립 커널 시험을 ShizukuDOS 교체 완료로 합산하지 않습니다.
+호스트 빌드, 정적 PE 검사, 실제 Windows 98 호출, 앱 창 표시, 앱 기능 성공은 각각 다른 결과입니다. 과거 Windows 98 제어군과 독립 커널·호스트 시험을 현재 ShizukuOS 기능 완료로 합산하지 않습니다. 실제 ShizukuOS의 실행 증거가 필요합니다.
 
 상세 시험·실패·수정 기록은 원본 문서에 보존합니다. 날짜가 있는 기록은 해당 시점의 입력과 결과를 설명하므로 현재 상태를 확인할 때는 아키텍처·앱 인계 문서도 함께 읽으세요.

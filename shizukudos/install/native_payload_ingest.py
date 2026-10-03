@@ -632,6 +632,38 @@ def archive_entries(raw):
     return entries
 
 
+PRIVATE_MEMBERS=('WIN98','WINDOWS','WIN98CFG.BIN','W98PERS.BIN','VGACFG.BIN','VGAROM.BIN','W98INPT.BIN')
+
+
+def _short_alias_of_private(part):
+    """True for NAME~N[.EXT] where NAME is a 1..6 char prefix of a protected base and EXT matches.
+
+    Conservative: refuses a possible DOS 8.3 alias; unrelated names (README~1.TXT) pass."""
+    base,dot,ext=part.partition('.')
+    if '.' in ext or '~' not in base:
+        return False
+    stem,tilde,num=base.rpartition('~')
+    if not (stem and num.isdigit() and 1<=len(stem)<=6):
+        return False
+    for protected in PRIVATE_MEMBERS:
+        pbase,pdot,pext=protected.partition('.')
+        if pext==ext and pbase.startswith(stem) and (dot==pdot):
+            return True
+    return False
+
+
+def private_member(name):
+    """True when any path component names a private native/Windows member.
+
+    Case, backslash separators, FAT trailing dot/space aliases, NTFS ':stream'/'::$DATA'
+    suffixes and possible DOS 8.3 NAME~N aliases are folded/refused."""
+    for part in str(name).replace('\\','/').split('/'):
+        part=part.split(':',1)[0].rstrip(' .').upper()
+        if part in PRIVATE_MEMBERS or _short_alias_of_private(part):
+            return True
+    return False
+
+
 def reject_private(obj):
     if type(obj) is dict:
         need(('private' not in obj or obj['private'] is False) and ('public_artifact' not in obj or obj['public_artifact'] is True) and
@@ -670,7 +702,7 @@ def public_sparse_members(view):
                 if row[0]==0xe5 or row[11]&8 or row[:11] in (b'.          ',b'..         '):continue
                 name=row[:8].rstrip(b' ').decode('cp437');extension=row[8:11].rstrip(b' ').decode('cp437')
                 name=(name+('.'+extension if extension else '')).upper();full=prefix+name;names.append(full)
-                need(len(names)<=30000 and name not in ('WINDOWS','WIN98','WIN98CFG.BIN','W98PERS.BIN','VGACFG.BIN','VGAROM.BIN'),'private native/Windows sparse ESP member refused')
+                need(len(names)<=30000 and not private_member(name),'private native/Windows sparse ESP member refused')
                 number=struct.unpack_from('<H',row,26)[0]|(struct.unpack_from('<H',row,20)[0]<<16)
                 if row[11]&16:directory(full+'/',number,depth+1)
             cluster=struct.unpack_from('<I',fat,cluster*4)[0]&0xfffffff
@@ -693,13 +725,15 @@ def require_public_payload(manifest, receipt, install_bytes):
         children=archive_entries(raw)
         work['members']+=len(children);need(work['members']<=65536,'nested public archive member work exceeds bound')
         for name,data in children.items():
-            need(not any(part in ('WIN98','WINDOWS','WIN98CFG.BIN','W98PERS.BIN','VGACFG.BIN','VGAROM.BIN') for part in name.split('/')),'private native/Windows installer member refused')
+            need(not private_member(name),'private native/Windows installer member refused')
             if data.startswith(b'SHZARC01'):inspect(data,depth+1)
             elif data.startswith(b'SHZSIMG1'):
                 view=SparseView(data);need(view.size<=512<<20,'native-size sparse ESP refused by development public profile')
                 if name.endswith('/ESP.SIM'):
                     need(manifest.get('esp',{}).get('bytes')==view.size and manifest.get('esp',{}).get('sha256')==view.digest,'public sparse ESP differs from manifest')
                 public_sparse_members(view)
+            elif data.startswith(SZOU_MAGIC):
+                need(False,'private original-userland SZOU stage refused from public media')
             elif name.endswith('.JSON'):
                 need(len(data)<=MAX_JSON,'bounded embedded public metadata required')
                 reject_private(json.loads(data,object_pairs_hook=unique))
@@ -708,10 +742,413 @@ def require_public_payload(manifest, receipt, install_bytes):
     return True
 
 
+# ---------------------------------------------------------------------------
+# Distinct explicit original-Windows-userland route (SZOU v1).
+#
+# The strict native ESP route above is unchanged and remains the CLI default.
+# This route consumes only a private profile already produced by the existing
+# original observer (tools/native_original_userland.py), re-runs that held
+# observer over the same leased source disk, and stages the observed Windows
+# directory into the SZOU manifest consumed by the guest native installer
+# (shizukudos/win64/setup/native_install). It installs, boots and admits
+# nothing; native_release_admission.py remains the separate release gate.
+REPO = Path(__file__).resolve().parents[2]
+ORIGINAL_REQUEST_SCHEMA = 'shizukuos.original-userland-stage-request.v1'
+ORIGINAL_SCHEMA = 'shizukuos.private-original-userland-stage.v1'
+ORIGINAL_PROFILE_SCHEMA = 'shizukuos.private-original-userland-profile.v1'
+ORIGINAL_OBSERVER = REPO/'tools/native_original_userland.py'
+ORIGINAL_READER = REPO/'shizukudos/win98_boot/prepare_replacement.py'
+ORIGINAL_DISK_BYTES = 2 << 30
+ORIGINAL_STAGE_NAME = 'ORIGUSER.SZO'
+ORIGINAL_FALSE_FLAGS = FALSE_FLAGS + ('release_admitted', 'original_userland_booted')
+# Agreed with guest-installer: .codex/handoff/original-userland-schema.md.
+SZOU_MAGIC = b'SZOU'
+SZOU_VERSION = 1
+SZOU_HEADER = struct.Struct('<4sHHIIQ32s8s')   # 64 bytes
+SZOU_ENTRY = struct.Struct('<260sIQQ32s8s')    # 320 bytes
+SZOU_MAX_ENTRIES = 30000                       # observer inventory bound; guest bound is 65535
+SZOU_ATTRIBUTES = 0x27                         # READONLY|HIDDEN|SYSTEM|ARCHIVE
+SZOU_REFUSED = frozenset('<>:"/|?*')
+# SZOU v2 = v1 bytes unchanged + append-only SZLN extension after the payload
+# (header flag 1). SZLN carries the complete selected directory list and the
+# original VFAT long names as validated UTF-16LE code units.
+SZOU_VERSION_NAMES = 2
+SZOU_FLAG_NAMES = 1
+SZLN_MAGIC = b'SZLN'
+SZLN_HEADER = struct.Struct('<4sHHII32s')      # 48 bytes
+SZLN_RECORD = struct.Struct('<260sBBH512s8s')  # 784 bytes
+SZLN_FILE, SZLN_DIRECTORY = 1, 2
+LFN_REFUSED = frozenset('"*/:<>?\\|')
+ORIGINAL_ROOT_DOS = frozenset({'IO.SYS', 'MSDOS.SYS', 'COMMAND.COM'})
+assert SZOU_HEADER.size == 64 and SZOU_ENTRY.size == 320
+assert SZLN_HEADER.size == 48 and SZLN_RECORD.size == 784
+
+
+def szou_path(name):
+    need(type(name) is str and 0<len(name)<=259 and all(c==' ' or '!'<=c<='~' for c in name),
+         'SZOU v1 requires a bounded printable ASCII destination path')
+    need(not SZOU_REFUSED.intersection(name) and
+         all(v not in ('','.','..') and v[-1] not in ' .' for v in name.split('\\')),
+         'unsafe SZOU destination path refused')
+    return name
+
+
+def szou_table(rows):
+    """Return the canonical contiguous SZOU entry table and payload total."""
+    need(type(rows) is list and 0<len(rows)<=SZOU_MAX_ENTRIES,'bounded nonempty SZOU entry table required')
+    table=bytearray();seen=set();offset=0
+    for row in rows:
+        need(type(row) is dict and {'path','attributes','bytes','sha256'}<=set(row),'exact SZOU row required')
+        name=szou_path(row['path']);folded=name.upper();attributes=row['attributes'];size=row['bytes']
+        need(folded not in seen,'duplicate case-insensitive SZOU destination refused');seen.add(folded)
+        need(type(attributes) is int and 0<=attributes and not attributes&~SZOU_ATTRIBUTES,'unsupported SZOU DOS attributes refused')
+        need(type(size) is int and 0<=size<=MAX_FILE-offset,'SZOU payload extent overflow refused')
+        need(type(row['sha256']) is str and re.fullmatch('[0-9a-f]{64}',row['sha256']),'literal SZOU member SHA required')
+        table+=SZOU_ENTRY.pack(name.encode('ascii'),attributes,size,offset,bytes.fromhex(row['sha256']),bytes(8))
+        offset+=size
+    ancestors={'\\'.join(p.split('\\')[:i]) for p in seen for i in range(1,p.count('\\')+1)}
+    need(not seen&ancestors,'SZOU file path is also a directory prefix')
+    return bytes(table),offset
+
+
+def szou_header(table,count,total,version=SZOU_VERSION):
+    need(version in (SZOU_VERSION,SZOU_VERSION_NAMES),'unknown SZOU version')
+    flags=SZOU_FLAG_NAMES if version==SZOU_VERSION_NAMES else 0
+    return SZOU_HEADER.pack(SZOU_MAGIC,version,SZOU_HEADER.size,count,flags,total,hashlib.sha256(table).digest(),bytes(8))
+
+
+def lfn_units(name):
+    """Validated Win98 VFAT long name -> UTF-16LE code units (lossless carry)."""
+    need(type(name) is str and name not in ('.','..') and name[-1:] not in ('',' ','.') and
+         all(c>=' ' and c not in LFN_REFUSED for c in name),'invalid Win98 long file name refused')
+    try:units=name.encode('utf-16-le')
+    except UnicodeEncodeError:raise ValueError('unpaired UTF-16 surrogate in long file name refused') from None
+    need(2<=len(units)<=510,'long file name exceeds 255 UTF-16 units')
+    return units
+
+
+def lfn_checksum(short):
+    total=0
+    for b in short:total=(((total&1)<<7)+(total>>1)+b)&0xff
+    return total
+
+
+def lfn_name(pending,short):
+    """Return the VFAT long name bound to a short entry, or None for none/orphan.
+
+    Windows ignores LFN chains whose ordinal sequence or checksum does not
+    bind to the following short entry; such orphans are counted, not used.
+    A structurally bound name that violates the long-name policy is refused.
+    """
+    if not pending:return None
+    count=len(pending)//32;parts=[pending[i*32:i*32+32] for i in range(count)]
+    checksum=lfn_checksum(short[:11])
+    if len(pending)%32 or not 1<=count<=20 or any(
+            part[0]!=(count-i)|(0x40 if i==0 else 0) or part[11]!=15 or part[12]!=0 or
+            part[13]!=checksum or part[26:28]!=b'\0\0' for i,part in enumerate(parts)):
+        return False
+    raw=b''.join(part[1:11]+part[14:26]+part[28:32] for part in reversed(parts))
+    units=[raw[i:i+2] for i in range(0,len(raw),2)]
+    if b'\0\0' in units:
+        end=units.index(b'\0\0')
+        if any(u!=b'\xff\xff' for u in units[end+1:]) or end<=13*(count-1):return False
+        units=units[:end]
+    try:name=b''.join(units).decode('utf-16-le')
+    except UnicodeDecodeError:raise ValueError('unpaired UTF-16 surrogate in long file name refused') from None
+    lfn_units(name);return name
+
+
+def szou_names(rows,records):
+    """Canonical SZLN records: complete directory list plus long names."""
+    need(type(records) is list and 0<len(records)<=SZOU_MAX_ENTRIES,'bounded nonempty SZLN record list required')
+    files={r['path'].upper():r['path'] for r in rows};raw=bytearray();kinds={};previous=None;siblings={}
+    for record in records:
+        need(type(record) is dict and set(record)=={'path','kind','attributes','long_name'},'exact SZLN record required')
+        name=szou_path(record['path']);folded=name.upper();kind=record['kind'];attributes=record['attributes'];long=record['long_name']
+        need(previous is None or previous<folded,'SZLN records must be uniquely sorted by folded path');previous=folded
+        if kind==SZLN_FILE:need(files.get(folded)==name and attributes==0 and long is not None,'SZLN file record must name an SZOU entry')
+        else:need(kind==SZLN_DIRECTORY and folded not in files and type(attributes) is int and 0<=attributes and
+                  not attributes&~SZOU_ATTRIBUTES,'SZLN directory record invalid')
+        kinds[folded]=kind;units=lfn_units(long) if long is not None else b''
+        parent,_,leaf=folded.rpartition('\\')
+        for alias in {leaf,*([long.upper()] if long is not None else [])}:
+            need(siblings.setdefault((parent,alias),folded)==folded,'long/short sibling name collision refused')
+        raw+=SZLN_RECORD.pack(name.encode('ascii'),kind,attributes,len(units)//2,units.ljust(512,b'\0'),bytes(8))
+    for folded,name in files.items():
+        parent,_,leaf=folded.rpartition('\\')
+        need(siblings.setdefault((parent,leaf),folded)==folded,'long/short sibling name collision refused')
+    every=set(files)|set(kinds)
+    ancestors={'\\'.join(p.split('\\')[:i]) for p in every for i in range(1,p.count('\\')+1)}
+    need(all(kinds.get(a)==SZLN_DIRECTORY for a in ancestors),'SZLN directory list incomplete')
+    return bytes(raw)
+
+
+def szou_image(rows,records=None):
+    """Return (header+table, total, trailing SZLN bytes, version); v1 when records is None."""
+    table,total=szou_table(rows)
+    if records is None:return szou_header(table,len(rows),total)+table,total,b'',SZOU_VERSION
+    ext=szou_names(rows,records)
+    tail=SZLN_HEADER.pack(SZLN_MAGIC,1,SZLN_HEADER.size,len(records),0,hashlib.sha256(ext).digest())+ext
+    return szou_header(table,len(rows),total,SZOU_VERSION_NAMES)+table,total,tail,SZOU_VERSION_NAMES
+
+
+def szou_verify(fd,size,check,names_out=None):
+    """Independently parse and fully hash a held SZOU stage; returns summary, rows.
+
+    v2 SZLN records are appended to names_out when a list is supplied."""
+    need(type(size) is int and SZOU_HEADER.size<=size<=MAX_FILE,'bounded SZOU stage required')
+    magic,version,header,count,flags,total,table_sha,reserved=SZOU_HEADER.unpack(read_exact(fd,SZOU_HEADER.size,0,check))
+    need(magic==SZOU_MAGIC and (version,flags) in ((SZOU_VERSION,0),(SZOU_VERSION_NAMES,SZOU_FLAG_NAMES)) and
+         header==SZOU_HEADER.size and not any(reserved) and 0<count<=SZOU_MAX_ENTRIES,'exact SZOU v1/v2 header required')
+    start=SZOU_HEADER.size+count*SZOU_ENTRY.size
+    need(start+total<=size and (size-start==total if version==SZOU_VERSION else size-start-total>=SZLN_HEADER.size),
+         'SZOU image length differs from header')
+    table=read_exact(fd,count*SZOU_ENTRY.size,SZOU_HEADER.size,check)
+    need(hashlib.sha256(table).digest()==table_sha,'SZOU entry table SHA differs')
+    rows=[]
+    for i in range(count):
+        raw,attributes,length,offset,digest,tail=SZOU_ENTRY.unpack_from(table,i*SZOU_ENTRY.size)
+        zero=raw.find(b'\0')
+        need(zero>0 and not any(raw[zero:]) and not any(tail),'canonical SZOU entry required')
+        rows.append({'path':raw[:zero].decode('ascii'),'attributes':attributes,'bytes':length,'sha256':digest.hex(),'offset':offset})
+    # Rebuilding enforces paths, duplicates, attributes and contiguous offsets.
+    need(szou_table(rows)==(table,total),'noncanonical SZOU entry table refused')
+    for row in rows:
+        h=hashlib.sha256()
+        for at in range(0,row['bytes'],1<<20):
+            h.update(read_exact(fd,min(1<<20,row['bytes']-at),start+row['offset']+at,check))
+        need(h.hexdigest()==row['sha256'],'SZOU member payload SHA differs')
+    summary={'entry_count':count,'total_payload_bytes':total,'entries_sha256':table_sha.hex()}
+    if version==SZOU_VERSION_NAMES:
+        at=start+total;magic,ext_version,ext_header,records,ext_flags,ext_sha=SZLN_HEADER.unpack(read_exact(fd,SZLN_HEADER.size,at,check))
+        need(magic==SZLN_MAGIC and ext_version==1 and ext_header==SZLN_HEADER.size and ext_flags==0 and
+             0<records<=SZOU_MAX_ENTRIES and size-at-SZLN_HEADER.size==records*SZLN_RECORD.size,'exact SZLN v1 extension required')
+        ext=read_exact(fd,records*SZLN_RECORD.size,at+SZLN_HEADER.size,check)
+        need(hashlib.sha256(ext).digest()==ext_sha,'SZLN record SHA differs')
+        names=[]
+        for i in range(records):
+            raw,kind,attributes,units,long,tail=SZLN_RECORD.unpack_from(ext,i*SZLN_RECORD.size)
+            zero=raw.find(b'\0')
+            need(zero>0 and not any(raw[zero:]) and not any(tail) and units<=255 and not any(long[2*units:]),'canonical SZLN record required')
+            try:name=long[:2*units].decode('utf-16-le') if units else None
+            except UnicodeDecodeError:raise ValueError('unpaired UTF-16 surrogate in SZLN record') from None
+            names.append({'path':raw[:zero].decode('ascii'),'kind':kind,'attributes':attributes,'long_name':name})
+        need(szou_names([{'path':r['path']} for r in rows],names)==ext,'noncanonical SZLN extension refused')
+        summary.update(names_records=records,names_sha256=ext_sha.hex(),
+                       long_names=sum(r['long_name'] is not None for r in names),
+                       directories=sum(r['kind']==SZLN_DIRECTORY for r in names))
+        if names_out is not None:names_out.extend(names)
+    need(not os.pread(fd,1,size),'SZOU stage extent grew')
+    return summary,rows
+
+
+def original_request(request):
+    need(type(request) is dict and set(request)=={'schema','route','source_disk','windows_directory','boot_policy',
+                                                  'producer_inputs','original_userland_profile'} and
+         request['schema']==ORIGINAL_REQUEST_SCHEMA and request['route']=='original-userland',
+         'exact original-userland stage request required')
+    pin(request['source_disk']);pin(request['original_userland_profile'])
+    need(request['source_disk']['bytes']==ORIGINAL_DISK_BYTES,'exact original 2 GiB disk required')
+    need(request['original_userland_profile']['bytes']<=MAX_JSON,'bounded private observer profile required')
+    need(request['boot_policy']=='shz.foundation=win98','explicit Windows foundation policy required')
+    directory=request['windows_directory']
+    need(type(directory) is str and re.fullmatch('[A-Z0-9_-]{1,8}',directory) and
+         directory not in {'CON','PRN','AUX','NUL',*(p+str(n) for p in ('COM','LPT') for n in range(1,10))},
+         'uppercase nondevice short Windows directory required')
+    rows=request['producer_inputs']
+    need(type(rows) is list and len(rows)==2 and all(type(r) is dict for r in rows) and
+         [r.get('path') for r in rows]==[str(ORIGINAL_OBSERVER),str(ORIGINAL_READER)],
+         'exact existing observer/reader producer pins required')
+    for row in rows:
+        pin(row);need(row['bytes']<=1<<20,'bounded producer source required')
+
+
+def original_entries(reader,fd,geometry,check,files):
+    """Bind each entry's DOS attribute byte and VFAT long name to the held inventory.
+
+    Returns ({path: (attribute byte, long name or None)}, orphaned LFN chain count).
+    The LFN bytes are already covered by the inventory metadata SHA.
+    """
+    volume=reader.Volume(fd,geometry,check);result={};orphans=[0]
+    def directory(prefix,cluster,depth):
+        need(depth<=32,'FAT directory nesting exceeds bound')
+        if cluster:chunks=(volume.cluster(n) for n in volume.chain(cluster))
+        else:chunks=[volume.read((geometry['start_lba']+geometry['reserved']+geometry['fats']*geometry['fat_sectors'])*512,
+                                 geometry['root_sectors']*512)]
+        pending=bytearray()
+        for block in chunks:
+            for at in range(0,len(block),32):
+                row=block[at:at+32]
+                if row[0]==0:
+                    orphans[0]+=bool(pending);return
+                if row[0]==0xe5:orphans[0]+=bool(pending);pending.clear();continue
+                if row[11]==15:need(len(pending)<20*32,'unbounded LFN sequence');pending.extend(row);continue
+                if row[11]&8 or row[:11] in (b'.          ',b'..         '):orphans[0]+=bool(pending);pending.clear();continue
+                base=row[:8].rstrip(b' ').decode('cp437');extension=row[8:11].rstrip(b' ').decode('cp437')
+                name=prefix+base+('.'+extension if extension else '');record=files.get(name)
+                need(type(record) is dict and record.get('metadata_sha256')==reader.digest(bytes(pending)+row),
+                     'original directory entry differs from held inventory')
+                long=lfn_name(bytes(pending),row);pending.clear()
+                if long is False:orphans[0]+=1;long=None
+                result[name]=(row[11],long)
+                if row[11]&16:
+                    directory(name+'/',reader.u16(row,26)|((reader.u16(row,20)<<16) if geometry['fat_bits']==32 else 0),depth+1)
+        orphans[0]+=bool(pending)
+    directory('',geometry['root_cluster'] or 0,0)
+    return result,orphans[0]
+
+
+def ingest_original_userland(request_path, request_sha, out, budget_bytes):
+    request_path=path(str(request_path));out=path(str(out))
+    need(type(budget_bytes) is int and 1<<20<=budget_bytes<=MAX_FILE,'explicit bounded export budget required')
+    need(not out.exists() and out.parent.is_dir(),'fresh private output leaf required')
+    need(not any((p/'.git').exists() for p in out.parents),'private ingestion output must be outside source checkouts')
+    request_pin={'path':str(request_path),'bytes':request_path.stat().st_size,'sha256':request_sha}
+    manifest_path=out/'manifest.json';stage_path=out/ORIGINAL_STAGE_NAME;owned=None;accepted=None;directory=None
+    try:
+        with Union() as artifacts:
+            with Union() as inputs:
+                request=inputs.json(request_pin);original_request(request)
+                # Execute the held reviewed bytes of the existing observer and
+                # FAT reader; their current checkout epoch must match the pins.
+                observer=held_module(inputs,request['producer_inputs'][0],sha(ORIGINAL_OBSERVER.read_bytes()),'held_original_userland_observer')
+                reader=held_module(inputs,request['producer_inputs'][1],sha(ORIGINAL_READER.read_bytes()),'held_original_userland_fat_reader')
+                need(observer.ROOT==REPO and observer.READER==ORIGINAL_READER,'held observer bound to another checkout')
+                profile=inputs.json(request['original_userland_profile'])
+                need(type(profile) is dict and set(profile)=={'schema','status','phase','source_disk','request','producer_inputs',
+                     'boot_policy','observed_windows_path','observed_members','boot_sectors','source_before_after_match',
+                     *observer.FLAGS} and profile.get('schema')==ORIGINAL_PROFILE_SCHEMA and
+                     profile.get('status')=='ORIGINAL_USERLAND_SOURCE_OBSERVED_NOT_BOOTED' and
+                     profile.get('phase')=='original-userland-legacy-adapter' and
+                     profile.get('source_disk')==request['source_disk'] and
+                     profile.get('producer_inputs')==request['producer_inputs'] and
+                     profile.get('boot_policy')==request['boot_policy'] and
+                     profile.get('source_before_after_match') is True and
+                     all(profile.get(name) is False for name in observer.FLAGS) and
+                     profile.get('observed_windows_path')=='C:\\'+request['windows_directory'],
+                     'exact observed original-userland profile required')
+                disk=inputs.add(request['source_disk'])
+                def check():inputs.io_check(disk)
+                observed=observer.observe(disk['fd'],ORIGINAL_DISK_BYTES,request['windows_directory'],reader,check)
+                need(all(observed[k]==profile.get(k) for k in observed),'fresh original observation differs from private profile')
+                # Exactly the seven members the existing observer requires: the
+                # three root MS-DOS control members plus four Windows members.
+                windows_members={request['windows_directory']+'/'+n for n in ('WIN.COM','SYSTEM.INI','SYSTEM/VMM32.VXD','IFSHLP.SYS')}
+                need(set(observed['observed_members'])==ORIGINAL_ROOT_DOS|windows_members,'exact seven observed original members required')
+                mbr=read_exact(disk['fd'],512,0,check)
+                active=[mbr[446+i*16:462+i*16] for i in range(4) if mbr[446+i*16]==0x80]
+                need(len(active)==1,'one original active partition required')
+                vbr=read_exact(disk['fd'],512,struct.unpack_from('<I',active[0],8)[0]*512,check)
+                need(sha(mbr)==observed['boot_sectors']['mbr']['sha256'] and sha(vbr)==observed['boot_sectors']['vbr']['sha256'],
+                     'original boot sectors changed after observation')
+                geometry=reader.inspect_geometry(mbr,vbr,ORIGINAL_DISK_BYTES)
+                files=reader.inventory(disk['fd'],geometry,check)
+                entries,orphans=original_entries(reader,disk['fd'],geometry,check,files)
+                need(set(entries)==set(files),'original directory walk differs from held inventory')
+                prefix=request['windows_directory']+'/'
+                selected=sorted((n for n,r in files.items() if n.startswith(prefix) and r.get('directory') is not True),key=str.upper)
+                folders=sorted((n for n,r in files.items() if (n==request['windows_directory'] or n.startswith(prefix)) and
+                                r.get('directory') is True),key=str.upper)
+                need(request['windows_directory'] in folders and windows_members<=set(selected),
+                     'observed original Windows members absent from staged inventory')
+                # ShizukuDOS replaces the DOS layer: root MS-DOS members stay a private control input.
+                need(all(n.startswith(prefix) and n.upper() not in ORIGINAL_ROOT_DOS for n in selected),'root MS-DOS member in stage refused')
+                for name in selected:
+                    record=files[name]
+                    need(set(record)=={'bytes','sha256','metadata_sha256','cluster'} and not entries[name][0]&16 and
+                         record['sha256']==observed['observed_members'].get(name,record)['sha256'],
+                         'staged original member differs from observation')
+                rows=[{'path':n.replace('/','\\'),'attributes':entries[n][0],'bytes':files[n]['bytes'],
+                       'sha256':files[n]['sha256']} for n in selected]
+                records=sorted([{'path':n.replace('/','\\'),'kind':SZLN_DIRECTORY,'attributes':entries[n][0]&~16,'long_name':entries[n][1]}
+                                for n in folders]+
+                               [{'path':n.replace('/','\\'),'kind':SZLN_FILE,'attributes':0,'long_name':entries[n][1]}
+                                for n in selected if entries[n][1] is not None],key=lambda r:r['path'].upper())
+                implied={'\\'.join(r['path'].split('\\')[:i]) for r in rows for i in range(1,r['path'].count('\\')+1)}
+                # v1 stays byte-identical when the tree needs no names/empty/attributed directories.
+                plain=all(r['long_name'] is None and (r['kind']==SZLN_FILE or (not r['attributes'] and r['path'] in implied))
+                          for r in records)
+                head,total,tail,version=szou_image(rows,None if plain else records)
+                stage_bytes=len(head)+total+len(tail)
+                need(budget_bytes>=stage_bytes+(4<<20),'full SZOU stage plus metadata export budget required')
+                capacity(out.parent,budget_bytes);out.mkdir(mode=0o700);owned=identity(out.stat())[:2]
+                directory=os.open(out,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
+                def output_check():
+                    path(str(out))
+                    need(identity(os.fstat(directory))[:2]==identity(out.stat())[:2]==owned and
+                         stat.S_IMODE(os.fstat(directory).st_mode)==0o700 and not out.is_symlink(),'owned private output directory changed')
+                inputs.guards.append(output_check);artifacts.guards.append(output_check)
+                fd=os.open(stage_path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600)
+                try:
+                    digest=hashlib.sha256();written=[0]
+                    class Sink:
+                        def write(self,raw):
+                            need(written[0]+len(raw)<=stage_bytes,'SZOU stage exceeds declared extent')
+                            write_all(fd,raw,check);digest.update(raw);written[0]+=len(raw);return len(raw)
+                    sink=Sink();sink.write(head)
+                    volume=reader.Volume(disk['fd'],geometry,check)
+                    for name in selected:
+                        # inventory() already refused crosslinks across the whole
+                        # volume with one chain set; reset per member re-read.
+                        volume.used=set();record=files[name]
+                        need(volume.file(record['cluster'],record['bytes'],sink)==record['sha256'],'original member changed during staging')
+                    sink.write(tail);need(written[0]==stage_bytes,'short SZOU stage write')
+                    os.fsync(fd);stage_written=identity(os.fstat(fd))
+                finally:os.close(fd)
+                stage={'path':str(stage_path),'bytes':stage_bytes,'sha256':digest.hexdigest()}
+                e=artifacts.add(stage,written_identity=stage_written)
+                staged_names=[];summary,_=szou_verify(e['fd'],stage_bytes,lambda:artifacts.io_check(e),staged_names)
+                need(version==SZOU_VERSION or staged_names==records,'SZLN readback differs from original names')
+                result={'schema':ORIGINAL_SCHEMA,'status':'PRIVATE_ORIGINAL_USERLAND_STAGED_NOT_INSTALLED',
+                        'route':'original-userland','private':True,'public_artifact':False,
+                        'redistribution':'PROHIBITED_PRIVATE_LICENSED_INPUT','boot_profile':'win98-foundation',
+                        'boot_policy':request['boot_policy'],'source_request':request_pin,
+                        'original_userland_profile':request['original_userland_profile'],
+                        'producer_inputs':request['producer_inputs'],'source_disk':request['source_disk'],
+                        'observed_windows_path':observed['observed_windows_path'],'boot_sectors':observed['boot_sectors'],
+                        'stage':dict(stage,format='SZOU',version=version,**summary),
+                        'long_file_names':{'carried':'UTF-16LE' if version==SZOU_VERSION_NAMES else 'NONE_PRESENT',
+                                           'orphaned_lfn_chains_ignored':orphans},
+                        'excluded_root_dos_members':sorted(ORIGINAL_ROOT_DOS),
+                        'input_linux_read_leases':True,'inputs_before_after_full_SHA_match':True,
+                        'independent_SZOU_readback':True,'native_release_admission':'NOT_PERFORMED_SEPARATE_GATE',
+                        **{name:False for name in ORIGINAL_FALSE_FLAGS}}
+                raw=(json.dumps(result,indent=2)+'\n').encode();need(len(raw)<=MAX_JSON,'bounded private manifest required')
+                temporary=out/'.manifest.part';fd=os.open(temporary,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600)
+                try:
+                    write_all(fd,raw);os.fsync(fd);manifest_written=identity(os.fstat(fd))
+                finally:os.close(fd)
+                m=artifacts.add({'path':str(temporary),'bytes':len(raw),'sha256':sha(raw)},written_identity=manifest_written)
+                inputs.finish();artifacts.check();capacity(out,budget_bytes)
+            # Mandatory original lease unlock/close has succeeded before publication.
+            artifacts.check();need(read_exact(m['fd'],len(raw),0,artifacts.check)==raw,'final manifest bytes differ')
+            os.link(temporary,manifest_path);accepted=identity(manifest_path.stat())[:2]
+            os.unlink(temporary);artifacts.entries.pop(temporary)
+            artifacts.entries[manifest_path]=dict(m,pin={'path':str(manifest_path),'bytes':len(raw),'sha256':sha(raw)},identity=identity(os.fstat(m['fd'])))
+            os.fsync(directory);artifacts.check();capacity(out,budget_bytes)
+        output_check();os.close(directory);directory=None
+        return result
+    except BaseException:
+        # Retain partial data for diagnosis; invalidate only our accepted manifest inode.
+        if accepted is not None and out.exists() and identity(out.stat())[:2]==owned and manifest_path.exists() and identity(manifest_path.stat())[:2]==accepted:
+            manifest_path.unlink()
+        if directory is not None:
+            try:os.close(directory)
+            except OSError:pass
+        raise
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--request',type=Path,required=True)
     p.add_argument('--request-sha256',required=True);p.add_argument('--out',type=Path,required=True)
-    p.add_argument('--budget-bytes',type=int,required=True);a=p.parse_args()
+    p.add_argument('--budget-bytes',type=int,required=True)
+    # The old strict DOS/native ESP schema stays the default route. The
+    # original-userland route must be named explicitly; schemas never cross.
+    p.add_argument('--route',choices=('native-esp','original-userland'),default='native-esp');a=p.parse_args()
+    if a.route=='original-userland':
+        result=ingest_original_userland(a.request,a.request_sha256,a.out,a.budget_bytes)
+        print(json.dumps({'status':result['status'],'private_manifest':str(a.out/'manifest.json'),
+                          'stage':str(a.out/ORIGINAL_STAGE_NAME),**{k:False for k in ORIGINAL_FALSE_FLAGS}}));return
     result=ingest(a.request,a.request_sha256,a.out,a.budget_bytes)
     print(json.dumps({'status':result['status'],'private_manifest':str(a.out/'manifest.json'),**{k:False for k in FALSE_FLAGS}}))
 

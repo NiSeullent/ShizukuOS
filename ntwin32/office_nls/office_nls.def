@@ -1,0 +1,7 @@
+LIBRARY OFFNLS.DLL
+EXPORTS
+    OfnGetUserDefaultLocaleName@8
+    OfnGetLocaleInfoEx@16
+    OfnResolveLocaleName@12
+    OfnLocaleNameToLCID@8
+    OfnLCIDToLocaleName@16

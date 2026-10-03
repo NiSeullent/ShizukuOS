@@ -33,6 +33,8 @@ STATIC = ('index.html', 'downloads.html', 'install.html', 'apps.html', 'develop.
           'dead-screen.html', 'dead-screen.css', 'dead-screen.js',
           'dead-screen-preview.wasm', 'en/index.html', 'en/preview.html',
           'en/preview.js', 'en/dead-screen.html', 'en/evidence/preview.json',
+          'fonts.css', 'fonts/PretendardVariable.woff2', 'fonts/OFL.txt',
+          'fonts/manifest.json',
           'favicon.svg', 'evidence/preview.json', 'downloads/SHZGOP.zip',
           'downloads/SHZGOP.zip.sha256', 'downloads/SHZNPP.zip',
           'downloads/SHZNPP.zip.sha256', 'downloads/SHZNPP-README.md',

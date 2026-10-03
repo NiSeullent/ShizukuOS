@@ -53,7 +53,9 @@ static int kernel_contract(void)
 {
     shz_cpu_dtr_t gdt,idt;
     __asm__ volatile("sgdt %0":"=m"(gdt));__asm__ volatile("sidt %0":"=m"(idt));
-    const uint64_t low=K64_VIRT_BASE+0x100000,high=K64_VIRT_BASE+0x300000;
+    /* The boot GDT/IDT live in the kernel image: [SHZ_K64_KERNEL_GPA, SHZ_K64_KERNEL_END) of standalone/memholes.h,
+     * the same window every loader zeroes and link.ld bounds (image + bss end at or below the heap). */
+    const uint64_t low=K64_VIRT_BASE+SHZ_K64_KERNEL_GPA,high=K64_VIRT_BASE+SHZ_K64_KERNEL_END;
     if(!owner_boot || (owner_boot->flags&SHZ_BIF_UEFI_DIRECT) || initial_root!=0x1000 ||
        gdt.limit!=55 || idt.limit!=4095 || gdt.base<low || gdt.base>high-56 ||
        idt.base<low || idt.base>high-4096 ||

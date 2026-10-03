@@ -5,6 +5,7 @@
 #include "k64.h"
 #include "smp_boot.h"
 #include "pci.h"
+#include "../dead_screen/native.h"
 shz_smp_cpu_t shz_smp_cpus[SHZ_SMP_MAX_CPUS];
 static shz_smp_topology_t topology;
 static volatile uint32_t *lapic;
@@ -138,6 +139,9 @@ int shz_smp_boot_start_with_reader(uint64_t rsdp_pa,shz_smp_ap_entry_fn entry,sh
     uint64_t base,boot_cr3,flags; unsigned i; uint32_t a=1,b,c,d; int rc;
     shz_smp_topology_t found;
     struct trampoline_params *params=(struct trampoline_params *)p2v(SHZ_SMP_TRAMPOLINE_PA+0x800);
+    /* Before any INIT/SIPI: a fatal Dead Screen can no longer prove sole-CPU
+     * takeover, so its panic-time gate refuses games (visual+trace remain). */
+    ds_native_secondary_cpu_started();
     __asm__ volatile("pushfq; pop %0":"=r"(flags));
     if(!entry || !read || started || (flags&(1ull<<9))) return SHZ_SMP_ACPI_INVALID;
     if(shz_smp_boot_pages_safe(read,ctx,initial_cr3,read_cr3(),kernel_pml4(),mem_ram_top()))

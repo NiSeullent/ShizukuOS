@@ -17,12 +17,16 @@
 #include "core.h"
 #include "store.h"
 #include "profile.h"
+#include "desktop_agent.h"
+#include "agent_ctl.h"
+#include "chrome_native.h"
+#include "retro_core.h"
 #include "../adapter.h"
 #include "../theme_selector/native_backend.h"
 
 #define PREVIEW_W 320u
 #define PREVIEW_H 180u
-enum { ID_SCENE=100,ID_RATE,ID_LANGUAGE,ID_PAUSE,ID_BATTERY,ID_SAVE,ID_ANIMATE,ID_STATIC,ID_STATUS,ID_CLASSIC,ID_SHIZUKUOS };
+enum { ID_SCENE=100,ID_RATE,ID_LANGUAGE,ID_PAUSE,ID_BATTERY,ID_SAVE,ID_ANIMATE,ID_STATIC,ID_STATUS,ID_CLASSIC,ID_SHIZUKUOS,ID_AGENT,ID_AGENT_FS,ID_AGENT_APPLY,ID_METRICS_ON,ID_METRICS_OFF,ID_RETRO_ON,ID_RETRO_OFF };
 #define REFRESH_THEME (WM_APP+42u)
 typedef struct backend { HWND window;HDC memory,painting;HBITMAP bitmap;HGDIOBJ previous; } backend;
 static backend native;
@@ -30,7 +34,7 @@ static ntwg98_view view;
 static pz98_preferences preferences;
 static HWND main_window,scene_box,rate_box,language_box,pause_box,battery_box,status_box;
 static HWND scene_label,rate_label,language_label,save_button,animate_button,static_button;
-static HWND companion_label;
+static HWND companion_label,agent_box,agent_fs_box,agent_button,metrics_label,metrics_on_button,metrics_off_button,retro_on_button,retro_off_button;
 static HWND theme_label,classic_button,shizuku_button,theme_status;
 static shz_theme_native theme;
 static int theme_ready,theme_blocked,theme_busy,theme_refresh_pending;
@@ -241,6 +245,68 @@ static void update_policy(void)
         else if(apply_static())status("Wallpaper paused by the power or pause setting.","전원 또는 일시정지 설정에 따라 배경화면을 멈췄습니다.");
     }
 }
+static void apply_agent(void)
+{
+    szw_settings settings;DWORD error;char message[200];
+    settings.enabled=SendMessageA(agent_box,BM_GETCHECK,0,0)==BST_CHECKED;
+    settings.scene=preferences.scene;settings.fps=preferences.fps;
+    settings.battery_pause=preferences.battery_saver?1u:0u;
+    settings.fullscreen_pause=SendMessageA(agent_fs_box,BM_GETCHECK,0,0)==BST_CHECKED;
+    error=szw_save_settings(&settings);
+    if(error==ERROR_SUCCESS)error=szw_launch((int)settings.enabled);
+    if(error!=ERROR_SUCCESS){
+        wsprintfA(message,"Wallpaper agent failed (error %lu). Settings may be saved; Explorer wallpaper is unchanged.",(unsigned long)error);
+        SetWindowTextA(status_box,message);OutputDebugStringA(message);return;
+    }
+    if(settings.enabled)status("Live wallpaper agent enabled for this user and started.","이 사용자의 실시간 배경화면 에이전트를 켜고 시작했습니다.");
+    else status("Live wallpaper agent disabled; Explorer shows the static wallpaper.","실시간 배경화면 에이전트를 껐습니다. 정적 배경화면으로 돌아갑니다.");
+}
+static void apply_metrics(int modern)
+{
+    DWORD error=modern?szc_native_apply():szc_native_restore();char message[200];
+    if(error!=ERROR_SUCCESS){
+        wsprintfA(message,"Window metrics change failed (error %lu); previous metrics kept or restored.",(unsigned long)error);
+        SetWindowTextA(status_box,message);OutputDebugStringA(message);return;
+    }
+    if(modern)status("Modern window metrics applied for this user. Classic can restore them.","이 사용자에게 현대적 창 크기를 적용했습니다. 클래식으로 복원할 수 있습니다.");
+    else status("Classic window metrics restored.","클래식 창 크기를 복원했습니다.");
+}
+static int retro_get_style(void *c,uint32_t *style)
+{
+    shz_theme_snapshot snap;shz_theme_result r;(void)c;
+    if(!shz_theme_native_snapshot(&theme,&snap,&r))return 0;
+    *style=snap.current==SHZ_THEME_CURRENT_CLASSIC?SZR_STYLE_CLASSIC:snap.current==SHZ_THEME_CURRENT_SHIZUKUOS?SZR_STYLE_SHIZUKUOS:SZR_STYLE_CUSTOM;
+    return 1;
+}
+static int retro_set_style(void *c,uint32_t style)
+{
+    shz_theme_result r;(void)c;
+    return shz_theme_native_apply(&theme,style==SZR_STYLE_CLASSIC?SHZ_THEME_CLASSIC:SHZ_THEME_SHIZUKUOS,&r);
+}
+static int retro_metrics_applied(void *c){(void)c;return szc_native_is_applied();}
+static int retro_apply_metrics(void *c){(void)c;return szc_native_apply()==ERROR_SUCCESS;}
+static int retro_restore_metrics(void *c){(void)c;return szc_native_restore()==ERROR_SUCCESS;}
+static void apply_retro(int modern)
+{
+    szr_ops ops;szr_result result;char message[200];
+    if(theme_busy || theme_blocked || !theme_ready)return;
+    ops.ctx=NULL;ops.get_style=retro_get_style;ops.set_style=retro_set_style;ops.metrics_applied=retro_metrics_applied;
+    ops.apply_metrics=retro_apply_metrics;ops.restore_metrics=retro_restore_metrics;
+    theme_busy=1;EnableWindow(classic_button,FALSE);EnableWindow(shizuku_button,FALSE);
+    EnableWindow(retro_on_button,FALSE);EnableWindow(retro_off_button,FALSE);
+    szr_apply(&ops,modern,&result);
+    theme_busy=0;refresh_theme();EnableWindow(retro_on_button,TRUE);EnableWindow(retro_off_button,TRUE);
+    if(result.status==SZR_OK){
+        if(modern)status("Modern retro applied for this user (colours and window size). Classic can restore both.","이 사용자에게 현대 레트로(색상과 창 크기)를 적용했습니다. 클래식으로 둘 다 복원할 수 있습니다.");
+        else status("Classic colours and window size restored.","클래식 색상과 창 크기를 복원했습니다.");
+        return;
+    }
+    wsprintfA(message,result.status==SZR_REFUSED?"Modern retro refused: custom colours or unreadable state; nothing changed.":
+        result.status==SZR_FAILED_ROLLED_BACK?"Modern retro failed at step %d; earlier change undone and verified.":
+        "Modern retro failed at step %d and the undo could NOT be verified; use the Classic buttons.",result.failed_step);
+    SetWindowTextA(status_box,message);OutputDebugStringA(message);
+    MessageBoxA(main_window,message,"ShizukuOS shell profile",MB_OK|MB_ICONERROR);
+}
 static void read_controls(void)
 {
     LRESULT selected;
@@ -259,6 +325,12 @@ static void labels(void)
     caption(save_button,"Save settings","설정 저장");caption(animate_button,"Apply animated","움직이는 배경 적용");caption(static_button,"Apply static","정적 배경 적용");
     caption(theme_label,"Windows theme","Windows 테마");caption(classic_button,"Classic","클래식");
     caption(shizuku_button,"ShizukuOS","ShizukuOS");
+    caption(agent_box,"Run live wallpaper agent at sign-in","로그인 시 실시간 배경화면 에이전트 실행");
+    caption(agent_fs_box,"Pause agent for full-screen apps","전체 화면 앱에서는 에이전트 정지");
+    caption(agent_button,"Apply agent","에이전트 적용");
+    caption(metrics_label,"Window size","창 크기");
+    caption(metrics_on_button,"Modern","현대적");caption(metrics_off_button,"Classic","클래식");
+    caption(retro_on_button,"Modern retro","현대 레트로");caption(retro_off_button,"All classic","모두 클래식");
     caption(companion_label,"Accounts / elevation: NTW64 bridge is not configured.","계정 / 권한 상승: NTW64 연결이 아직 설정되지 않았습니다.");
     SendMessageA(scene_box,CB_RESETCONTENT,0,0);
     ansi_text(text("Aurora","오로라"),value,sizeof value);SendMessageA(scene_box,CB_ADDSTRING,0,(LPARAM)value);
@@ -287,10 +359,19 @@ static int create_controls(void)
     classic_button=control("BUTTON",BS_PUSHBUTTON|WS_TABSTOP,374,256,108,30,ID_CLASSIC);
     shizuku_button=control("BUTTON",BS_PUSHBUTTON|WS_TABSTOP,494,256,110,30,ID_SHIZUKUOS);
     theme_status=control("STATIC",0,374,294,230,38,0);
-    companion_label=control("STATIC",0,24,380,585,20,0);
-    status_box=control("STATIC",0,24,400,585,68,ID_STATUS);
+    agent_box=control("BUTTON",BS_AUTOCHECKBOX|WS_TABSTOP,24,386,320,24,ID_AGENT);
+    agent_fs_box=control("BUTTON",BS_AUTOCHECKBOX|WS_TABSTOP,24,412,320,24,ID_AGENT_FS);
+    agent_button=control("BUTTON",BS_PUSHBUTTON|WS_TABSTOP,374,400,230,30,ID_AGENT_APPLY);
+    metrics_label=control("STATIC",0,24,446,120,20,0);
+    metrics_on_button=control("BUTTON",BS_PUSHBUTTON|WS_TABSTOP,150,440,110,30,ID_METRICS_ON);
+    metrics_off_button=control("BUTTON",BS_PUSHBUTTON|WS_TABSTOP,270,440,110,30,ID_METRICS_OFF);
+    retro_on_button=control("BUTTON",BS_PUSHBUTTON|WS_TABSTOP,394,440,100,30,ID_RETRO_ON);
+    retro_off_button=control("BUTTON",BS_PUSHBUTTON|WS_TABSTOP,504,440,105,30,ID_RETRO_OFF);
+    companion_label=control("STATIC",0,24,480,585,20,0);
+    status_box=control("STATIC",0,24,500,585,68,ID_STATUS);
     if(!scene_label || !scene_box || !rate_label || !rate_box || !language_label || !language_box ||
        !pause_box || !battery_box || !save_button || !animate_button || !static_button || !companion_label || !status_box ||
+       !agent_box || !agent_fs_box || !agent_button || !metrics_label || !metrics_on_button || !metrics_off_button || !retro_on_button || !retro_off_button ||
        !theme_label || !classic_button || !shizuku_button || !theme_status)return 0;
     SendMessageA(rate_box,CB_ADDSTRING,0,(LPARAM)"5");SendMessageA(rate_box,CB_ADDSTRING,0,(LPARAM)"10");SendMessageA(rate_box,CB_ADDSTRING,0,(LPARAM)"20");
     SendMessageA(rate_box,CB_SETCURSEL,preferences.fps==5?0:preferences.fps==10?1:2,0);
@@ -298,7 +379,13 @@ static int create_controls(void)
     { char korean[80];if(!ansi_text("Korean / 한국어",korean,sizeof korean))lstrcpyA(korean,"Korean");SendMessageA(language_box,CB_ADDSTRING,0,(LPARAM)korean); }
     SendMessageA(language_box,CB_SETCURSEL,preferences.language,0);
     SendMessageA(pause_box,BM_SETCHECK,preferences.paused?BST_CHECKED:BST_UNCHECKED,0);
-    SendMessageA(battery_box,BM_SETCHECK,preferences.battery_saver?BST_CHECKED:BST_UNCHECKED,0);labels();return 1;
+    SendMessageA(battery_box,BM_SETCHECK,preferences.battery_saver?BST_CHECKED:BST_UNCHECKED,0);
+    { szw_settings stored;
+      if(szw_load_settings(&stored)==ERROR_SUCCESS) {
+          SendMessageA(agent_box,BM_SETCHECK,stored.enabled?BST_CHECKED:BST_UNCHECKED,0);
+          SendMessageA(agent_fs_box,BM_SETCHECK,stored.fullscreen_pause?BST_CHECKED:BST_UNCHECKED,0);
+      } else SendMessageA(agent_fs_box,BM_SETCHECK,BST_CHECKED,0); }
+    labels();return 1;
 }
 static LRESULT CALLBACK window_proc(HWND window,UINT message,WPARAM wparam,LPARAM lparam)
 {
@@ -312,6 +399,9 @@ static LRESULT CALLBACK window_proc(HWND window,UINT message,WPARAM wparam,LPARA
         if(HIWORD(wparam)==BN_CLICKED && (LOWORD(wparam)==ID_CLASSIC || LOWORD(wparam)==ID_SHIZUKUOS)) {
             choose_theme(LOWORD(wparam)==ID_CLASSIC?SHZ_THEME_CLASSIC:SHZ_THEME_SHIZUKUOS);return 0;
         }
+        if(HIWORD(wparam)==BN_CLICKED && (LOWORD(wparam)==ID_RETRO_ON || LOWORD(wparam)==ID_RETRO_OFF)){apply_retro(LOWORD(wparam)==ID_RETRO_ON);return 0;}
+        if(HIWORD(wparam)==BN_CLICKED && LOWORD(wparam)==ID_AGENT_APPLY){read_controls();apply_agent();return 0;}
+        if(HIWORD(wparam)==BN_CLICKED && (LOWORD(wparam)==ID_METRICS_ON || LOWORD(wparam)==ID_METRICS_OFF)){apply_metrics(LOWORD(wparam)==ID_METRICS_ON);return 0;}
         read_controls();
         if(LOWORD(wparam)==ID_LANGUAGE && HIWORD(wparam)==CBN_SELCHANGE)labels();
         if(LOWORD(wparam)==ID_SAVE) {
@@ -358,7 +448,7 @@ static LRESULT CALLBACK window_proc(HWND window,UINT message,WPARAM wparam,LPARA
 }
 void __attribute__((stdcall)) WinMainCRTStartup(void)
 {
-    WNDCLASSA window_class={0};MSG message;RECT rect={0,0,640,490};char converted[64];int opened=0,code=1,mode;
+    WNDCLASSA window_class={0};MSG message;RECT rect={0,0,640,580};char converted[64];int opened=0,code=1,mode;
     const char *command=GetCommandLineA();size_t command_bytes=0;
     HRESULT initialized;
     while(command && command_bytes<1024 && command[command_bytes])++command_bytes;

@@ -197,4 +197,15 @@ class NestedContract(unittest.TestCase):
         before,after=self.inventory();before['SHZGOP']={'bytes':3}
         with self.assertRaises(ValueError):r.verify_payload_inventory(before,after,self.payloads)
 
+class PersistenceRecipeBinding(unittest.TestCase):
+    def test_binding_key_and_admit_recipe(self):
+        pv=load('nonce_prepare_vm',REPO/'shizukudos/supervisor/native_win98/prepare_vm.py')
+        out=Path('/tmp/shz-gb');sock=str(out/'epoch.sock')
+        pers=stage.recipe_binding(9,sock,{'W98PERS.BIN':{}});plain=stage.recipe_binding(9,sock,{'VGACFG.BIN':{}})
+        self.assertIs(pers.get('modern_persistence_low32'),True);self.assertNotIn('modern_persistence_low32',plain)
+        a=tuple(pv.recipe('q',out,pers));b=tuple(pv.recipe('q',out,plain))
+        epoch.admit_recipe(a,2,9,sock);epoch.admit_recipe(b,1,9,sock)
+        with self.assertRaises(Exception):epoch.admit_recipe(b,2,9,sock)
+        with self.assertRaises(Exception):epoch.admit_recipe(a,1,9,sock)
+
 if __name__=='__main__':unittest.main()

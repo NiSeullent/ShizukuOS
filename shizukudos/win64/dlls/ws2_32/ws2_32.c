@@ -9,7 +9,7 @@
  *  - IPv4 only. socket(AF_INET6) fails with WSAEAFNOSUPPORT; inet_pton/inet_ntop still convert IPv6 text (pure formatting).
  *  - WSASend/WSARecv/WSASendTo/WSARecvFrom/WSAIoctl are synchronous and fail with WSAEOPNOTSUPP when
  *    an OVERLAPPED or completion routine is supplied. WSAEventSelect/WSAEnumNetworkEvents are implemented (kernel side).
- *  - ConnectEx/DisconnectEx use real IPv4 TCP and native IRPs with events/IOCP. No AcceptEx, raw sockets or extension APCs.
+ *  - ConnectEx/DisconnectEx/AcceptEx (overlapped only) use real IPv4 TCP and native IRPs with events/IOCP. No raw sockets or extension APCs.
  *  - inet_ntoa uses a process-wide static buffer (Windows uses per-thread storage).
  *  - gethostbyaddr reads genuine IPv4 records from system drivers\\etc\\hosts only; no PTR, NetBIOS or IPv6 reverse provider.
  *    Missing hosts database is WSANO_RECOVERY; an absent address is WSAHOST_NOT_FOUND. No numeric-name fallback.

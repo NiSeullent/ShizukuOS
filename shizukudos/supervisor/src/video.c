@@ -4,6 +4,7 @@
 #include "devices.h"
 #include "../../csmwrap/video/cp437.h"
 #include "guest.h"
+#include "../../abi/shz_abi.h"
 
 #define TEXT_BASE 0xb8000ull
 #define COLS 80
@@ -16,6 +17,8 @@ static uint32_t last_hash;
 static int last_render_valid;
 static int native_vga_owner;
 void video_native_vga_own(void) { native_vga_owner = 1; last_render_valid = 0; }
+static uint32_t delegated_dom;                   /* 0 = the Supervisor console owns the GOP framebuffer */
+void video_delegate_display(uint32_t dom) { delegated_dom = dom < SHZ_MAX_DOMAINS ? dom : 0; last_render_valid = 0; }
 static struct {
     uint64_t base, size, guest_ram;
     uint32_t width, height, pitch, format;
@@ -256,6 +259,12 @@ void video_render(void)
 {
     if (native_vga_owner) return;
     shz_info_t *info = G.info;
+    if (delegated_dom) {                         /* single writer: the granted domain draws, the console stays off */
+        const uint32_t st = info ? info->domains[delegated_dom].state : SHZ_DS_FAILED;
+        if (st == SHZ_DS_RUNNABLE || st == SHZ_DS_WAITING) return;
+        delegated_dom = 0;                       /* grantee ended: it can no longer write; reclaim for the console */
+        last_render_valid = 0;
+    }
     const uint16_t *page = text_page();
     volatile uint32_t *fb;
     uint64_t pixels;

@@ -107,6 +107,24 @@ I2C/GPIO resources. No discovered OEM/I2C resource provider currently calls it
 on live hardware; actual Win98 mouse-driver/USER input and hardware tests are
 still required. See the native bridge's `POINTER_BRIDGE.md` for that gate.
 
+`ps2_touchpad.h` adds the i8042 auxiliary-port path used by most legacy
+laptop touchpads: a trusted byte transport (`write_aux`/`read_aux`/`drain`,
+provider-enforced elapsed timeouts) drives F5 stream stop (bounded in-flight
+byte skip), Synaptics E6/E8 sliced queries (identify, capabilities, model,
+extended 0x09/0x0C, resolution), absolute+80pps mode with W mode when the
+extended capability is reported, and F4 enable. Non-Synaptics or pre-4.x
+identification selects standard 3-byte relative PS/2 after F6 defaults. Any
+transport failure after the first command poisons the device; only
+`shz_ps2_close` (FF reset with AA 00 self-test) clears it, also restoring
+relative mode for legacy drivers. `shz_ps2_feed` frames bytes with sync-bit
+resynchronization, revalidates ownership per frame and publishes through the
+same `shz_pointer_adapter`. ClickPad, middle-button and extra-button
+coordinate masking follow the reported capabilities. Multi-finger frames
+keep buttons but publish no contact; W2 pass-through/W3 packets,
+RMI4/SMBus, ALPS/Elantech protocols and gestures return explicit errors.
+Coverage is host model only (`test_ps2_touchpad.c`); no i8042 owner calls it
+on live hardware yet.
+
 Protocol references used for this independently authored implementation:
 
 - [UEFI ACPI6.6 software programming model: FADT/GAS/ECDT](https://uefi.org/specs/ACPI/6.6/05_ACPI_Software_Programming_Model.html)

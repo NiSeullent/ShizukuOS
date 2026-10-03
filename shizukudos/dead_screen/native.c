@@ -13,6 +13,7 @@ extern void ds_test_outb(uint16_t,uint8_t);
 extern uint64_t ds_test_cr2(void),ds_test_cr3(void),ds_test_flags(void);
 extern void ds_test_halt(void) __attribute__((noreturn));
 extern void ds_test_iteration(const ds_state *);
+extern uint64_t ds_test_sp(void),ds_test_boot_stack_top(void),ds_test_task_stack_top(void);
 #define k_inb ds_test_inb
 #define k_outb ds_test_outb
 #define read_cr2 ds_test_cr2
@@ -26,6 +27,7 @@ static unsigned initialised,keyboard_ready,timer_ready,capturing,force_text;
 static char panic_reason[DS_REASON];
 static unsigned panic_length;
 static unsigned fallback_depth;
+static volatile unsigned secondary_cpus_started;
 #ifdef SHZ_STANDALONE
 static unsigned serial_ready;
 #endif
@@ -82,6 +84,43 @@ void ds_native_bind(volatile uint32_t *pixels,uint32_t width,uint32_t height,
 void ds_native_keyboard_ready(unsigned ready) {keyboard_ready=!!ready;}
 void ds_native_timer_ready(void) {timer_ready=1;}
 void ds_native_force_text(void) {if(!state.latched)force_text=1;}
+/* Sticky, lock-free: an AP start makes panic-time takeover unproven. The fatal
+ * path must not take the scheduler queue lock to ask for the online mask. */
+void ds_native_secondary_cpu_started(void) {secondary_cpus_started=1;}
+#ifdef SHZ_STANDALONE
+static int within(uint64_t sp,uint64_t top,uint64_t bytes)
+{ return top>bytes && sp>top-bytes && sp<=top; }
+#endif
+/* Measures only already-known facts: RFLAGS after CLI, the live SP and whether
+ * it lies in the boot or current-task kernel stack. Unknown => not proven. */
+static void measure(ds_context *c)
+{
+    memset(c,0,sizeof *c);
+#ifdef SHZ_STANDALONE
+    uint64_t boot_top,task_top;
+#ifdef DS_NATIVE_HOST_TEST
+    c->flags=ds_test_flags();c->sp=ds_test_sp();
+    boot_top=ds_test_boot_stack_top();task_top=ds_test_task_stack_top();
+#else
+    extern uint8_t kstack_top[];
+    __asm__ volatile("pushfq; popq %0":"=r"(c->flags));
+    __asm__ volatile("mov %%rsp,%0":"=r"(c->sp));
+    boot_top=(uint64_t)kstack_top;task_top=g_kstack_top; /* start.asm: KSTACK_BYTES */
+#endif
+    if(within(c->sp,boot_top,KSTACK_BYTES)) {c->stack_low=boot_top-KSTACK_BYTES;c->stack_high=boot_top;}
+    else if(within(c->sp,task_top,KSTACK_BYTES)) {c->stack_low=task_top-KSTACK_BYTES;c->stack_high=task_top;}
+    c->secondary_cpus_started=secondary_cpus_started;
+    c->fault_depth=fallback_depth;
+    c->proven=1;
+#endif
+}
+static void hexline(char *out,const char *label,unsigned v)
+{
+    unsigned n=0;
+    while(*label)out[n++]=*label++;
+    for(unsigned i=0;i<8;++i)out[n++]="0123456789abcdef"[(v>>((7-i)*4))&15];
+    out[n++]='\n';out[n]=0;
+}
 static void fallback(void) __attribute__((noreturn));
 static void fallback(void)
 {
@@ -112,7 +151,21 @@ static void enter(const ds_fault *f)
     if(ds_latch(&state,DS_KERNEL_FATAL,f)!=1) fallback();
     /* The framebuffer includes the real trace. The exact textual fallback is
      * used when rendering/load prerequisites fail, or on recursive fault. */
+    {
+        ds_context context;
+        measure(&context);
+        (void)ds_admit_games(&state,&context);
+    }
     if(force_text || ds_render(&state,&framebuffer)) fallback();
+    if(!state.games_allowed) {
+        /* Visual + traceback are on screen; the game loop is refused. Report
+         * the refusal on the console and halt; output failure still halts. */
+        char line[64];
+        hexline(line,"Dead Screen: games refused, unsafe=0x",state.unsafe);
+        size_t n=0;while(line[n])++n;
+        (void)console(0,line,n);
+        halt();
+    }
 #ifdef SHZ_STANDALONE
     uint32_t elapsed=0;
     uint16_t previous=0;

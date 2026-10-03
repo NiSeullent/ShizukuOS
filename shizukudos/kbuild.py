@@ -40,6 +40,11 @@ def dead_screen_sources():
             ("dead_screen.c", "render.c", "native.c", "control.c")]
 
 
+def kernel_font_sources():
+    # The same licensed glyph data and allocation-free rasterizer as GDI32.
+    return [SHZ / "win64/dlls/gdi32" / name for name in ("gdi_font.c", "gdi_font_data.c")]
+
+
 def build_standalone_stub(k32=False):
     """Multiboot ELF32 boot stub (see kernel64/standalone/boot32.c) for running a guest kernel without the Supervisor."""
     out = BUILD / ("kernel32s" if k32 else "kernel64s")
@@ -64,10 +69,13 @@ def source_hashes():
     # Kernel64's laptop_protocols.c imports the shared driver C and headers.
     directories += [REPO / "shizukufs/v1/libsfs", REPO / "drivers/ahci_native",
                     REPO / "drivers/common", REPO / "drivers/shz_laptop"]
+    # Kernel64 net_sock_extensions.h includes the AcceptEx registry source.
+    directories += [REPO / "ntwin32/steam_socket"]
     paths = {p for directory in directories for p in directory.rglob("*")
              if p.is_file() and p.suffix in (".c", ".h", ".asm", ".ld")}
     paths.update(SHZ / "install" / name for name in
                  ("native_release_admission.py", "native_release_policy.py", "native_payload_ingest.py", "private_installer_package.py", "native_capacity_profile.py", "private_installer_iso.py", "native_build_tool_custody.py"))
+    paths.update([*kernel_font_sources(), SHZ / "win64/dlls/gdi32/gdi_font.h"])
     paths.update([Path(__file__).resolve(), SHZ / "tools/shzlib.py", SHZ / "win64/pe_parse.c",
                   SHZ / "win64/pe_parse.h",
                   SHZ / "supervisor/src/font8x8_basic.h", SHZ / "supervisor/build.py",
@@ -177,20 +185,28 @@ def build_all(args, stack, private_finalize=None):
              for name, sha in built_sources.items()],
             build_tool_pins={role: {"path": row["path"], "bytes": Path(row["path"]).stat().st_size,
                                    "sha256": row["sha256"]}
-                             for role, row in tools.items()}))
+                             for role, row in tools.items()},
+            # role-2 SZOU pin only when explicitly requested; v1-only call shape is unchanged
+            **({"original_userland_manifest": args.original_userland_manifest}
+               if getattr(args, "original_userland_manifest", None) is not None else {})))
     private_flags = [] if release is None or release.get('profile') is None else release['profile'].flags()
     k32 = build_kernel("kernel32", "kernel32", K32_FLAGS, "elf32", "elf_i386", "KERNEL32.BIN")
     # The PE32+ parser is shared with the host tests; Kernel64 links the same source freestanding.
     # ShizukuFS v1 (ext4 format, jbd2): the portable libsfs sources are linked freestanding (kernel64/sfs_mount.c).
     libsfs = sorted((REPO / "shizukufs" / "v1" / "libsfs").glob("*.c"))
     k64 = build_kernel("kernel64", "kernel64", K64_FLAGS, "elf64", "elf_x86_64", "KERNEL64.BIN",
-                       extra_c=[SHZ / "win64" / "pe_parse.c", *libsfs, *dead_screen_sources()])
+                       extra_c=[SHZ / "win64" / "pe_parse.c", *libsfs, *dead_screen_sources(), *kernel_font_sources()])
     # Same sources with SHZ_STANDALONE: hypercalls served in-kernel over COM1/PIT/RTC so it boots under QEMU TCG.
     # The standalone profile is the only one with a disk: the original AHCI core (drivers/ahci_native) is linked
     # behind kernel64/ahci_blk.c; under the Supervisor no device is passed through and the block registry stays empty.
     k64s = build_kernel("kernel64s", "kernel64", K64_FLAGS + ["-DSHZ_STANDALONE"] + (["-DSHZ_NATIVE_INSTALLER_RELEASE"] if release else []) + private_flags, "elf64", "elf_x86_64",
                         "KERNEL64S.BIN", extra_c=[SHZ / "win64" / "pe_parse.c", STUB_DIR / "standalone64.c",
-                                                  REPO / "drivers" / "ahci_native" / "ahci.c", *libsfs, *dead_screen_sources(),
+                                                  REPO / "drivers" / "ahci_native" / "ahci.c",
+                                                  REPO / "drivers" / "xhci_native" / "xhci.c", REPO / "drivers" / "xhci_usb" / "xhci_usb.c",
+                                                  REPO / "drivers" / "xhci_usb" / "hid_interrupt.c", REPO / "drivers" / "usb_native" / "ntwu_usb.c",
+                                                  REPO / "drivers" / "shz_laptop" / "hid.c", REPO / "drivers" / "shz_laptop" / "pointer_adapter.c",
+                                                  REPO / "drivers" / "shz_laptop" / "ps2_touchpad.c",
+                                                  REPO / "drivers" / "common" / "device.c", *libsfs, *dead_screen_sources(), *kernel_font_sources(),
                                                   *([release["source"]] if release else [])])
     stub = build_standalone_stub()
     k32s = build_kernel("kernel32s", "kernel32", K32_FLAGS + ["-DSHZ_STANDALONE"], "elf32", "elf_i386", "KERNEL32S.BIN",
@@ -235,9 +251,14 @@ def build_all(args, stack, private_finalize=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, help="new canonical private output directory")
+    parser.add_argument("--original-userland-manifest", type=Path, default=None,
+                        help="private original-userland stage manifest; role-2 SZOU pin, needs --native-release-manifest "
+                             "and an approved ORIGINAL_USERLAND_STAGE policy anchor")
     parser.add_argument("--native-release-manifest", type=Path,
                         help="private actual saved producer manifest; installer K64S only")
     args = parser.parse_args()
+    if args.original_userland_manifest is not None and args.native_release_manifest is None:
+        parser.error("--original-userland-manifest is admitted only inside --native-release-manifest custody")
     if args.native_release_manifest is not None:
         if args.out is None or any((p / ".git").exists() for p in args.out.parents):
             parser.error("native release requires explicit fresh private --out outside Git")

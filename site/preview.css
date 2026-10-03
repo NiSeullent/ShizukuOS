@@ -29,7 +29,7 @@
 .preview-proof summary { cursor: pointer; padding: .6rem 0; }
 .preview-proof dl { display: grid; grid-template-columns: minmax(8rem, 1fr) minmax(0, 3fr); gap: .6rem; font-size: .875rem; line-height: 1.5; }
 .preview-proof dt { color: #52727c; }
-.preview-proof dd { margin: 0; overflow-wrap: anywhere; font-family: ui-monospace, monospace; }
+.preview-proof dd { margin: 0; overflow-wrap: anywhere; font-family: var(--site-font); }
 .preview-live-status { color: #52727c; font-size: .875rem; padding: .75rem 0; }
 .preview-dialog { width: min(96vw, 1400px); max-width: 96vw; max-height: 95vh; padding: 1rem; border: 1px solid #9aacb2; border-radius: .4rem; }
 .preview-dialog::backdrop { background: rgb(5 20 26 / .85); }

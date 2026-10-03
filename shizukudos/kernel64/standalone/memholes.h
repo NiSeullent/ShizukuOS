@@ -8,7 +8,7 @@
  * Why: OVMF with S3 enabled (QEMU's default) reserves its SEC/PEI scratch RAM at 8-9 MiB as EfiACPIMemoryNVS for
  * S3 resume; UEFI hands it to CSMWrap's E820 as ACPI NVS too. An OS must not overwrite ACPI NVS, so Kernel64's RAM
  * is not one run from 1 MiB. Kernel64's layout is fixed: boot structures [0x1000, 0x8000), kernel image + bss
- * [1 MiB, 3 MiB), heap [3 MiB, 15 MiB), page allocator above 15 MiB, initial RAM image at 32 MiB. The plan:
+ * [1 MiB, 4 MiB), heap [4 MiB, 15 MiB), page allocator above 15 MiB, initial RAM image at 32 MiB. The plan:
  *   - boot structures, the kernel window and the initial RAM image must be usable RAM (else: refused);
  *   - a hole in the heap window is fenced off in the heap's block list (mem.c heap_init), as long as at least
  *     SHZ_K64_HEAP_KEEP bytes of the heap stay usable (else: refused);
@@ -27,13 +27,24 @@
 #define SHZ_MEMHOLES_MAGIC 0x454c4f48u  /* "HOLE" */
 #define SHZ_MEMHOLES_MAX 16
 
-/* Kernel64's fixed guest-physical layout (mem.c checks that it matches). */
+/* Kernel64's fixed guest-physical layout: the one checked contract for every Kernel64 loader (Multiboot stub
+ * boot32.c, UEFI direct boot supervisor/loader/loader.c, Supervisor kdom.c) and for mem.c, which includes this
+ * header in every build. kernel64/link.ld repeats SHZ_K64_KERNEL_END as a literal in its ASSERT (a linker script
+ * cannot include C); test_memplan.py checks that the two agree. Kernel32 has its own geometry (boot32.c STUB_K32). */
 #define SHZ_K64_LOW_GPA 0x1000u         /* boot page tables, loader trampoline, holes, boot info: [0x1000, 0x8000) */
 #define SHZ_K64_LOW_END 0x8000u
-#define SHZ_K64_KERNEL_GPA 0x100000u    /* kernel image + bss: [1 MiB, 3 MiB) */
-#define SHZ_K64_HEAP_GPA 0x300000u      /* heap: [3 MiB, 15 MiB) */
+#define SHZ_K64_KERNEL_GPA 0x100000u    /* kernel image + bss: [1 MiB, 4 MiB); every loader zeroes all of it */
+#define SHZ_K64_KERNEL_END 0x400000u
+#define SHZ_K64_KERNEL_WINDOW (SHZ_K64_KERNEL_END - SHZ_K64_KERNEL_GPA)
+#define SHZ_K64_KERNEL_FILE_MAX SHZ_K64_KERNEL_WINDOW  /* KERNEL64*.BIN bytes; link.ld bounds file + bss */
+#define SHZ_K64_HEAP_GPA SHZ_K64_KERNEL_END              /* heap: [4 MiB, 15 MiB) */
 #define SHZ_K64_PMM_GPA 0xF00000u       /* page allocator from 15 MiB */
-#define SHZ_K64_HEAP_KEEP 0x800000u     /* at least 8 MiB of the 12 MiB heap window must be usable RAM */
+#define SHZ_K64_HEAP_BYTES (SHZ_K64_PMM_GPA - SHZ_K64_HEAP_GPA)   /* 11 MiB */
+#define SHZ_K64_HEAP_KEEP 0x800000u     /* at least 8 MiB of the 11 MiB heap window must be usable RAM */
+_Static_assert(SHZ_K64_LOW_END <= SHZ_K64_KERNEL_GPA && SHZ_K64_KERNEL_GPA < SHZ_K64_KERNEL_END &&
+               SHZ_K64_KERNEL_END == SHZ_K64_HEAP_GPA && SHZ_K64_HEAP_GPA < SHZ_K64_PMM_GPA &&
+               SHZ_K64_HEAP_KEEP <= SHZ_K64_HEAP_BYTES && !(SHZ_K64_KERNEL_END & 0xfffu) &&
+               !(SHZ_K64_PMM_GPA & 0xfffu), "Kernel64 guest-physical layout");
 
 typedef struct {
     uint32_t magic;                     /* SHZ_MEMHOLES_MAGIC */
@@ -65,9 +76,9 @@ typedef struct {
 
 typedef struct {
     uint64_t ram;                       /* Kernel64 ram_size: guest RAM is [0, ram), 2 MiB aligned; 0 = refused */
-    uint32_t count;                     /* holes in [3 MiB, ram), page aligned outward */
+    uint32_t count;                     /* holes in [4 MiB, ram), page aligned outward */
     uint64_t gpa[SHZ_MEMHOLES_MAX], size[SHZ_MEMHOLES_MAX];
-    uint64_t heap_hole_bytes;           /* bytes of the heap window [3 MiB, 15 MiB) inside holes */
+    uint64_t heap_hole_bytes;           /* bytes of the heap window [4 MiB, 15 MiB) inside holes */
     uint64_t cut;                       /* nonzero: RAM ends early below this hole (hole budget exhausted) */
     uint64_t top;                       /* highest usable address below the cap */
     const char *why;                    /* refusal reason when ram == 0 */
@@ -193,10 +204,10 @@ static inline int shz_memplan_solve(const shz_memplan_t *p, uint64_t cap, uint64
     r->why = 0;
     if (!shz_memplan_covers(p, SHZ_K64_LOW_GPA, SHZ_K64_LOW_END))
         return shz_memplan_refuse(r, "the boot pages [0x1000, 0x8000) are not usable RAM", SHZ_K64_LOW_GPA);
-    if (!shz_memplan_covers(p, SHZ_K64_KERNEL_GPA, SHZ_K64_HEAP_GPA)) {
+    if (!shz_memplan_covers(p, SHZ_K64_KERNEL_GPA, SHZ_K64_KERNEL_END)) {
         for (i = 0; i < p->n && !(p->base[i] <= SHZ_K64_KERNEL_GPA && p->end[i] > SHZ_K64_KERNEL_GPA); ++i)
             ;
-        return shz_memplan_refuse(r, "firmware hole in the kernel window [1 MiB, 3 MiB) at",
+        return shz_memplan_refuse(r, "firmware hole in the kernel window [1 MiB, 4 MiB) at",
                                   i < p->n ? p->end[i] : SHZ_K64_KERNEL_GPA);
     }
     for (i = 0; i < p->n; ++i)          /* highest usable address below the cap */
@@ -204,7 +215,7 @@ static inline int shz_memplan_solve(const shz_memplan_t *p, uint64_t cap, uint64
             r->top = p->end[i] < cap ? p->end[i] : cap;
     ram = r->top & ~0x1fffffull;
 
-    /* Gaps between usable runs in [3 MiB, ram). The kernel window is covered, so they start at or above 3 MiB. */
+    /* Gaps between usable runs in [4 MiB, ram). The kernel window is covered, so they start at or above 4 MiB. */
     cursor = SHZ_K64_HEAP_GPA;
     for (i = 0; i < p->n && cursor < ram; ++i) {
         if (p->end[i] <= cursor)
@@ -248,8 +259,8 @@ static inline int shz_memplan_solve(const shz_memplan_t *p, uint64_t cap, uint64
         if (z > a)
             r->heap_hole_bytes += z - a;
     }
-    if ((SHZ_K64_PMM_GPA - SHZ_K64_HEAP_GPA) - r->heap_hole_bytes < SHZ_K64_HEAP_KEEP) {
-        shz_memplan_refuse(r, "firmware holes leave less than 8 MiB of the kernel heap [3 MiB, 15 MiB); "
+    if (r->heap_hole_bytes > SHZ_K64_HEAP_BYTES || SHZ_K64_HEAP_BYTES - r->heap_hole_bytes < SHZ_K64_HEAP_KEEP) {
+        shz_memplan_refuse(r, "firmware holes leave less than 8 MiB of the kernel heap [4 MiB, 15 MiB); "
                               "hole bytes there:", r->heap_hole_bytes);
         r->at_is_size = 1;
         return 0;

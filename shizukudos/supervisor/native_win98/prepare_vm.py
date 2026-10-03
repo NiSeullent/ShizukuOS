@@ -38,13 +38,19 @@ def recipe(qemu, out, epoch_binding=None):
             "-serial", f"file:{out / 'serial.log'}", "-qmp", f"unix:{out / 'qmp.sock'},server=on,wait=off"]
 
     if epoch_binding is not None:
-        if type(epoch_binding) is not dict or set(epoch_binding) != {'policy_fd','listener_path'}:
+        if type(epoch_binding) is not dict or set(epoch_binding) - {'modern_persistence_low32'} != {'policy_fd','listener_path'} or \
+                epoch_binding.get('modern_persistence_low32', True) is not True:
             raise ValueError('exact live owner recipe binding required')
         fd,path = epoch_binding['policy_fd'],Path(epoch_binding['listener_path'])
         if type(fd) is not int or fd < 3 or path != out/'epoch.sock' or path.resolve() != path or len(os.fsencode(path)) >= 104:
             raise ValueError('actual owner policy FD and exact private COM2 path required')
         result += ['-S','-fw_cfg','name=opt/shizuku/native-device-epoch,file=/proc/self/fd/%d'%fd,
                    '-chardev','socket,id=shz-epoch,path=%s,server=off'%path,'-serial','chardev:shz-epoch']
+        # Selected W98PERS: disable OVMF's 64-bit PCI aperture so the modern
+        # virtio-blk BAR4 (64-bit prefetchable) is placed below 4 GiB, as
+        # observed in the owned firmware-only probe; HostGrant pins this pair.
+        if 'modern_persistence_low32' in epoch_binding:
+            result += ['-fw_cfg','name=opt/ovmf/X-PciMmio64Mb,string=0']
     return result
 
 

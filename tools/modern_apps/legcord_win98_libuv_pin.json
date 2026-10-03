@@ -1,0 +1,46 @@
+{
+  "schema": "shizukuos.legcord.libuv-port-pin.v1",
+  "node_runtime": "24.18.0",
+  "libuv_version": "1.52.1",
+  "libuv_version_source": "https://raw.githubusercontent.com/nodejs/node/v24.18.0/deps/uv/include/uv/version.h (UV_VERSION 1.52.1, IS_RELEASE 1)",
+  "upstream_tarball": {
+    "url": "https://github.com/libuv/libuv/archive/refs/tags/v1.52.1.tar.gz",
+    "sha256": "478baf2599bfbc882c355288c9cb6f92e0e7dda435fa04031fa5b607cf3f414c",
+    "size": 1361196,
+    "strip_components": 1,
+    "license": "MIT (libuv LICENSE preserved in upstream tarball)"
+  },
+  "node_deps_uv_identity": {
+    "note": "sha256 of node v24.18.0 deps/uv files equal the libuv v1.52.1 tag files",
+    "src/win/core.c": "b4e4f38d30c8c50cc5c2850c2512cb2fb43865236f3b7cfddc566b60ce9918a1",
+    "src/win/req-inl.h": "45e14fd58e531759c8130f1617cbccac69b463e8ab980664dc16202bb0600742",
+    "src/win/internal.h": "28de9aed84ec2dbb75e7eb18f270fa6fa3f080b16034e6a3d0b349a7d14bfe1a",
+    "src/win/async.c": "cfb1f1e500e3b012f80b90a1e55a45b5f9c5fe7d070368a2a95e0eff661450d1",
+    "src/win/winapi.c": "9a54878daa60d6ca1acc3dc6032dee8803325cf9cd1c0aaa241a5c8d510ed201",
+    "src/win/winapi.h": "d44fed6bb0c7576eb20706d69a975ea1359f9cfcd017df6ae6cf7e4adbb60f54",
+    "src/win/util.c": "cf857ce678c492c52b79782c980156e38b98f3167d117f0db1c3287be605a9a5"
+  },
+  "patch": {
+    "path": "tools/modern_apps/legcord_win98_libuv.patch",
+    "sha256": "3217cf8f051574d57b40f01fc6ed27c8caab81cfa25f9f2db1203d6cb6df200f",
+    "apply": "git apply -p1 (in extracted tarball root or node deps/uv)",
+    "define": "UV_SHIZUKU_LCIOCP",
+    "provider": "LCIOCP.DLL built from ntwin32/legcord_iocp (check.py)"
+  },
+  "verified": [
+    "git apply --check and patch --dry-run -p1 against fresh v1.52.1 extraction: clean",
+    "i686-w64-mingw32-gcc -fsyntax-only with -DUV_SHIZUKU_LCIOCP: core.c tcp.c udp.c pipe.c poll.c fs-event.c async.c, 0 errors",
+    "same without the define (upstream path) for core.c tcp.c: 0 errors",
+    "winapi.c hunk (UV_SHIZUKU_LCIOCP): uv__winapi_init resolves the 8 mandatory ntdll entry points + optional RtlGetVersion from LCIOCP.DLL ShizukuLc_* exports by ANSI GetProcAddress; git apply --check + patch --dry-run clean on fresh v1.52.1; i686 mingw -fsyntax-only winapi.c/core.c with and without define: 0 errors"
+  ],
+  "not_verified": [
+    "full libuv/Node/Electron build and link against LCIOCP.DLL",
+    "any Win98/ShizukuOS guest execution, Legcord startup or Discord operation"
+  ],
+  "known_remaining_win98_blockers": [
+    "ntdll providers return exact NTSTATUS failures where Win98 has no equivalent: NtQueryDirectoryFile/NtQuerySystemInformation NOT_IMPLEMENTED, NtDeviceIoControlFile INVALID_DEVICE_REQUEST (uv_poll AFD, uv_cpu_info, handle-based readdir, ioctl paths fail truthfully); remaining W-suffix Win32 API use (GetModuleHandleW etc. are Win9x stubs) elsewhere in libuv is not yet ported",
+    "uv_tcp_listen/accept: AcceptEx is not provided by the bridge (Discord client is outbound-only)",
+    "pipes/fs-event/uv_poll fast path: association returns ERROR_NOT_SUPPORTED (no Win98 completion source)",
+    "uv__winsock_init / SO_PROTOCOL_INFOW and SIO_BASE_HANDLE probes unverified on Win98 WS2_32"
+  ]
+}

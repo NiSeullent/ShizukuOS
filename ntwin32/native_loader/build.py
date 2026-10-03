@@ -33,7 +33,7 @@ def main():
            '-Wl,--disable-dynamicbase','-Wl,--disable-nxcompat','-Wl,--disable-tsaware',
            '-Wl,--no-insert-timestamp','-Xlinker','--stack','-Xlinker','4194304,65536']
     commands=[[clang,'--no-default-config','--target=i686-pc-windows-msvc','-march=i486','-O2','-fno-stack-protector','-c',str(HERE/'tls_compiler_fixture.c'),'-o',str(out/'compiler.obj')],
-              flags+['-Wl,--entry,_entry@0','-o',str(out/'NTWPE32.EXE'),str(HERE/'native.c'),str(HERE/'pe.c'),str(HERE/'tls_runtime.c'),'-lkernel32','-lgcc'],
+              flags+['-Wl,--entry,_entry@0','-o',str(out/'NTWPE32.EXE'),str(HERE/'native.c'),str(HERE/'pe.c'),str(HERE/'tls_runtime.c'),str(ROOT/'ntwin32/chromium_port/api_contract.c'),str(ROOT/'ntwin32/native_environment/environment.c'),'-lkernel32','-lgcc'],
               flags+['-shared','-Wl,--entry,_DllMain@12','-o',str(out/'PE32FIX.DLL'),str(HERE/'fixture.c'),str(HERE/'fixture.def'),'-lkernel32'],
               flags+['-DNP_FAIL_ATTACH','-shared','-Wl,--entry,_DllMain@12','-o',str(out/'PE32FAIL.DLL'),str(HERE/'fixture.c'),str(HERE/'fixture.def'),'-lkernel32'],
               flags+['-shared','-Wl,--entry,_DllMain@12','-Wl,--undefined,__tls_used','-Wl,--defsym,__tls_array=0x2c','-o',str(out/'PE32TLS.DLL'),str(HERE/'tls_fixture.c'),str(out/'compiler.obj'),str(HERE/'fixture.def'),'-lkernel32'],

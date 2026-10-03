@@ -14,6 +14,7 @@
 #define EPT_RWX 7ull
 #define EPT_WB (6ull << 3)
 #define EPT_UC 0ull
+#define EPT_WC (1ull << 3)                      /* EPT memory type 1: write-combining (guest PAT still applies) */
 
 typedef struct {
     uint64_t *pml4;

@@ -108,7 +108,7 @@ class MainControls(unittest.TestCase):
                 if mode=='lease_break' and clock[0]>=20:raise RuntimeError('modeled lease break')
             yield (0,checkpoint)
         guards=types.SimpleNamespace(pinned_hash=lambda path,pin,*a: self.assertEqual(sha(path),pin),read_leased=read_leased)
-        mods={'native_run_guards':guards,'native_run_preparation':types.SimpleNamespace(recipe=lambda *args:recipe),'native_run_qmp':types.SimpleNamespace(QMP=Monitor),'native_run_info':types.SimpleNamespace(REGION_BASE=64<<20,INFO_BYTES=8192,MAGIC=11,Info=Info,selfcheck=lambda path:5368),'native_run_capture':u}
+        mods={'native_run_guards':guards,'native_run_preparation':types.SimpleNamespace(recipe=lambda *args,**kw:recipe),'native_run_qmp':types.SimpleNamespace(QMP=Monitor),'native_run_info':types.SimpleNamespace(REGION_BASE=64<<20,INFO_BYTES=8192,MAGIC=11,Info=Info,selfcheck=lambda path:5368),'native_run_capture':u}
         def loader(name,path):
             instance.setdefault('imported_helpers',[]).append(name)
             return mods[name] if name in mods else original_load(name,path)

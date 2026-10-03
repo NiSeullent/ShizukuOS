@@ -69,6 +69,8 @@ void bootini_defaults(bootini_policy_t *p)
     p->menu_timeout = 0;
     p->win98_vga = p->win98_vga_set = 0;
     p->win98_persistence = p->win98_persistence_set = 0;
+    p->win98_input = p->win98_input_set = 0;
+    p->k64_display = p->k64_display_set = 0;
     p->mode_set = p->csm_path_set = p->auto_kernel64_set = p->menu_timeout_set = 0;
 }
 
@@ -241,8 +243,20 @@ static int boot_entry(void *ctx, msg_t *m, int line, const char *key, size_t kle
         else if(word_is(val,vlen,"no"))p->win98_persistence=0;
         else return fail(m,line,"invalid win98_persistence ",val,vlen," (expected yes or no)");
         p->win98_persistence_set=1;
+    } else if(word_is(key,klen,"win98_input")) {
+        if(p->win98_input_set)return fail(m,line,"duplicate key 'win98_input'",0,0,0);
+        if(word_is(val,vlen,"yes"))p->win98_input=1;
+        else if(word_is(val,vlen,"no"))p->win98_input=0;
+        else return fail(m,line,"invalid win98_input ",val,vlen," (expected yes or no)");
+        p->win98_input_set=1;
+    } else if(word_is(key,klen,"k64_display")) {
+        if(p->k64_display_set)return fail(m,line,"duplicate key 'k64_display'",0,0,0);
+        if(word_is(val,vlen,"yes"))p->k64_display=1;
+        else if(word_is(val,vlen,"no"))p->k64_display=0;
+        else return fail(m,line,"invalid k64_display ",val,vlen," (expected yes or no)");
+        p->k64_display_set=1;
     } else {
-        return fail(m, line, "unknown key ", key, klen, " (allowed: mode, csm_path, auto_kernel64, menu_timeout, win98_vga, win98_persistence)");
+        return fail(m, line, "unknown key ", key, klen, " (allowed: mode, csm_path, auto_kernel64, menu_timeout, win98_vga, win98_persistence, k64_display)");
     }
     return 0;
 }
@@ -258,6 +272,14 @@ int bootini_parse(const char *text, size_t len, bootini_policy_t *p, char *err, 
     if(!result && p->win98_persistence && p->mode!=BOOT_MODE_SUPERVISOR){
         msg_t m={err,errlen,0};if(errlen)err[0]=0;
         return fail(&m,1,"win98_persistence=yes requires mode=supervisor",0,0,0);
+    }
+    if(!result && p->k64_display && p->mode!=BOOT_MODE_SUPERVISOR){
+        msg_t m={err,errlen,0};if(errlen)err[0]=0;
+        return fail(&m,1,"k64_display=yes requires mode=supervisor",0,0,0);
+    }
+    if(!result && p->k64_display && (p->win98_vga || p->win98_persistence)){
+        msg_t m={err,errlen,0};if(errlen)err[0]=0;
+        return fail(&m,1,"k64_display=yes conflicts with the installed-Win98 display/persistence keys",0,0,0);
     }
     return result;
 }

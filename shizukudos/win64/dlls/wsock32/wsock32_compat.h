@@ -11,6 +11,10 @@ typedef void *PVOID;
 typedef int *LPINT;
 struct sockaddr { uint16_t sa_family; char sa_data[14]; };
 #define WSAEINVAL 10022
+#define NTAPI __attribute__((ms_abi))
+typedef int32_t LONG;
+typedef uint32_t ULONG, *PULONG;
+typedef uintptr_t ULONG_PTR;
 void WINAPI WSASetLastError(int);
 #else
 #define WIN32_LEAN_AND_MEAN

@@ -15,11 +15,17 @@
 #ifdef STUB_K32                                    /* Kernel32: 32-bit Protected Mode, paging off, EBX = bootinfo */
 #define STUB_DOMAIN SHZ_DOM_KERNEL32
 #define MAX_RAM (128u << 20)                       /* Kernel32's page allocator limit (mem.c MAX_PAGES) */
+#define KERNEL_WINDOW_END SHZ_STUB_K32_KERNEL_END  /* Kernel32: unchanged [1 MiB, 3 MiB) window, 1 MiB file */
+#define KERNEL_FILE_MAX SHZ_STUB_K32_FILE_MAX
+#define KERNEL_SIZE_WHY "kernel image size (file + bss must stay below 3 MiB), "
 #else
 #define STUB_DOMAIN SHZ_DOM_KERNEL64
 #define MAX_RAM 0xE0000000u                        /* 3.5 GiB: the most a QEMU pc guest has below 4 GiB; mem.c manages up to 4 GiB */
+#define KERNEL_WINDOW_END SHZ_K64_KERNEL_END        /* Kernel64: memholes.h [1 MiB, 4 MiB) window, heap from 4 MiB */
+#define KERNEL_FILE_MAX SHZ_K64_KERNEL_FILE_MAX
+#define KERNEL_SIZE_WHY "kernel image size (file + bss must stay below 4 MiB), "
 #endif
-#define KERNEL_GPA 0x100000u
+#define KERNEL_GPA SHZ_STUB_KERNEL_GPA
 #define INITRD_GPA 0x2000000u
 #define MB_MAGIC 0x2BADB002u
 #define MB_INFO_MEM_MAP 0x40u
@@ -161,8 +167,9 @@ void stub_prepare(uint32_t magic, const struct mbi *mbi)
     if (has_initrd) isize = mods[1].end - mods[1].start;
     ram = memory_layout(isize);
     if (ram < (64u << 20)) fail("need at least 64 MiB, have ", ram);
-    if (ksize == 0 || ksize > 0x100000u) fail("kernel image size (file + bss must stay below 3 MiB), ", ksize);
-    if (!shz_stub_relocation_valid(&runs, ram, (uint32_t)stub_end, mods[0].start, mods[0].end,
+    if (ksize == 0 || ksize > KERNEL_FILE_MAX) fail(KERNEL_SIZE_WHY, ksize);
+    if (!shz_stub_relocation_valid(&runs, ram, KERNEL_WINDOW_END, KERNEL_FILE_MAX, (uint32_t)stub_end,
+                mods[0].start, mods[0].end,
                 has_initrd ? mods[1].start : 0, has_initrd ? mods[1].end : 0, has_initrd))
         fail("module relocation outside safe usable RAM", mods[0].start);
     if (mbi->flags & 4) {                          /* Capture before module copies. K64 retains its historical raw,
@@ -185,7 +192,9 @@ void stub_prepare(uint32_t magic, const struct mbi *mbi)
 #endif
     }
 
-    zero(KERNEL_GPA, 0x300000u - KERNEL_GPA);      /* bss of the kernel image reads as zero, as after the Supervisor's memset */
+    /* bss of the kernel image reads as zero, as after the Supervisor's memset: the whole window up to its exclusive
+     * end, which is at or below this stub's own image (module_relocation.h asserts it). */
+    zero(KERNEL_GPA, KERNEL_WINDOW_END - KERNEL_GPA);
     copy(KERNEL_GPA, mods[0].start, ksize);
     if (isize) copy(INITRD_GPA, mods[1].start, isize);
 

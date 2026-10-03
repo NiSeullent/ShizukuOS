@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "dead_screen.h"
+#include "sprites.h"
 #include "../supervisor/src/font8x8_basic.h"
 
 typedef struct { const ds_surface *fb; int scale, ox, oy; } canvas;
@@ -157,10 +158,17 @@ static void bsod_art(canvas *c,int x,int y,int size,unsigned level)
     else if(size>=18 && level<3)ascii(c,x+2,y+size-9,short_label[level],2,0xffffff,1);
     else {char tag[2]={(char)('0'+level),0};ascii(c,x+size-8,y+size-8,tag,1,0xffffff,1);}
 }
+static void sprite_art(canvas *c,int x,int y,int size,unsigned level)
+{
+    /* Nearest-neighbour scale of the static rodata sprite; fixed loops. */
+    for(int py=0;py<size;++py) for(int px=0;px<size;++px)
+        if(ds_sprite_bit(level,(unsigned)(px*16/size),(unsigned)(py*16/size)))pixel(c,x+px,y+py,0xffffff);
+}
 static void item(canvas *c,int x,int y,int size,unsigned level)
 {
-    if(!level) {sadmac(c,x,y,size);return;}
+    if(!level) {if(size>=12)sprite_art(c,x,y,size,0);else sadmac(c,x,y,size);return;}
     rect(c,x,y,size,size,color[level]);box(c,x,y,size,size,0xffffff);
+    if(size>=12){sprite_art(c,x,y,size,level);return;}
     bsod_art(c,x,y,size,level);
 }
 static void hex(char out[17],uint64_t n)
@@ -191,7 +199,14 @@ static void trace(canvas *c,const ds_state *s)
 }
 static void game(canvas *c,const ds_state *s)
 {
-    if(s->mode==DS_MENU) {
+    if(s->mode==DS_MENU && !s->games_allowed) {
+        char bits[17];hex(bits,s->unsafe);
+        ascii(c,24,96,"GAMES UNAVAILABLE: unsafe fatal context",40,0xffffff,1);
+        ascii(c,24,112,"UNSAFE=0x",9,0xaaaaaa,1);ascii(c,96,112,bits+8,8,0xaaaaaa,1);
+        ascii(c,24,128,"Kernel halted; traceback retained.",36,0xaaaaaa,1);
+        for(unsigned row=0;row<5;++row) for(unsigned j=0;j<=row;++j)
+            sadmac(c,138-(int)row*22+(int)j*44,198+(int)row*39,38);
+    } else if(s->mode==DS_MENU) {
         const uint16_t menu1[]={0xd14c,0xd2b8,0xb9ac,0xc2a4,' ',0xac8c,0xc784,0xc744,' ',0xd560,0xb798,'?'};
         const uint16_t menu2[]={0xc218,0xbc15,' ',0xac8c,0xc784,0xc744,' ',0xd560,0xb798,'?'};
         ascii(c,24,92,"1",1,0xffffff,2);ascii(c,24,126,"2",1,0xffffff,2);
@@ -236,6 +251,8 @@ static void game(canvas *c,const ds_state *s)
 int ds_render(ds_state *s,const ds_surface *f)
 {
     if(!s || !s->latched || s->graphics_failed) return -1;
+    if(s->guard_head!=DS_GUARD_HEAD || s->guard_tail!=DS_GUARD_TAIL ||
+       (s->mode!=DS_MENU && !s->games_allowed)) {s->graphics_failed=1;return -1;}
     if(s->mode>DS_SUIKA || (s->mode==DS_TETRIS &&
        (s->tetris.piece>=7 || s->tetris.rotation>=4 || s->tetris.x < -4 ||
         s->tetris.x>10 || s->tetris.y < -4 || s->tetris.y>20)) ||
@@ -268,7 +285,8 @@ int ds_render(ds_state *s,const ds_surface *f)
         for(unsigned i=0;i<6;++i) {item(&c,304,116+(int)i*43,32,i);ascii(&c,350,128+(int)i*43,full[i],22,0xffffff,1);}
         ascii(&c,304,396,"T shows actual traceback",25,0xaaaaaa,1);
     }
-    ascii(&c,24,450,"1 Tetris  2 Suika | A/D move W rotate S down Space drop",56,0xffffff,1);
+    if(s->games_allowed) ascii(&c,24,450,"1 Tetris  2 Suika | A/D move W rotate S down Space drop",56,0xffffff,1);
+    else ascii(&c,24,450,"Games refused by panic-time safety gate",40,0xffffff,1);
     ascii(&c,24,466,"Esc menu  R restart  L KO/EN  T trace/items | kernel halted",60,0xaaaaaa,1);
     return 0;
 }

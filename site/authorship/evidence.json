@@ -4,7 +4,7 @@
   "proposed_version": "0.9",
   "release_state": "development_checkpoint",
   "published_by_this_tool": false,
-  "repository": "https://github.com/NiSeullent/Win98-Modern",
+  "repository": "https://github.com/NiSeullent/ShizukuOS",
   "full_project_goal_complete": false,
   "screenshots": [
     {
@@ -174,7 +174,7 @@
   ],
   "publication_target": "https://m98.nyase.kr/authorship/",
   "source_branch": "main",
-  "handoff_document": "https://github.com/NiSeullent/Win98-Modern/blob/main/docs/CONTINUE_MODERN_APPS.md",
+  "handoff_document": "https://github.com/NiSeullent/ShizukuOS/blob/main/docs/CONTINUE_MODERN_APPS.md",
   "required_targets": [
     "Google Chrome",
     "Chromium",
@@ -209,5 +209,5 @@
       "application_functionality": false
     }
   },
-  "v44_contract_record": "https://github.com/NiSeullent/Win98-Modern/blob/main/docs/shizukudos10/reports/checkpoint-20261001/v44-contracts.json"
+  "v44_contract_record": "https://github.com/NiSeullent/ShizukuOS/blob/main/docs/shizukudos10/reports/checkpoint-20261001/v44-contracts.json"
 }

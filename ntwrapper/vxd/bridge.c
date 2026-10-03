@@ -14,6 +14,41 @@ static void ntwv_fill(void *d, int c, size_t n) { uint8_t *a = d; while (n--) *a
 #define SHZ_IPC_MEMCPY(d, s, n) ntwv_copy((d), (s), (n))
 #define SHZ_IPC_MEMSET(d, c, n) ntwv_fill((d), (c), (n))
 #include "../../shizukudos/abi/shz_ipc.h"
+#ifdef NTWV_W64_DERIVED_OWNER
+#include "w64_owner.h"
+/* Set only inside dioc_w64 under the W64 admission token: a user SEND is stamped with the VxD-derived owner. */
+static int w64_stamp;
+static uint32_t w64_stamp_cap;
+/* RECV demultiplex: K64 replies echo the request capability_id and events carry the creator's owner_cap, so a
+ * message is delivered only to the Win98 process holding that derived identity. A message popped by another
+ * process waits here (bounded); an owner that retired drops its messages. Protected by w64_admitted.
+ * Every stashed message records a non-wrapping 64-bit arrival number; an owner always receives its OLDEST stashed
+ * message first (slot reuse order is irrelevant), so per-process console sequence order is preserved. */
+#define NTWV_W64_STASH 8u
+struct w64_stashed { uint32_t cap; uint64_t arrival; uint8_t slot[SHZ_MSG_SLOT_SIZE]; };
+static struct w64_stashed w64_stash[NTWV_W64_STASH];
+static uint64_t w64_arrival;
+static uint32_t w64_orphans;
+/* Remote process custody (P1-C). Every CREATE_PROCESS the VxD forwards for a derived owner reserves an entry
+ * (owner capability + request id); only the matching reply turns it into (owner, K64 pid), so a foreign or forged
+ * reply can never make the VxD kill a process. A full table refuses the CREATE (fail closed, nothing leaks). When that owner retires (last NTWRAP9X handle closed) before releasing it, the
+ * VxD itself sends a trusted (DERIVED bit clear) KILL_PROCESS, waits for PROCESS_EXITED, then sends RELEASE.
+ * Bounded: work happens only inside admitted W64 DIOCs of other processes; table overflow is counted. */
+#define NTWV_W64_TRACKED 32u
+enum { TR_FREE = 0, TR_CREATE_SENT, TR_RUNNING, TR_EXITED, TR_KILL_SENT, TR_RELEASE_SENT };
+/* out_seen: highest CONSOLE_OUTPUT seq K64 sent for this (owner, pid) and this VxD popped (delivered, stashed or
+ * discarded); out_acked: highest seq the VxD itself acknowledged after the owner retired. K64 holds a process's
+ * PROCESS_EXITED until its output FIFOs drain, and drains only under console credit, so a retired owner's unacked
+ * window must be acknowledged here or the slot never reaches EXITED/RELEASE. */
+struct w64_tracked_proc { uint32_t cap, pid, state, user_release, out_seen, out_acked; uint64_t user_req, vxd_req; };
+static struct w64_tracked_proc w64_tracked[NTWV_W64_TRACKED];
+static uint64_t w64_vxd_request = UINT64_C(0x8000000000000000);   /* VxD-originated ids; client ids start low */
+static uint32_t w64_untracked;
+/* Same LE-packer constraint as w64_owner.c owner_at(): keep element addresses computed from the array base. */
+static struct w64_stashed *stash_at(uint32_t i) { struct w64_stashed *s = &w64_stash[i]; __asm__("" : "+r"(s)); return s; }
+static struct w64_tracked_proc *tracked_at(uint32_t i)
+{ struct w64_tracked_proc *t = &w64_tracked[i]; __asm__("" : "+r"(t)); return t; }
+#endif
 
 _Static_assert(sizeof(struct ntwv_dioc) == 48, "VWIN32 DIOC ABI");
 _Static_assert(sizeof(struct ntwv_query) == 32, "query wire ABI");
@@ -296,8 +331,10 @@ static struct {
     shz_channel_hdr_t layout;              /* Supervisor-owned layout captured at OPEN */
     shz_ring_hdr_t *tx, *rx;
     uint32_t channel_id, self, peer, generation, abi;
-    uint32_t sent, received, proto_errors, notify_errors;
-    struct { int used; uint64_t request_id, offset; uint32_t length, opcode; } pending[NTWV_W64_PENDING_POOL];
+    uint32_t sent, received, proto_errors, notify_errors, attested;
+    /* Pool custody keyed by (stamped owner capability, request id, opcode, channel generation): every NTW32
+     * instance numbers its requests from the same base, so the id alone never identifies a request. */
+    struct { int used; uint64_t request_id, offset; uint32_t length, opcode, cap, generation; } pending[NTWV_W64_PENDING_POOL];
 } w64;
 static uint8_t w64_in[NTWV_W64_SEND_MAX], w64_out[SHZ_MSG_SLOT_SIZE];   /* protected by w64_admitted */
 
@@ -313,6 +350,13 @@ void ntwv_w64_reset(void)
      * allocated: the peer may still consume their queued requests. There is no
      * cancellation/rundown acknowledgement in this transport revision. */
     ntwv_fill(&w64, 0, sizeof w64);
+#ifdef NTWV_W64_DERIVED_OWNER
+    ntwv_w64_owner_reset_locked();
+    ntwv_fill(w64_stash, 0, sizeof w64_stash);
+    /* A reset channel's pids belong to the old generation: never KILL them on a reopened (possibly restarted)
+     * peer where the same pid may name another process. Gap: a reset without a peer restart leaks them. */
+    ntwv_fill(w64_tracked, 0, sizeof w64_tracked);
+#endif
     legacy_opened = 0;
     w64_leave();
 }
@@ -389,6 +433,7 @@ static void fill_open(struct ntwv_w64_open *o)
     o->proto_errors = w64.proto_errors;
     o->notify_errors = w64.notify_errors;
     o->pending_pool = pending_count();
+    o->attested = w64.attested;
 }
 
 static uint32_t w64_open(const struct ntwv_hv *hv)
@@ -426,35 +471,236 @@ static uint32_t w64_open(const struct ntwv_hv *hv)
         w64.channel_id = w64.layout.channel_id;
         w64.generation = w64.layout.generation;
         w64.abi = ver;
+#ifdef NTWV_W64_DERIVED_OWNER
+        /* This build stamps every user SEND (w64_owner.c): declare it to the Supervisor for exactly this channel
+         * generation, before the first send. An old Supervisor (E_UNSUPPORTED) or a missing EDX hypercall leaves
+         * the channel unattested: K64 then refuses GUI and keeps only its legacy console route. Any other refusal
+         * means the Supervisor disagrees about this bind, so the channel is not used at all (fail closed). */
+        w64.attested = 0;
+        if (hv->hcall3) {
+            uint32_t recorded = 0;
+            const int32_t rc = hv->hcall3(SHZ_HC_CHANNEL_ATTEST, c, w64.generation,
+                                          SHZ_CHAN_ATTEST_W64_DERIVED_OWNER, &recorded, 0);
+            if (rc == SHZ_OK && recorded == SHZ_CHAN_ATTEST_W64_DERIVED_OWNER)
+                w64.attested = recorded;
+            else if (rc != SHZ_E_UNSUPPORTED) {
+                ntwv_fill(&w64, 0, sizeof w64);
+                return NTWV_ERROR_GEN_FAILURE;
+            }
+        }
+#endif
         w64.open = 1;
         return 0;
     }
     return NTWV_ERROR_DEV_NOT_EXIST;
 }
 
-static int pending_reply_matches(const shz_msg_hdr_t *h)
+/* The pool lease of (owner, request id) on this generation; NTWV_W64_PENDING_POOL when none. At most one exists:
+ * w64_send refuses a second request with the same owner/id while one is outstanding. */
+static uint32_t pending_find(uint32_t cap, uint64_t request_id, uint32_t generation)
 {
     uint32_t i;
     for (i = 0; i < NTWV_W64_PENDING_POOL; ++i)
-        if (w64.pending[i].used && w64.pending[i].request_id == h->request_id)
-            return w64.pending[i].opcode == h->opcode;
-    return 1;                               /* inline requests have no pool lease here */
+        if (w64.pending[i].used && w64.pending[i].cap == cap && w64.pending[i].request_id == request_id &&
+            w64.pending[i].generation == generation)
+            return i;
+    return NTWV_W64_PENDING_POOL;
 }
 
+static int pending_reply_matches(const shz_msg_hdr_t *h)
+{
+    const uint32_t i = pending_find(h->capability_id, h->request_id, h->generation);
+    /* Another owner's lease with the same id is irrelevant; inline requests have no pool lease here. */
+    return i == NTWV_W64_PENDING_POOL || w64.pending[i].opcode == h->opcode;
+}
+
+/* Only the entry's own terminal reply (same owner, id, opcode, generation) retires its pool block. */
 static void release_pending(const shz_msg_hdr_t *h)
 {
-    uint32_t i;
-    for (i = 0; i < NTWV_W64_PENDING_POOL; ++i)
-        if (w64.pending[i].used && w64.pending[i].request_id == h->request_id && w64.pending[i].opcode == h->opcode) {
-            if (shz_pool_release(w64.base, &w64.layout, w64.self, w64.pending[i].offset, w64.pending[i].length, 0) == SHZ_OK)
-                w64.pending[i].used = 0;
-        }
+    const uint32_t i = pending_find(h->capability_id, h->request_id, h->generation);
+    if (i != NTWV_W64_PENDING_POOL && w64.pending[i].opcode == h->opcode &&
+        shz_pool_release(w64.base, &w64.layout, w64.self, w64.pending[i].offset, w64.pending[i].length, 0) == SHZ_OK)
+        w64.pending[i].used = 0;
 }
+
+#ifdef NTWV_W64_DERIVED_OWNER
+static uint32_t tracked_find(uint32_t cap, uint32_t pid)
+{
+    uint32_t i;
+    for (i = 0; i < NTWV_W64_TRACKED; ++i)
+        if (tracked_at(i)->state > TR_CREATE_SENT && tracked_at(i)->cap == cap && tracked_at(i)->pid == pid)
+            return i;
+    return NTWV_W64_TRACKED;
+}
+/* The outstanding forwarded CREATE (owner, request id), or NTWV_W64_TRACKED. */
+static uint32_t tracked_create(uint32_t cap, uint64_t request_id)
+{
+    uint32_t i;
+    for (i = 0; i < NTWV_W64_TRACKED; ++i)
+        if (tracked_at(i)->state == TR_CREATE_SENT && tracked_at(i)->cap == cap && tracked_at(i)->user_req == request_id)
+            return i;
+    return NTWV_W64_TRACKED;
+}
+static uint32_t tracked_free(void)
+{
+    uint32_t i;
+    for (i = 0; i < NTWV_W64_TRACKED; ++i)
+        if (tracked_at(i)->state == TR_FREE)
+            return i;
+    return NTWV_W64_TRACKED;
+}
+
+/* Locked. A validated K64 message (before routing): record/advance remote process custody. */
+static void track_observe(const shz_msg_hdr_t *h, const uint8_t *payload)
+{
+    shz_w64_event_t ev;
+    uint32_t i;
+    if (h->opcode == SHZ_OP_W64_CREATE_PROCESS && h->flags == SHZ_MSGF_REPLY) {
+        if ((i = tracked_create(h->capability_id, h->request_id)) == NTWV_W64_TRACKED)
+            return;                           /* not a CREATE this VxD forwarded: never gains custody */
+        if (h->status == SHZ_OK && h->payload_length == sizeof ev) {
+            ntwv_copy(&ev, payload, sizeof ev);
+            if (ev.pid && ev.state == SHZ_W64_PS_STARTED && tracked_find(h->capability_id, ev.pid) == NTWV_W64_TRACKED) {
+                tracked_at(i)->pid = ev.pid;
+                tracked_at(i)->state = TR_RUNNING;
+                return;
+            }
+            if (ev.pid && ev.state == SHZ_W64_PS_STARTED)
+                ++w64_untracked;              /* duplicate (owner, pid): K64 contract breach, keep the first */
+        }
+        tracked_at(i)->state = TR_FREE;       /* creation failed: no remote slot */
+        return;
+    }
+    if (h->opcode == SHZ_OP_W64_CONSOLE_OUTPUT) {
+        shz_w64_console_t c;
+        struct w64_tracked_proc *t;
+        /* Credit custody only from a well-formed one-way stdout/stderr frame of a tracked (K64-stamped owner, pid)
+         * process; the client's request id never names anything here. Bounded jump: K64 numbers frames 1, 2, ...
+         * per process and never runs more than one window ahead of an acknowledgement. */
+        if (h->flags != SHZ_MSGF_ONEWAY || !shz_w64_owner_cap_derived(h->capability_id) ||
+            shz_w64_console_check(h, payload, &c) != SHZ_OK || (c.stream != 1 && c.stream != 2) ||
+            (i = tracked_find(h->capability_id, c.pid)) == NTWV_W64_TRACKED)
+            return;
+        t = tracked_at(i);
+        if ((t->state == TR_RUNNING || t->state == TR_KILL_SENT) && c.seq - t->out_seen - 1u < SHZ_W64_CONSOLE_WINDOW)
+            t->out_seen = c.seq;
+        return;
+    }
+    if (h->opcode == SHZ_OP_W64_PROCESS_EXITED && h->flags == SHZ_MSGF_ONEWAY && h->payload_length == sizeof ev) {
+        ntwv_copy(&ev, payload, sizeof ev);
+        i = tracked_find(h->capability_id, ev.pid);
+        if (i != NTWV_W64_TRACKED && (tracked_at(i)->state == TR_RUNNING || tracked_at(i)->state == TR_KILL_SENT))
+            tracked_at(i)->state = TR_EXITED;
+        return;
+    }
+    if (h->flags != SHZ_MSGF_REPLY || (h->opcode != SHZ_OP_W64_KILL_PROCESS && h->opcode != SHZ_OP_W64_RELEASE))
+        return;
+    for (i = 0; i < NTWV_W64_TRACKED; ++i) {
+        struct w64_tracked_proc *t = tracked_at(i);
+        if (t->state == TR_FREE)
+            continue;
+        if (shz_w64_owner_cap_derived(h->capability_id)) {
+            /* The owner's own RELEASE: its slot is gone (NOENT: already gone), else it keeps custody. */
+            if (h->opcode == SHZ_OP_W64_RELEASE && t->user_release && t->cap == h->capability_id &&
+                t->user_req == h->request_id) {
+                if (h->status == SHZ_OK || h->status == SHZ_E_NOENT)
+                    t->state = TR_FREE;
+                t->user_release = 0;
+            }
+        } else if (h->capability_id == 0 && t->vxd_req == h->request_id) {
+            if (h->opcode == SHZ_OP_W64_KILL_PROCESS && t->state == TR_KILL_SENT && h->status == SHZ_E_NOENT)
+                t->state = TR_FREE;          /* nothing left to release */
+            else if (h->opcode == SHZ_OP_W64_RELEASE && t->state == TR_RELEASE_SENT)
+                t->state = h->status == SHZ_OK || h->status == SHZ_E_NOENT ? TR_FREE : TR_EXITED;
+        }
+    }
+}
+
+/* Locked. A trusted in-VxD message (capability 0: never DERIVED, never a client's capability) on the bound
+ * channel generation. 0 when queued; the request id is consumed only then. */
+static int vxd_push(const struct ntwv_hv *hv, uint32_t opcode, uint16_t flags, const void *payload, uint16_t length,
+                    uint64_t *request_id)
+{
+    shz_msg_hdr_t h;
+    ntwv_fill(&h, 0, sizeof h);
+    h.opcode = opcode;
+    h.flags = flags;
+    h.request_id = w64_vxd_request;
+    h.src_domain = (uint16_t)w64.self;
+    h.dst_domain = (uint16_t)w64.peer;
+    h.generation = w64.generation;
+    h.payload_length = length;
+    ntwv_w64_owner_stamp(&h, 0, 0);
+    if (shz_ring_push(w64.tx, &h, payload) != SHZ_OK)
+        return 1;
+    ++w64_vxd_request;
+    if (request_id)
+        *request_id = h.request_id;
+    ++w64.sent;
+    if (hv->hcall(SHZ_HC_NOTIFY, w64.peer, 1, 0, 0) != SHZ_OK)
+        ++w64.notify_errors;
+    return 0;
+}
+
+/* Locked. A trusted KILL/RELEASE of a tracked pid; its reply is matched by *request_id. */
+static int vxd_send(const struct ntwv_hv *hv, uint32_t opcode, uint32_t pid, uint64_t *request_id)
+{
+    shz_w64_kill_t k;
+    k.pid = pid;
+    k.exit_code = -1;
+    return vxd_push(hv, opcode, 0, &k, sizeof k, request_id);
+}
+
+/* Locked. A trusted cumulative CONSOLE_ACK (one-way, no reply) for a retired owner's tracked process. */
+static int vxd_console_ack(const struct ntwv_hv *hv, uint32_t pid, uint32_t seq)
+{
+    shz_w64_console_t c;
+    ntwv_fill(&c, 0, sizeof c);
+    c.pid = pid;
+    c.seq = seq;
+    return vxd_push(hv, SHZ_OP_W64_CONSOLE_ACK, SHZ_MSGF_ONEWAY, &c, sizeof c, 0);
+}
+
+/* Locked, live channel. Reclaim K64 processes of retired owners: acknowledge every console frame K64 sent them
+ * (the owner can no longer consume or ACK it; without credit K64 never drains and never reports EXITED), KILL,
+ * then RELEASE after PROCESS_EXITED. Frames that arrive later are discarded by RECV and acknowledged here again. */
+static void w64_reap(const struct ntwv_hv *hv)
+{
+    uint32_t i, op, next;
+    for (i = 0; i < NTWV_W64_TRACKED; ++i) {
+        struct w64_tracked_proc *t = tracked_at(i);
+        if (t->state == TR_FREE || t->user_release || ntwv_w64_owner_cap_live(t->cap))
+            continue;
+        if ((t->state == TR_RUNNING || t->state == TR_KILL_SENT) && t->out_seen != t->out_acked) {
+            if (vxd_console_ack(hv, t->pid, t->out_seen))
+                return;                       /* ring full: the watermark stays pending for a later DIOC */
+            t->out_acked = t->out_seen;
+        }
+        if (t->state == TR_RUNNING) { op = SHZ_OP_W64_KILL_PROCESS; next = TR_KILL_SENT; }
+        else if (t->state == TR_EXITED) { op = SHZ_OP_W64_RELEASE; next = TR_RELEASE_SENT; }
+        else continue;
+        if (vxd_send(hv, op, t->pid, &t->vxd_req))
+            return;                           /* ring full: retry on a later DIOC */
+        t->state = next;
+    }
+}
+
+uint32_t ntwv_w64_tracked(void)
+{
+    uint32_t i, n = 0;
+    for (i = 0; i < NTWV_W64_TRACKED; ++i)
+        n += tracked_at(i)->state != TR_FREE;
+    return n;
+}
+#endif
 
 static uint32_t w64_send(const struct ntwv_hv *hv, uint32_t in_bytes, uint32_t *out_len)
 {
     shz_msg_hdr_t h;
     uint32_t extra, slot = NTWV_W64_PENDING_POOL, i;
+#ifdef NTWV_W64_DERIVED_OWNER
+    uint32_t track;
+#endif
     uint64_t off = 0;
     int32_t status;
     int rc;
@@ -464,15 +710,27 @@ static uint32_t w64_send(const struct ntwv_hv *hv, uint32_t in_bytes, uint32_t *
     ntwv_copy(&h, w64_in, sizeof h);
     if (h.payload_length > SHZ_MSG_MAX_INLINE || in_bytes < sizeof h + h.payload_length)
         return NTWV_ERROR_INVALID_PARAMETER;
-    for (i = 0; i < NTWV_W64_PENDING_POOL; ++i)
-        if (w64.pending[i].used && w64.pending[i].request_id == h.request_id)
-            return NTWV_ERROR_BUSY;           /* one completion cannot retire two buffers */
     extra = in_bytes - (uint32_t)sizeof h - h.payload_length;
     /* The VxD, not the application, names the endpoints and the generation; a buffer reference only
      * ever comes from data the application handed over in this same request. */
     h.src_domain = (uint16_t)w64.self;
     h.dst_domain = (uint16_t)w64.peer;
     h.generation = w64.generation;
+#ifdef NTWV_W64_DERIVED_OWNER
+    ntwv_w64_owner_stamp(&h, w64_stamp, w64_stamp_cap);   /* the application's capability_id is never forwarded */
+#endif
+    /* One completion cannot retire two buffers: the same owner may not reuse an id with a pool lease. */
+    if (pending_find(h.capability_id, h.request_id, h.generation) != NTWV_W64_PENDING_POOL)
+        return NTWV_ERROR_BUSY;
+#ifdef NTWV_W64_DERIVED_OWNER
+    track = NTWV_W64_TRACKED;
+    if (w64_stamp && h.opcode == SHZ_OP_W64_CREATE_PROCESS) {
+        if (tracked_create(h.capability_id, h.request_id) != NTWV_W64_TRACKED)
+            return NTWV_ERROR_BUSY;
+        if ((track = tracked_free()) == NTWV_W64_TRACKED)
+            return NTWV_ERROR_NOT_ENOUGH_MEMORY;   /* no custody record: refuse rather than risk an orphan */
+    }
+#endif
     h.flags = (uint16_t)(h.flags & ~(uint16_t)SHZ_MSGF_BUFFER);
     h.buffer_offset = 0;
     h.buffer_length = 0;
@@ -501,7 +759,26 @@ static uint32_t w64_send(const struct ntwv_hv *hv, uint32_t in_bytes, uint32_t *
         w64.pending[slot].offset = off;
         w64.pending[slot].length = extra;
         w64.pending[slot].opcode = h.opcode;
+        w64.pending[slot].cap = h.capability_id;
+        w64.pending[slot].generation = h.generation;
     }
+#ifdef NTWV_W64_DERIVED_OWNER
+    if (track != NTWV_W64_TRACKED) {
+        ntwv_fill(tracked_at(track), 0, sizeof *tracked_at(track));
+        tracked_at(track)->cap = h.capability_id;
+        tracked_at(track)->user_req = h.request_id;
+        tracked_at(track)->state = TR_CREATE_SENT;
+    }
+    if (w64_stamp && h.opcode == SHZ_OP_W64_RELEASE && h.payload_length >= sizeof(shz_w64_kill_t)) {
+        shz_w64_kill_t k;
+        ntwv_copy(&k, w64_in + sizeof h, sizeof k);
+        i = tracked_find(h.capability_id, k.pid);
+        if (i != NTWV_W64_TRACKED) {          /* the owner releases its own slot: custody ends on its OK reply */
+            tracked_at(i)->user_release = 1;
+            tracked_at(i)->user_req = h.request_id;
+        }
+    }
+#endif
     ++w64.sent;
     if (hv->hcall(SHZ_HC_NOTIFY, w64.peer, 1, 0, 0) != SHZ_OK)
         ++w64.notify_errors;
@@ -511,14 +788,76 @@ static uint32_t w64_send(const struct ntwv_hv *hv, uint32_t in_bytes, uint32_t *
     return 0;
 }
 
-static uint32_t w64_recv(uint32_t *out_len)
+#ifdef NTWV_W64_DERIVED_OWNER
+/* Locked. Deliver the OLDEST stashed message for `cap` (lowest arrival number, independent of slot index). */
+static int stash_take(uint32_t cap, uint32_t *out_len)
+{
+    uint32_t i, best = NTWV_W64_STASH;
+    for (i = 0; i < NTWV_W64_STASH; ++i)
+        if (stash_at(i)->cap && stash_at(i)->cap == cap &&
+            (best == NTWV_W64_STASH || stash_at(i)->arrival < stash_at(best)->arrival))
+            best = i;
+    if (best == NTWV_W64_STASH)
+        return 0;
+    ntwv_copy(w64_out, stash_at(best)->slot, SHZ_MSG_SLOT_SIZE);
+    stash_at(best)->cap = 0;
+    ++w64.received;
+    *out_len = SHZ_MSG_SLOT_SIZE;
+    return 1;
+}
+/* Locked. A free stash slot, after dropping retired owners' messages; NTWV_W64_STASH when full. */
+static uint32_t stash_free_slot(void)
+{
+    uint32_t i;
+    for (i = 0; i < NTWV_W64_STASH; ++i)
+        if (stash_at(i)->cap && !ntwv_w64_owner_cap_live(stash_at(i)->cap)) {
+            stash_at(i)->cap = 0;                /* owner's last handle closed / channel reset: undeliverable */
+            ++w64_orphans;
+        }
+    for (i = 0; i < NTWV_W64_STASH; ++i)
+        if (!stash_at(i)->cap)
+            return i;
+    return NTWV_W64_STASH;
+}
+/* Locked. 1 when the unconsumed ring head belongs to ANOTHER live derived owner, i.e. popping it would need a
+ * stash slot. Advisory peek of the peer-written slot: the popped (CRC-checked) header still decides routing. An
+ * empty or corrupt ring returns 0 so shz_ring_pop reports it. */
+static int rx_head_for_other(uint32_t cap)
+{
+    shz_msg_hdr_t peek;
+    const uint32_t tail = w64.rx->tail, head = __atomic_load_n(&w64.rx->head, __ATOMIC_ACQUIRE);
+    if (head == tail || head - tail > w64.rx->slot_count)
+        return 0;
+    ntwv_copy(&peek, shz_ring_slot(w64.rx, tail), sizeof peek);
+    return peek.capability_id != cap && shz_w64_owner_cap_derived(peek.capability_id) &&
+           ntwv_w64_owner_cap_live(peek.capability_id);
+}
+#endif
+
+/* cap: the caller's derived identity (0 = unfiltered: the in-VxD endpoint or a forwarding build). */
+static uint32_t w64_recv(uint32_t *out_len, uint32_t cap)
 {
     shz_msg_hdr_t h;
     int rc, reason;
     uint32_t budget, live_result = w64_live();
+#ifdef NTWV_W64_DERIVED_OWNER
+    uint32_t spare = NTWV_W64_STASH;
+#else
+    (void)cap;
+#endif
     if (live_result)
         return live_result;
+#ifdef NTWV_W64_DERIVED_OWNER
+    if (cap && stash_take(cap, out_len))
+        return 0;
+#endif
     for (budget = 0; budget < w64.layout.slot_count; ++budget) {
+#ifdef NTWV_W64_DERIVED_OWNER
+        /* Never pop a message that could be neither delivered nor kept: with the stash full only a head that is
+         * the caller's own (or undeliverable to anyone) may be consumed; another live owner's head stays queued. */
+        if (cap && (spare = stash_free_slot()) == NTWV_W64_STASH && rx_head_for_other(cap))
+            return NTWV_ERROR_BUSY;
+#endif
         rc = shz_ring_pop(w64.rx, &h, w64_out + sizeof h, SHZ_MSG_MAX_INLINE, &reason);
         if (rc == SHZ_E_NOENT)
             return NTWV_ERROR_NO_MORE_ITEMS;
@@ -543,6 +882,25 @@ static uint32_t w64_recv(uint32_t *out_len)
             ntwv_fill(w64_out + sizeof h + h.payload_length, 0, SHZ_MSG_MAX_INLINE - h.payload_length);
         if (h.flags & SHZ_MSGF_REPLY)
             release_pending(&h);
+#ifdef NTWV_W64_DERIVED_OWNER
+        track_observe(&h, w64_out + sizeof h);
+        if (cap && h.capability_id != cap) {
+            if (shz_w64_owner_cap_derived(h.capability_id) && ntwv_w64_owner_cap_live(h.capability_id)) {
+                if (spare == NTWV_W64_STASH) {            /* peer rewrote the head after the peek (SPSC breach) */
+                    ++w64.proto_errors;
+                    ++w64_orphans;
+                } else {                                  /* another live Win98 process's reply/event */
+                    stash_at(spare)->cap = h.capability_id;
+                    stash_at(spare)->arrival = w64_arrival++;
+                    ntwv_copy(stash_at(spare)->slot, w64_out, SHZ_MSG_SLOT_SIZE);
+                }
+            } else {
+                ++w64_orphans;                            /* no live owner: never shown to this caller */
+            }
+            ntwv_fill(w64_out, 0, SHZ_MSG_SLOT_SIZE);
+            continue;
+        }
+#endif
         ++w64.received;
         *out_len = SHZ_MSG_SLOT_SIZE;
         return 0;
@@ -565,7 +923,7 @@ static uint32_t w64_wait(const struct ntwv_hv *hv, uint32_t *out_len)
     return 0;
 }
 
-static uint32_t w64_handle(const struct ntwv_hv *hv, uint32_t code, uint32_t in_bytes, uint32_t *out_len)
+static uint32_t w64_handle(const struct ntwv_hv *hv, uint32_t code, uint32_t in_bytes, uint32_t *out_len, uint32_t cap)
 {
     if (w64.open)
         legacy_opened = 1;
@@ -580,7 +938,7 @@ static uint32_t w64_handle(const struct ntwv_hv *hv, uint32_t code, uint32_t in_
         return 0;
     }
     case NTWV_IOCTL_W64_SEND: return w64_send(hv, in_bytes, out_len);
-    case NTWV_IOCTL_W64_RECV: return w64_recv(out_len);
+    case NTWV_IOCTL_W64_RECV: return w64_recv(out_len, cap);
     case NTWV_IOCTL_W64_WAIT: return w64_wait(hv, out_len);
     default: return NTWV_ERROR_NOT_SUPPORTED;
     }
@@ -642,7 +1000,7 @@ uint32_t ntwv_endpoint_recv(void *slot)
     if (!w64_enter())
         return NTWV_ERROR_BUSY;
     result = endpoint_leased && __atomic_load_n(&live, __ATOMIC_ACQUIRE) ?
-        w64_recv(&bytes) : NTWV_ERROR_NOT_READY;
+        w64_recv(&bytes, 0) : NTWV_ERROR_NOT_READY;
     if (!result)
         ntwv_copy(slot, w64_out, bytes);
     w64_leave();
@@ -727,7 +1085,26 @@ static uint32_t dioc_w64(const struct ntwv_dioc *request, const struct ntwv_page
     ops->leave(0, saved);
     if (ok) {
         /* Ring and hypercall work happens with the caller's interrupt state: it never touches user memory. */
-        result = w64_handle(hv, request->code, request->input_bytes, &out_len);
+#ifdef NTWV_W64_DERIVED_OWNER
+        /* Owner = VWIN32 DIOCParams (VMHandle, tagProcess) + live channel generation, never request bytes. */
+        /* SEND is stamped with it; RECV only sees messages carrying it. OPEN/WAIT expose no per-process data. */
+        result = 0;
+        /* Reclaim retired owners' K64 processes first (trusted VxD sends; touches neither w64_in nor w64_out). */
+        if (w64.open && !w64_live())
+            w64_reap(hv);
+        w64_stamp = request->code == NTWV_IOCTL_W64_SEND;
+        w64_stamp_cap = 0;
+        if ((w64_stamp || request->code == NTWV_IOCTL_W64_RECV) && w64.open)
+            result = ntwv_w64_owner_derive(request->vm, request->process, w64.generation, &w64_stamp_cap);
+        if (!result)
+            result = w64_handle(hv, request->code, request->input_bytes, &out_len, w64_stamp_cap);
+#else
+        result = w64_handle(hv, request->code, request->input_bytes, &out_len, 0);
+#endif
+#ifdef NTWV_W64_DERIVED_OWNER
+        w64_stamp = 0;
+        w64_stamp_cap = 0;
+#endif
         if (result == 0) {
             /* Bounded interval 2: re-validate (pages stayed pinned) and copy the reply out. */
             saved = ops->enter(0);

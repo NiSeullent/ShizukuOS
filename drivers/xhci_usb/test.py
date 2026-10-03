@@ -19,7 +19,11 @@ FREESTANDING = ['-ffreestanding', '-fno-builtin', '-fno-stack-protector',
                 '-fstack-usage']
 SOURCES = [ROOT / 'drivers/xhci_native/xhci.c', HERE / 'xhci_usb.c',
            ROOT / 'drivers/usb_native/ntwu_usb.c']
-MANIFEST = SOURCES + [ROOT / 'drivers/xhci_native/xhci.h',
+HID_SOURCES = SOURCES + [HERE / 'hid_interrupt.c', ROOT / 'drivers/shz_laptop/hid.c',
+                         ROOT / 'drivers/shz_laptop/pointer_adapter.c', ROOT / 'drivers/common/device.c']
+INCLUDES = ['-I' + str(ROOT / d) for d in ('drivers/common', 'drivers/shz_laptop', 'drivers/xhci_native',
+                                            'drivers/usb_native')] + ['-I' + str(HERE)]
+MANIFEST = HID_SOURCES + [HERE / 'hid_interrupt.h', HERE / 'test_hid_interrupt.c', ROOT / 'drivers/xhci_native/xhci.h',
     ROOT / 'drivers/xhci_native/xhci_internal.h', ROOT / 'drivers/usb_native/ntwu_usb.h',
     HERE / 'xhci_usb.h', HERE / 'test_usb_xhci.c', HERE / 'test.py', HERE / 'README.md']
 
@@ -67,6 +71,19 @@ def main():
                                  'passed': True, 'output': output,
                                  'counters': counters,
                                  'log_sha256': digest(BUILD / (label + '.log'))}
+    result['hid_interrupt'] = {}
+    for compiler, label, extra in (
+        ('gcc', 'gcc', []),
+        ('clang', 'clang_sanitized', ['-fsanitize=address,undefined', '-fno-omit-frame-pointer'])
+    ):
+        executable = BUILD / (label + '-hid-test')
+        run([compiler, *STRICT, *extra, *INCLUDES, *HID_SOURCES, HERE / 'test_hid_interrupt.c', '-o', executable])
+        output = run([executable], dict(os.environ, ASAN_OPTIONS='detect_leaks=1:abort_on_error=1',
+                                        UBSAN_OPTIONS='halt_on_error=1'))
+        counters = json.loads(output)
+        if counters.get('status') != 'PASS' or counters.get('scenarios', 0) < 13:
+            raise RuntimeError('HID interrupt model did not report all scenarios: ' + output)
+        result['hid_interrupt'][label] = {'passed': True, 'counters': counters}
     for compiler, target in (('gcc', ['-m32']),
                              ('clang', ['--target=i386-unknown-none-elf'])):
         objects = []

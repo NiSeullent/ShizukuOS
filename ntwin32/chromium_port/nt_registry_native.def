@@ -1,0 +1,12 @@
+LIBRARY M98NTREG
+EXPORTS
+ NtCreateKey=m98r_create@28
+ NtOpenKeyEx=m98r_open@16
+ NtQueryValueKey=m98r_query@24
+ NtSetValueKey=m98r_set@24
+ NtDeleteKey=m98r_delete@4
+ NtClose=m98r_close@4
+ RtlFormatCurrentUserKeyPath=m98r_format_user@4
+ RtlInitUnicodeString=m98r_init_string@8
+ RtlFreeUnicodeString=m98r_free_string@4
+ M98NtRegistryLiveHandles=m98r_live@0

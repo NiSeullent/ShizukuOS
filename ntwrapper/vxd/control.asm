@@ -3,7 +3,7 @@
 BITS 32
 GLOBAL ntwv_ddb, ntwv_control, ntwv_irq_enter, ntwv_irq_leave
 GLOBAL ntwv_vmm_check, ntwv_vmm_lock, ntwv_vmm_unlock, ntwv_vmm_ptes, ntwv_vmm_map_phys
-GLOBAL ntwv_vmcall, ntwv_cpuid
+GLOBAL ntwv_vmcall, ntwv_vmcall3, ntwv_cpuid
 EXTERN ntwv_native_init, ntwv_native_exit, ntwv_native_dioc, ntwv_native_lifecycle
 
 SECTION .ddb progbits alloc noexec write align=4
@@ -118,6 +118,20 @@ ntwv_vmm_ptes:
 ; EAX = opcode, EBX/ECX = arguments; the Supervisor returns the status in EAX and results in EBX/ECX. Only
 ; executed after ntwv_cpuid confirmed the hypervisor signature: VMCALL outside a VMX guest raises #UD.
 ntwv_vmcall:
+    ; Single VMCALL site: forward to ntwv_vmcall3 with EDX = 0 (op, a, b, 0, ebx_out, ecx_out).
+    push dword [esp + 20]       ; ecx_out
+    push dword [esp + 20]       ; ebx_out
+    push 0                      ; c (EDX)
+    push dword [esp + 24]       ; b
+    push dword [esp + 24]       ; a
+    push dword [esp + 24]       ; op
+    call ntwv_vmcall3
+    add esp, 24
+    ret
+
+; int32_t ntwv_vmcall3(op, a, b, c, uint32_t *ebx_out, uint32_t *ecx_out): as ntwv_vmcall plus EDX = c
+; (SHZ_HC_CHANNEL_ATTEST feature bits). EDX is caller-saved in this cdecl ABI.
+ntwv_vmcall3:
     push ebp
     mov ebp, esp
     push ebx
@@ -125,17 +139,18 @@ ntwv_vmcall:
     mov eax, [ebp + 8]
     mov ebx, [ebp + 12]
     mov ecx, [ebp + 16]
+    mov edx, [ebp + 20]
     vmcall
-    mov esi, [ebp + 20]
-    test esi, esi
-    jz .no_ebx
-    mov [esi], ebx
-.no_ebx:
     mov esi, [ebp + 24]
     test esi, esi
-    jz .no_ecx
+    jz .no_ebx3
+    mov [esi], ebx
+.no_ebx3:
+    mov esi, [ebp + 28]
+    test esi, esi
+    jz .no_ecx3
     mov [esi], ecx
-.no_ecx:
+.no_ecx3:
     pop esi
     pop ebx
     pop ebp

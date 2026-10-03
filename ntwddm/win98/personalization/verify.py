@@ -13,13 +13,15 @@ from pathlib import Path
 import selectors
 import shutil
 import signal
+import sys
 import subprocess
 import time
 
 HERE=Path(__file__).resolve().parent
 ROOT=HERE.parents[2]
 LIMIT=16*1024*1024
-SOURCES=('native.c','core.c','core.h','store.c','store.h','profile.c','profile.h','mock/windows.h','mock/shlobj.h','test_core.c','test_store.c','test_profile.c','test_html.js','verify.py')
+SOURCES=('native.c','core.c','core.h','store.c','store.h','profile.c','profile.h','mock/windows.h','mock/shlobj.h','test_core.c','test_store.c','test_profile.c','test_html.js','verify.py','verify_agent.py','desktop_agent.c','desktop_agent.h','desktop_agent_core.c','test_desktop_agent.c',
+         'agent_ctl.c','agent_ctl.h','chrome_core.c','chrome_core.h','chrome_native.c','chrome_native.h','test_chrome.c','retro_core.c','retro_core.h','test_retro.c')
 SHARED=('ntwddm/win98/adapter.c','ntwddm/win98/adapter.h','ntwddm/src/ntwddm.c',
         'ntwddm/include/ntwddm.h','platform/freestanding/memory.c','platform/freestanding/memory.h',
         'ntwin32/prepare.py','ntwddm/win98/theme_selector/selector_core.c','ntwddm/win98/theme_selector/selector_core.h',
@@ -109,6 +111,14 @@ def main():
             before=digest(executable)
             data=run([str(executable)],label+'-profile-test').decode()
             if not data.startswith('PASS:') or before!=digest(executable):raise RuntimeError('profile verdict/binary changed')
+            executable=output/('chrome-'+label)
+            run([tools[compiler]['path'],'-std=c11','-Wall','-Wextra','-Werror',*flags,
+                 str(HERE/'chrome_core.c'),str(HERE/'test_chrome.c'),'-o',str(executable)],label+'-chrome-compile')
+            if not run([str(executable)],label+'-chrome-test').decode().startswith('chrome core ok'):raise RuntimeError('chrome verdict')
+            executable=output/('retro-'+label)
+            run([tools[compiler]['path'],'-std=c11','-Wall','-Wextra','-Werror',*flags,
+                 str(HERE/'retro_core.c'),str(HERE/'test_retro.c'),'-o',str(executable)],label+'-retro-compile')
+            if not run([str(executable)],label+'-retro-test').decode().startswith('retro core ok'):raise RuntimeError('retro verdict')
             theme=HERE.parent/'theme_selector'
             executable=output/('theme-backend-'+label)
             run([tools[compiler]['path'],'-std=c11','-Wall','-Wextra','-Werror',*flags,'-I'+str(theme/'mock'),
@@ -117,12 +127,15 @@ def main():
             before=digest(executable)
             data=run([str(executable)],label+'-theme-backend-test').decode()
             if not data.startswith('PASS:') or before!=digest(executable):raise RuntimeError('theme backend verdict/binary changed')
+        agent_out=output/'agent'
+        agent_text=run([sys.executable,'-B',str(HERE/'verify_agent.py'),str(agent_out)],'wallpaper-agent').decode()
+        if 'SHZWALL.EXE sha256=' not in agent_text:raise RuntimeError('wallpaper agent verdict missing')
         html=run([str(output/'core-gcc'),'--html'],'html-generate');(output/'wallpaper.htm').write_bytes(html)
         run([tools['node']['path'],str(HERE/'test_html.js'),str(output/'wallpaper.htm')],'html-behavior')
         compiler=tools['i686-w64-mingw32-gcc']['path']
         flags=['-std=c11','-Os','-Wall','-Wextra','-Werror','-march=i486','-mno-sse','-mno-mmx','-msoft-float',
                '-fno-stack-protector','-fno-builtin','-ffreestanding','-nostdlib','-Intwddm/include']
-        native_sources=[HERE/'native.c',HERE/'core.c',HERE/'store.c',HERE/'profile.c',
+        native_sources=[HERE/'native.c',HERE/'core.c',HERE/'store.c',HERE/'profile.c',HERE/'agent_ctl.c',HERE/'desktop_agent_core.c',HERE/'chrome_core.c',HERE/'chrome_native.c',HERE/'retro_core.c',
                         theme/'selector_core.c',theme/'native_backend.c',
                         ROOT/'ntwddm/win98/adapter.c',ROOT/'ntwddm/src/ntwddm.c',ROOT/'platform/freestanding/memory.c']
         for index,source in enumerate(native_sources):

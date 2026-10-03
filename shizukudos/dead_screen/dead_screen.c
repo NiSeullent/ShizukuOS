@@ -143,7 +143,43 @@ static void reset_game(ds_state *s)
     if(s->mode==DS_TETRIS) { zero(&s->tetris,sizeof s->tetris); spawn(s); }
     if(s->mode==DS_SUIKA) { zero(&s->suika,sizeof s->suika); s->suika.aim=120; s->suika.next=random_next(s)%3; }
 }
-void ds_init(ds_state *s) { zero(s,sizeof *s); s->rng=0x53485a31u; s->korean=1; s->show_trace=1; }
+void ds_init(ds_state *s)
+{
+    zero(s,sizeof *s); s->rng=0x53485a31u; s->korean=1; s->show_trace=1;
+    s->guard_head=DS_GUARD_HEAD; s->guard_tail=DS_GUARD_TAIL;
+}
+static int guards_ok(const ds_state *s)
+{ return s->guard_head==DS_GUARD_HEAD && s->guard_tail==DS_GUARD_TAIL; }
+unsigned ds_game_safety(const ds_state *s, const ds_context *c)
+{
+    unsigned bad=0;
+    if(!s) return DS_UNSAFE_NOT_LATCHED|DS_UNSAFE_STATE;
+    if(!s->latched) bad|=DS_UNSAFE_NOT_LATCHED;
+    if(!guards_ok(s) || s->mode>DS_SUIKA) bad|=DS_UNSAFE_STATE;
+    if(s->graphics_failed) bad|=DS_UNSAFE_GRAPHICS;
+    /* NMI, double fault and machine check run on IST stacks or with undefined
+     * machine state; even a static game loop is refused there. */
+    if(s->latched && (s->fault.vector==2 || s->fault.vector==8 || s->fault.vector==18))
+        bad|=DS_UNSAFE_VECTOR;
+    if(!c || !c->proven) return bad|DS_UNSAFE_NO_CONTEXT;
+    if(c->flags & 0x200u) bad|=DS_UNSAFE_INTERRUPTS;
+    if(c->stack_low>=c->stack_high || c->sp<=c->stack_low || c->sp>c->stack_high ||
+       c->sp-c->stack_low<DS_GAME_STACK_MIN) bad|=DS_UNSAFE_STACK;
+    if(c->secondary_cpus_started) bad|=DS_UNSAFE_SMP;
+    if(c->fault_depth) bad|=DS_UNSAFE_RECURSION;
+    return bad;
+}
+unsigned ds_admit_games(ds_state *s, const ds_context *c)
+{
+    unsigned bad;
+    if(!s) return DS_UNSAFE_NOT_LATCHED|DS_UNSAFE_STATE;
+    bad=ds_game_safety(s,c);
+    /* Monotonic: a refusal is never lifted by a later, rosier context. */
+    if(s->games_evaluated && !s->games_allowed && !s->unsafe) bad|=DS_UNSAFE_STATE;
+    s->games_evaluated=1; s->unsafe|=bad; s->games_allowed=!s->unsafe;
+    if(!s->games_allowed && s->mode<=DS_SUIKA) s->mode=DS_MENU;
+    return s->unsafe;
+}
 int ds_latch(ds_state *s, enum ds_severity severity, const ds_fault *r)
 {
     size_t i;
@@ -161,6 +197,9 @@ int ds_latch(ds_state *s, enum ds_severity severity, const ds_fault *r)
 void ds_key_event(ds_state *s, enum ds_key key)
 {
     if(!s || !s->latched || s->graphics_failed) return;
+    if(!guards_ok(s)) { s->graphics_failed=1; return; }
+    if((key==DS_ONE || key==DS_TWO || key==DS_RESTART) && !s->games_allowed) return;
+    if(s->mode!=DS_MENU && !s->games_allowed) { s->graphics_failed=1; return; }
     if(key==DS_LANGUAGE) { s->korean^=1; return; }
     if(key==DS_TRACE) { s->show_trace^=1; return; }
     if(key==DS_ESCAPE) { s->mode=DS_MENU; return; }
@@ -197,6 +236,7 @@ void ds_key_event(ds_state *s, enum ds_key key)
 void ds_tick(ds_state *s)
 {
     if(!s || !s->latched || s->graphics_failed) return;
+    if(!guards_ok(s) || (s->mode!=DS_MENU && !s->games_allowed)) { s->graphics_failed=1; return; }
     ++s->ticks;
     if(s->mode==DS_TETRIS && !s->tetris.over) {
         if(s->tetris.piece>=7 || s->tetris.rotation>=4 ||

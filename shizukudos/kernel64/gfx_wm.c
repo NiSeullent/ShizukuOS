@@ -61,6 +61,7 @@
  *  follows shz_nc_insets()).
  */
 #include "gfx.h"
+#include "gfx_fb.h"
 #include "gfx_auth.h"
 #include "../dead_screen/native.h"
 #include "gfx_present_layout.h"
@@ -265,9 +266,12 @@ static void draw_nc(gwin_t *w, int ox, int oy, const shz_rect_t *clip)
         const int cl = wr.left + frame, ct = wr.top + frame, cr = wr.right - frame, cb = ct + SHZ_CAPTION_H - 1;
         fillc(cl, ct, cr, cb, active ? CAP_ACTIVE : CAP_INACTIVE, clip);
         if (w->title_len) {
-            shz_rect_t cap = { cl, ct, cr, cb }, o;
+            const int tx = cl + 4, ty = ct + 1;
+            const int64_t text_right = (int64_t)tx + gfx_text_width(w->title, w->title_len);
+            shz_rect_t cap = { tx, ty, cr, cb }, o;
+            if (text_right < cap.right) cap.right = (int32_t)text_right;
             if (rc_isect(&cap, clip, &o))
-                gfx_text(tgt_px, (int)tgt_w, (int)tgt_w, (int)tgt_h, cl + 4, ct + 1, w->title, w->title_len,
+                gfx_text(tgt_px, (int)tgt_w, (int)tgt_w, (int)tgt_h, tx, ty, w->title, w->title_len,
                          active ? CAP_TEXT_ACTIVE : CAP_TEXT_INACTIVE, o.left, o.top, o.right, o.bottom);
         }
     }

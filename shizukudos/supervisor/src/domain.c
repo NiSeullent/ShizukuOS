@@ -11,6 +11,8 @@
 #include "video.h"
 #include "../native_win98/win98.h"
 #include "../../abi/shz_clock.h"
+#include "../../abi/shz_ipc.h"
+#include "chan_attest.h"
 
 domain_t g_dom[SHZ_MAX_DOMAINS];
 shz_info_t *g_info;
@@ -261,6 +263,39 @@ static void kernel_handle_io(domain_t *d)
 }
 
 /* ------------------------------------------------------------------ hypercalls */
+/* Channel attestation (abi/shz_abi.h SHZ_HC_CHANNEL_ATTEST/ATTESTED): Supervisor-owned record, never the shared page.
+ * Only the Win98 domain's ring-0 VxD may attest the channel it shares with Kernel64, for the generation currently in the
+ * channel header, once per generation. Kernel64 reads it back; it is void once the attester's domain generation changes. */
+static shz_chan_attest_rec_t chan_attest[SHZ_MAX_CHANNELS];
+
+static int64_t chan_attest_set(domain_t *d, uint64_t c, uint64_t gen, uint64_t bits, uint64_t *out)
+{
+    const uint64_t ss_ar = vmread(VMCS_GUEST_SS_AR), rflags = vmread(VMCS_GUEST_RFLAGS), cr0 = vmread(VMCS_GUEST_CR0);
+    const int mapped = c < SHZ_MAX_CHANNELS && d->chan[c].mapped;
+    const uint32_t peer = mapped ? d->chan[c].peer : SHZ_MAX_DOMAINS;
+    const int caller_ok = d->kind == DK_WIN98 && (cr0 & 1) && ((ss_ar >> 5) & 3) == 0 && !(rflags & (1ull << 17));
+    const int peer_ok = peer < SHZ_MAX_DOMAINS && g_dom[peer].kind == DK_KERNEL64;
+    const uint32_t header_gen = mapped ? ((const volatile shz_channel_hdr_t *)(uintptr_t)d->chan[c].hpa)->generation : 0;
+    int64_t st;
+    if (!mapped) { *out = 0; return SHZ_E_NOENT; }
+    st = shz_chan_attest_decide(&chan_attest[c], 1, caller_ok, peer_ok, gen, header_gen, bits, (uint32_t)(d - g_dom),
+                                d->generation, out);
+    if (st == SHZ_OK)
+        kprintf("SHZ: channel %u generation %u attested by %s: bits %llx\n", (unsigned)c, (unsigned)gen, d->name,
+                (unsigned long long)*out);
+    return st;
+}
+
+static int64_t chan_attest_get(domain_t *d, uint64_t c, uint64_t *bits, uint64_t *gen)
+{
+    const int mapped = c < SHZ_MAX_CHANNELS && d->chan[c].mapped;
+    const shz_chan_attest_rec_t *r = mapped ? &chan_attest[c] : 0;
+    const domain_t *a = r && r->generation && r->attester < SHZ_MAX_DOMAINS ? &g_dom[r->attester] : 0;
+    const int alive = a && shz_chan_attester_alive(r, 1, a->generation, a->state);
+    if (!mapped) { *bits = *gen = 0; return SHZ_E_NOENT; }
+    return shz_chan_attest_lookup(r, 1, alive, bits, gen);
+}
+
 int hcall_vmcall(domain_t *d)
 {
     uint64_t *r = d->vc.gpr;
@@ -347,6 +382,21 @@ int hcall_vmcall(domain_t *d)
         if (c >= SHZ_MAX_CHANNELS || !d->chan[c].mapped) { status = SHZ_E_NOENT; break; }
         r[GPR_RBX] = SHZ_IPC_GPA_BASE + c * SHZ_IPC_REGION_SIZE;
         r[GPR_RCX] = d->chan[c].peer;
+        break;
+    }
+    case SHZ_HC_CHANNEL_ATTEST: {
+        uint64_t bits = 0;
+        /* The Win98 domain is a 32-bit guest: only EBX/ECX/EDX are its arguments; stale upper halves never count. */
+        const uint64_t m32 = d->kind == DK_WIN98 ? 0xffffffffull : ~0ull;
+        status = chan_attest_set(d, r[GPR_RBX] & m32, r[GPR_RCX] & m32, r[GPR_RDX] & m32, &bits);
+        r[GPR_RBX] = bits;
+        break;
+    }
+    case SHZ_HC_CHANNEL_ATTESTED: {
+        uint64_t bits = 0, gen = 0;
+        status = chan_attest_get(d, r[GPR_RBX] & (d->kind == DK_WIN98 ? 0xffffffffull : ~0ull), &bits, &gen);
+        r[GPR_RBX] = bits;
+        r[GPR_RCX] = gen;
         break;
     }
     case SHZ_HC_NATIVE_GOP_EPOCH: {

@@ -40,6 +40,7 @@ void u32_notify_activation(uint64_t now_active, uint64_t prev_active);
 HWND u32_desktop(void);
 void u32_send_size_move(HWND hwnd, int moved, int sized);
 int u32_metric(int index);
+int u32_text_px(LPCWSTR s, int n);                   /* pixel width of s[0..n) in the default (built-in) font */
 COLORREF u32_syscolor(int index);
 HBRUSH u32_sysbrush(int index);
 

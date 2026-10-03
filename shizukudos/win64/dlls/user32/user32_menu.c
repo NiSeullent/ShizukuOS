@@ -609,7 +609,17 @@ typedef struct {
     int is_sys;
 } popup_t;
 
-static int text_width(LPCWSTR s, int n) { int i, w = 0; for (i = 0; i < n; ++i) if (s[i] != '&' || (i + 1 < n && s[i + 1] == '&')) w += 8; return w; }
+/* width of a menu label without its '&' prefixes, measured with the built-in font's real advances */
+static int text_width(LPCWSTR s, int n)
+{
+    WCHAR buf[256];
+    int i, k = 0;
+    for (i = 0; i < n && k < 255; ++i) {
+        if (s[i] == '&' && i + 1 < n) { if (s[i + 1] == '&') { buf[k++] = '&'; ++i; } continue; }
+        if (s[i] != '&') buf[k++] = s[i];
+    }
+    return u32_text_px(buf, k);
+}
 
 static void measure(HMENU h, int *w, int *hh)
 {
@@ -663,8 +673,11 @@ static void draw_text_mn(HDC dc, int x, int y, LPCWSTR s, int n, COLORREF c)
     TextOutW(dc, x, y, buf, k);
     if (ul >= 0) {                                                      /* the mnemonic is underlined */
         HPEN p = CreatePen(PS_SOLID, 1, c), o = SelectObject(dc, p);
-        MoveToEx(dc, x + ul * 8, y + 15, 0);
-        LineTo(dc, x + ul * 8 + 8, y + 15);
+        SIZE pre = { 0, 0 }, one = { 8, 16 };
+        GetTextExtentPoint32W(dc, buf, ul, &pre);
+        if (ul < k) GetTextExtentPoint32W(dc, buf + ul, 1, &one);
+        MoveToEx(dc, x + pre.cx, y + 15, 0);
+        LineTo(dc, x + pre.cx + one.cx, y + 15);
         SelectObject(dc, o);
         DeleteObject(p);
     }

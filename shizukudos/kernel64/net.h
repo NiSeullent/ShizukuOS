@@ -193,6 +193,7 @@ typedef struct sock {
     int32_t evt_err[6];
     struct sock_extension *extension;          /* one owned ConnectEx IRP; cancel abort deferred under net lock */
     uint8_t extension_busy, extension_context_pending, extension_no_reuse;
+    uint32_t acceptex_id, acceptex_epoch;       /* lazily assigned never-reused AcceptEx identity, 0 = none */
 } sock_t;
 extern sock_t *g_socks;
 
@@ -258,6 +259,7 @@ unsigned tcp_dump(uint8_t *out, unsigned max_entries);
 int32_t sys_ext_net(process_t *cur, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4);
 void net_socket_handle_closing(kobject_t *o);  /* objects.c handle_close hook for OB_SOCKET */
 void net_socket_last_handle_closed(kobject_t *o); /* IPC atomic last-handle hook; handles vs IRP references */
+void net_sock_process_exited(process_t *p);       /* Core process_teardown after handles_close_all: drop dead owner's AcceptEx records */
 
 /* ---- ABI structures shared with ws2_32.dll (layout = Windows x64) ---- */
 struct shz_sockaddr_in { uint16_t family; uint16_t port_be; uint32_t addr_be; uint8_t zero[8]; };

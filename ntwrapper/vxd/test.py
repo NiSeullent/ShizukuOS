@@ -50,6 +50,12 @@ def dependency_closure(manifest):
          [bridge, broker, core, HERE / 'tests/test_bridge.c']),
         ('host_w64_asan_ubsan', 'clang', [*host, '-fsanitize=address,undefined'],
          [bridge, broker, core, HERE / 'tests/test_w64vxd.c']),
+        ('host_derived_owner_asan_ubsan', 'clang', [*host, '-Wconversion', '-fsanitize=address,undefined',
+                                                    '-DNTWV_W64_DERIVED_OWNER'],
+         [bridge, broker, core, HERE / 'w64_owner.c', HERE / 'tests/test_w64_derived_bridge.c']),
+        ('host_console_reaper_asan_ubsan', 'clang', [*host, '-fsanitize=address,undefined', '-DNTWV_W64_DERIVED_OWNER',
+                                                     '-DNTWV_CONSOLE_SLICE_DEPSCAN'],
+         [bridge, broker, core, HERE / 'w64_owner.c', HERE / 'tests/test_w64_console_reaper.c']),
         ('host_admission_asan_ubsan', 'clang', [*host, '-fsanitize=address,undefined', '-pthread'],
          [bridge, broker, core, HERE / 'tests/test_w64_admission.c']),
         ('host_pma_gcc', 'gcc', host,
@@ -81,6 +87,8 @@ def dependency_closure(manifest):
 
     for label, compiler, flags, sources in cases:
         scan(label, [compiler, *flags, '-MM', '-MT', 'ntwv-inputs', *map(str, sources)])
+    # The combined console-reaper regression compiles definitions extracted verbatim from this Kernel64 source.
+    closure.setdefault('host_console_reaper_asan_ubsan', set()).add(project_source('shizukudos/kernel64/subsys64.c'))
     for source in (HERE / 'control.asm', HERE / 'vmm_callbacks.asm', HERE / 'tests/control_harness.asm'):
         scan('assembly_i386', ['nasm', '-M', '-MT', 'ntwv-inputs', '-f', 'elf32', str(source)])
     return closure, commands
@@ -177,7 +185,8 @@ def main():
                       'native_contract_constants', 'win32_probe_pe_contract', 'win64_bridge_dioc_asan_ubsan',
                       'strict_object_flag_policy', 'win64_parallel_admission_asan_ubsan_tsan',
                       'win64_epoch_response_pool_validation', 'win64_corrupt_ring_bounded_failure', 'native_pma_broker_actual_rings_gcc_asan_ubsan',
-                      'native_pma_service_thunks_static', 'native_image_residency_model')},
+                      'native_pma_service_thunks_static', 'native_image_residency_model',
+                      'win64_derived_owner_attest_demux_asan_ubsan')},
         'win64_bridge_supervisor_run': False,
         'guest_loaded': False,
         'native_vmm_calls_verified': False,

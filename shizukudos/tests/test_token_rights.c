@@ -168,7 +168,7 @@ static uint32_t put_handle(kobject_t *o,uint32_t access) {
 }
 static uint32_t token_handle(uint32_t access) { return put_handle(process_token(&process),access); }
 static kobject_t *imp_token(void) {
-    shz_token_info value={.type=2,.imp_level=2,.integrity_rid=0x2000,.session=1};
+    shz_token_info value={.type=2,.imp_level=2,.integrity_rid=0x2000,.session=1,.auth_id=0x3e7+0x100};
     kobject_t *o=token_new(&value,92); assert(o && root_count<16); roots[root_count++]=o; return o;
 }
 static int32_t token_call(uint64_t op,uint64_t a2,uint64_t a3,uint64_t a4) {
@@ -261,14 +261,142 @@ static int duplicate_explicit_rights(void) {
     EXPECT(token_call(0x100,h,(1ull<<32),ptr(&output))==0);
     EXPECT(entries[output/4-1].access==0xa); return 1;
 }
-/* Desired access cannot exceed the originating handle's actual grant. */
-static int duplicate_requested_access_ceiling(void) {
+/* DuplicateTokenEx authorizes nonzero access against the token object policy,
+ * not the source handle: QUERY|DUPLICATE (0xa) may request QUERY|IMPERSONATE
+ * (0xc) for the caller's own subject (actual T_BASE_TOKEN contract). */
+static int duplicate_object_authorized_rights(void) {
     uint32_t h=token_handle(0xa); uint64_t output=0xa5a5a5a5a5a5a5a5ull;
-    token_snapshot s=snapshot(process.token);
-    EXPECT(token_call(0x100,h,0xf01ffull|(2ull<<32)|(2ull<<40),ptr(&output))==STATUS_ACCESS_DENIED);
-    EXPECT(output==0xa5a5a5a5a5a5a5a5ull && unchanged(process.token,s));
+    shz_token_info *original=process.token->u.token.t;
+    EXPECT(token_call(0x100,h,0xcull|(2ull<<32)|(2ull<<40),ptr(&output))==0);
+    EXPECT(output && entries[output/4-1].access==0xc);
+    shz_token_info *t=entries[output/4-1].obj->u.token.t;
+    EXPECT(t->type==2 && t->imp_level==2 && t->auth_id==original->auth_id &&
+           t->session==original->session && t->integrity_rid==original->integrity_rid && t->id!=original->id);
+    kobject_t *dup=entries[output/4-1].obj; uint32_t refs=dup->refs;
+    EXPECT(token_call(6,CURRENT_THREAD_HANDLE,output,0)==0);
+    EXPECT(caller_thread.impersonation==dup && dup->refs==refs+1);
+    EXPECT(handle_close(&process,(uint32_t)output)==0); EXPECT(dup->refs==refs);
+    EXPECT(token_call(6,CURRENT_THREAD_HANDLE,0,0)==0); EXPECT(!caller_thread.impersonation);
     EXPECT(token_call(0x100,h,0x02000000ull|(2ull<<32)|(2ull<<40),ptr(&output))==0);
-    EXPECT(output && entries[output/4-1].access==0xa); return 1;
+    EXPECT(output && entries[output/4-1].access==0xf01ff);
+    token_snapshot s=snapshot(process.token); uint64_t before=output;
+    EXPECT(token_call(0x100,h,0x01000008ull|(2ull<<32)|(2ull<<40),ptr(&output))==STATUS_ACCESS_DENIED);
+    EXPECT(output==before && unchanged(process.token,s)); return 1;
+}
+/* A lower-integrity caller of the same subject keeps NO_WRITE_UP. */
+static int duplicate_lower_integrity_no_write_up(void) {
+    (void)process_token(&process); ((shz_token_info *)process.token->u.token.t)->integrity_rid=0x1000;
+    kobject_t *tok=imp_token(); uint32_t h=put_handle(tok,0xa); uint64_t output=0xa5a5a5a5a5a5a5a5ull;
+    EXPECT(token_call(0x100,h,0xcull|(2ull<<32)|(2ull<<40),ptr(&output))==0);
+    EXPECT(entries[output/4-1].access==0xc);
+    const uint64_t denied[]={0x80,0x20,0x40000,0x10000,0x40000000};
+    for(unsigned i=0;i<sizeof denied/sizeof *denied;++i) {
+        token_snapshot s=snapshot(tok); uint64_t before=output;
+        EXPECT(token_call(0x100,h,(denied[i]|8ull)|(2ull<<32)|(2ull<<40),ptr(&output))==STATUS_ACCESS_DENIED);
+        EXPECT(output==before && unchanged(tok,s));
+    }
+    EXPECT(token_call(0x100,h,0x02000000ull|(2ull<<32)|(2ull<<40),ptr(&output))==0);
+    EXPECT(entries[output/4-1].access==0x2001f); return 1;
+}
+/* A token of another logon subject or session grants no new rights; only the
+ * zero-access form, which keeps the held source handle grant, remains. */
+static int duplicate_cross_subject_object_denial(void) {
+    (void)process_token(&process);
+    const struct {uint64_t auth; uint32_t session;} other[]={{0x3e7+0x200,1},{0x3e7+0x100,2}};
+    for(unsigned i=0;i<2;++i) {
+        kobject_t *tok=imp_token(); shz_token_info *ti=tok->u.token.t;
+        ti->auth_id=other[i].auth; ti->session=other[i].session;
+        uint32_t h=put_handle(tok,0xa); uint64_t output=0xa5a5a5a5a5a5a5a5ull;
+        const uint64_t denied[]={8,0xc,0x02000000,0x80000000};
+        for(unsigned j=0;j<sizeof denied/sizeof *denied;++j) {
+            token_snapshot s=snapshot(tok);
+            EXPECT(token_call(0x100,h,denied[j]|(2ull<<32)|(2ull<<40),ptr(&output))==STATUS_ACCESS_DENIED);
+            EXPECT(output==0xa5a5a5a5a5a5a5a5ull && unchanged(tok,s));
+        }
+        EXPECT(token_call(0x100,h,(2ull<<32)|(2ull<<40),ptr(&output))==0);
+        EXPECT(entries[output/4-1].access==0xa);
+        shz_token_info *t=entries[output/4-1].obj->u.token.t;
+        EXPECT(t->auth_id==other[i].auth && t->session==other[i].session);
+    }
+    /* SYSTEM logon is admitted like the owner by the default token DACL. */
+    ((shz_token_info *)process.token->u.token.t)->auth_id=0x3e7;
+    kobject_t *tok=imp_token(); uint32_t h=put_handle(tok,0xa); uint64_t output=0;
+    EXPECT(token_call(0x100,h,0xcull|(2ull<<32)|(2ull<<40),ptr(&output))==0);
+    EXPECT(entries[output/4-1].access==0xc); return 1;
+}
+/* The effective caller is the thread impersonation context: impersonating a
+ * lower label of the same subject must not regain the high primary's
+ * write-up rights; references are held only for the call. */
+static kobject_t *impersonate_as(uint64_t auth,uint32_t session,uint32_t integrity,uint32_t level) {
+    kobject_t *tok=imp_token(); shz_token_info *ti=tok->u.token.t;
+    ti->auth_id=auth; ti->session=session; ti->integrity_rid=integrity; ti->imp_level=level;
+    uint32_t h=put_handle(tok,4); assert(token_call(6,CURRENT_THREAD_HANDLE,h,0)==0);
+    assert(caller_thread.impersonation==tok); return tok;
+}
+static int duplicate_effective_lower_impersonation(void) {
+    (void)process_token(&process); ((shz_token_info *)process.token->u.token.t)->integrity_rid=0x3000;
+    uint32_t h=token_handle(0xa); uint64_t output=0;
+    EXPECT(token_call(0x100,h,0x40008ull|(2ull<<32)|(2ull<<40),ptr(&output))==0);   /* primary alone holds WRITE_DAC */
+    EXPECT(entries[output/4-1].access==0x40008);
+    kobject_t *imp=impersonate_as(0x3e7+0x100,1,0x1000,2);
+    uint32_t prefs=process.token->refs,irefs=imp->refs;
+    const uint64_t denied[]={0x40000,0x80,0x20,0x10000,0x40000000,0x10000000};
+    for(unsigned i=0;i<sizeof denied/sizeof *denied;++i) {
+        token_snapshot s=snapshot(process.token); uint64_t before=output;
+        EXPECT(token_call(0x100,h,(denied[i]|8ull)|(2ull<<32)|(2ull<<40),ptr(&output))==STATUS_ACCESS_DENIED);
+        EXPECT(output==before && unchanged(process.token,s) && imp->refs==irefs);
+    }
+    EXPECT(token_call(0x100,h,0xcull|(2ull<<32)|(2ull<<40),ptr(&output))==0);       /* T_BASE_TOKEN-sized request */
+    EXPECT(entries[output/4-1].access==0xc);
+    EXPECT(token_call(0x100,h,0x02000000ull|(2ull<<32)|(2ull<<40),ptr(&output))==0);
+    EXPECT(entries[output/4-1].access==0x2001f);
+    EXPECT(process.token->refs==prefs && imp->refs==irefs);                            /* duplicates are new objects; no leaked refs */
+    EXPECT(token_call(6,CURRENT_THREAD_HANDLE,0,0)==0);                                 /* revert: primary rights back */
+    EXPECT(token_call(0x100,h,0x40088ull|(2ull<<32)|(2ull<<40),ptr(&output))==0);
+    EXPECT(entries[output/4-1].access==0x40088); return 1;
+}
+/* Impersonating another subject/session yields no new-access rights on the
+ * primary's token; Identification/Anonymous levels authorize nothing. */
+static int duplicate_effective_context_denials(void) {
+    (void)process_token(&process);
+    const struct {uint64_t auth; uint32_t session, level;} ctx[]={
+        {0x3e7+0x200,1,2},{0x3e7+0x100,2,2},{0x3e7+0x100,1,1},{0x3e7+0x100,1,0}};
+    uint32_t h=token_handle(0xa);
+    for(unsigned i=0;i<sizeof ctx/sizeof *ctx;++i) {
+        kobject_t *imp=impersonate_as(ctx[i].auth,ctx[i].session,0x2000,ctx[i].level);
+        uint32_t irefs=imp->refs; uint64_t output=0xa5a5a5a5a5a5a5a5ull;
+        const uint64_t denied[]={8,0xc,0x02000000,0x80000000};
+        for(unsigned j=0;j<sizeof denied/sizeof *denied;++j) {
+            token_snapshot s=snapshot(process.token);
+            EXPECT(token_call(0x100,h,denied[j]|(2ull<<32)|(2ull<<40),ptr(&output))==STATUS_ACCESS_DENIED);
+            EXPECT(output==0xa5a5a5a5a5a5a5a5ull && unchanged(process.token,s) && imp->refs==irefs);
+        }
+        EXPECT(token_call(0x100,h,(2ull<<32)|(2ull<<40),ptr(&output))==0);              /* zero keeps source grant */
+        EXPECT(entries[output/4-1].access==0xa);
+        EXPECT(handle_close(&process,(uint32_t)output)==0);
+        EXPECT(token_call(6,CURRENT_THREAD_HANDLE,0,0)==0);
+    }
+    /* Delegation level of the same subject/label is a full effective context. */
+    impersonate_as(0x3e7+0x100,1,0x2000,3); uint64_t output=0;
+    EXPECT(token_call(0x100,h,0x40088ull|(2ull<<32)|(2ull<<40),ptr(&output))==0);
+    EXPECT(entries[output/4-1].access==0x40088); return 1;
+}
+/* The impersonation label is mutable (lower-only); each call snapshots it. */
+static int duplicate_effective_label_snapshot(void) {
+    (void)process_token(&process);
+    uint32_t h=token_handle(0xa); uint64_t output=0;
+    kobject_t *imp=impersonate_as(0x3e7+0x100,1,0x2000,2);
+    uint32_t adj=put_handle(imp,0x80);
+    EXPECT(token_call(0x100,h,0x40008ull|(2ull<<32)|(2ull<<40),ptr(&output))==0);
+    EXPECT(token_call(4,adj,1,0x1000)==0); EXPECT(((shz_token_info *)imp->u.token.t)->integrity_rid==0x1000);
+    token_snapshot s=snapshot(process.token); uint64_t before=output;
+    EXPECT(token_call(0x100,h,0x40008ull|(2ull<<32)|(2ull<<40),ptr(&output))==STATUS_ACCESS_DENIED);
+    EXPECT(output==before && unchanged(process.token,s));
+    /* Primary lifetime: a duplicate outlives closing every handle to its source. */
+    EXPECT(token_call(0x100,h,0xcull|(2ull<<32)|(2ull<<40),ptr(&output))==0);
+    kobject_t *dup=entries[output/4-1].obj; uint32_t prefs=process.token->refs;
+    EXPECT(handle_close(&process,h)==0 && process.token->refs==prefs-1 && dup!=process.token);
+    EXPECT(caller_thread.impersonation==imp); return 1;
 }
 static int duplicate_invalid_packing(void) {
     uint32_t h=token_handle(2); kobject_t *o=process.token; uint64_t output=0xa5a5a5a5a5a5a5a5ull;
@@ -477,8 +605,10 @@ static int frontend_desired_access_and_old_backend(void) {
     ULONG qos[4]={16,2,0,0}; SHZ_OBJECT_ATTRIBUTES oa={.SecurityQualityOfService=qos};
     EXPECT(NtDuplicateToken((HANDLE)(uintptr_t)h,8,&oa,0,2,&output)==0);
     EXPECT(entries[(uintptr_t)output/4-1].access==8);
+    EXPECT(NtDuplicateToken((HANDLE)(uintptr_t)h,0xc,&oa,0,2,&output)==0);
+    EXPECT(entries[(uintptr_t)output/4-1].access==0xc);
     token_snapshot s=snapshot(process.token); output=(HANDLE)(uintptr_t)0xa5a5a5a5;
-    EXPECT(NtDuplicateToken((HANDLE)(uintptr_t)h,0xf01ff,&oa,0,2,&output)==STATUS_ACCESS_DENIED);
+    EXPECT(NtDuplicateToken((HANDLE)(uintptr_t)h,0x01000008,&oa,0,2,&output)==STATUS_ACCESS_DENIED);
     EXPECT((uintptr_t)output==0xa5a5a5a5 && unchanged(process.token,s));
     model_old_backend=1;
     EXPECT(NtDuplicateToken((HANDLE)(uintptr_t)h,8,&oa,0,2,&output)==STATUS_INVALID_PARAMETER);
@@ -495,7 +625,12 @@ int main(void) {
     const struct {const char *name; int (*run)(void);} cases[]={
         {"query-rights",query_rights},{"mutation-denial",mutation_denial},{"mutation-allowed",mutation_allowed},
         {"duplicate-denial",duplicate_denial},{"duplicate-legacy-no-amplification",duplicate_legacy_no_amplification},
-        {"duplicate-explicit-rights",duplicate_explicit_rights},{"duplicate-access-ceiling",duplicate_requested_access_ceiling},
+        {"duplicate-explicit-rights",duplicate_explicit_rights},{"duplicate-object-authorized",duplicate_object_authorized_rights},
+        {"duplicate-lower-integrity-no-write-up",duplicate_lower_integrity_no_write_up},
+        {"duplicate-cross-subject-object-denial",duplicate_cross_subject_object_denial},
+        {"duplicate-effective-lower-impersonation",duplicate_effective_lower_impersonation},
+        {"duplicate-effective-context-denials",duplicate_effective_context_denials},
+        {"duplicate-effective-label-snapshot",duplicate_effective_label_snapshot},
         {"duplicate-invalid-packing",duplicate_invalid_packing},{"duplicate-failure-cleanup",duplicate_failure_cleanup},
         {"token-masks-impersonation-level",token_masks_and_impersonation_level},
         {"impersonation-token-denial",impersonation_token_denial},{"impersonation-thread-denial",impersonation_thread_denial},

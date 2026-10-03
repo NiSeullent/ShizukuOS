@@ -172,6 +172,9 @@ class MemoryUnion:
         self.rows[identity['path']] = copy.deepcopy(identity)
         return {'pin': self.rows[identity['path']], 'fd': -1}
     def check(self): pass
+    def stream_guard(self, entry):
+        # perf-b9 production per-read guard transport; real leases tested elsewhere.
+        self.check(); return self.check
     def raw(self, identity, maximum):
         self.add(identity)
         raw = self.data[identity['path']]

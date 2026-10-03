@@ -1,0 +1,239 @@
+diff --git a/src/win/core.c b/src/win/core.c
+index 317238f..882ec34 100644
+--- a/src/win/core.c
++++ b/src/win/core.c
+@@ -171,7 +171,7 @@ void uv__wake_all_loops(void) {
+     loop = uv__loops[i];
+     assert(loop);
+     if (loop->iocp != INVALID_HANDLE_VALUE)
+-      PostQueuedCompletionStatus(loop->iocp, 0, 0, NULL);
++      uv__iocp_post(loop->iocp, 0, 0, NULL);
+   }
+   uv_mutex_unlock(&uv__loops_lock);
+ }
+@@ -233,7 +233,7 @@ int uv_loop_init(uv_loop_t* loop) {
+   uv__once_init();
+ 
+   /* Create an I/O completion port */
+-  loop->iocp = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 1);
++  loop->iocp = uv__iocp_create(INVALID_HANDLE_VALUE, NULL, 0, 1);
+   if (loop->iocp == NULL)
+     return uv_translate_sys_error(GetLastError());
+ 
+@@ -315,7 +315,7 @@ fail_timers_alloc:
+ fail_metrics_mutex_init:
+   uv__free(lfields);
+   loop->internal_fields = NULL;
+-  CloseHandle(loop->iocp);
++  uv__iocp_close(loop->iocp);
+   loop->iocp = INVALID_HANDLE_VALUE;
+ 
+   return err;
+@@ -371,7 +371,7 @@ void uv__loop_close(uv_loop_t* loop) {
+   uv__free(lfields);
+   loop->internal_fields = NULL;
+ 
+-  CloseHandle(loop->iocp);
++  uv__iocp_close(loop->iocp);
+ }
+ 
+ 
+@@ -463,7 +463,7 @@ static void uv__poll(uv_loop_t* loop, DWORD timeout) {
+      */
+     lfields->current_timeout = timeout;
+ 
+-    success = GetQueuedCompletionStatusEx(loop->iocp,
++    success = uv__iocp_get_ex(loop->iocp,
+                                           overlappeds,
+                                           ARRAY_SIZE(overlappeds),
+                                           &count,
+diff --git a/src/win/internal.h b/src/win/internal.h
+index db488be..6fb9c97 100644
+--- a/src/win/internal.h
++++ b/src/win/internal.h
+@@ -28,6 +28,7 @@
+ #include "uv/tree.h"
+ #include "winapi.h"
+ #include "winsock.h"
++#include "shizuku-lciocp.h"
+ 
+ #ifdef _MSC_VER
+ # define INLINE __inline
+diff --git a/src/win/req-inl.h b/src/win/req-inl.h
+index af6fb75..2643efc 100644
+--- a/src/win/req-inl.h
++++ b/src/win/req-inl.h
+@@ -74,7 +74,7 @@
+ 
+ 
+ #define POST_COMPLETION_FOR_REQ(loop, req)                              \
+-  if (!PostQueuedCompletionStatus((loop)->iocp,                         \
++  if (!uv__iocp_post((loop)->iocp,                                      \
+                                   0,                                    \
+                                   0,                                    \
+                                   &((req)->u.io.overlapped))) {         \
+diff --git a/b/src/win/shizuku-lciocp.h b/src/win/shizuku-lciocp.h
+new file mode 100644
+index 0000000..9a95ecd
+--- /dev/null
++++ b/src/win/shizuku-lciocp.h
+@@ -0,0 +1,54 @@
++/* ShizukuOS Win98 port of the libuv Windows backend (Legcord / Node 24.18.0).
++ * Win98 KERNEL32 has no I/O completion ports and Win98 WS2_32 completes
++ * overlapped socket I/O only through events; LCIOCP.DLL (ShizukuOS source
++ * ntwin32/legcord_iocp, GPL-2.0-only provider) supplies both with the NT
++ * argument/failure contracts. Enabled only with -DUV_SHIZUKU_LCIOCP.
++ */
++#ifndef UV_WIN_SHIZUKU_LCIOCP_H_
++#define UV_WIN_SHIZUKU_LCIOCP_H_
++
++#ifdef UV_SHIZUKU_LCIOCP
++__declspec(dllimport) HANDLE WINAPI ShizukuLc_CreateIoCompletionPort(HANDLE, HANDLE, ULONG_PTR, DWORD);
++__declspec(dllimport) BOOL WINAPI ShizukuLc_PostQueuedCompletionStatus(HANDLE, DWORD, ULONG_PTR, LPOVERLAPPED);
++__declspec(dllimport) BOOL WINAPI ShizukuLc_GetQueuedCompletionStatusEx(HANDLE, LPOVERLAPPED_ENTRY, ULONG,
++                                                                        PULONG, DWORD, BOOL);
++__declspec(dllimport) BOOL WINAPI ShizukuLc_CloseIoCompletionPort(HANDLE);
++__declspec(dllimport) int WSAAPI ShizukuLc_WSARecv(SOCKET, LPWSABUF, DWORD, LPDWORD, LPDWORD,
++    LPWSAOVERLAPPED, LPWSAOVERLAPPED_COMPLETION_ROUTINE);
++__declspec(dllimport) int WSAAPI ShizukuLc_WSASend(SOCKET, LPWSABUF, DWORD, LPDWORD, DWORD,
++    LPWSAOVERLAPPED, LPWSAOVERLAPPED_COMPLETION_ROUTINE);
++__declspec(dllimport) int WSAAPI ShizukuLc_WSARecvFrom(SOCKET, LPWSABUF, DWORD, LPDWORD, LPDWORD,
++    struct sockaddr*, LPINT, LPWSAOVERLAPPED, LPWSAOVERLAPPED_COMPLETION_ROUTINE);
++__declspec(dllimport) int WSAAPI ShizukuLc_WSASendTo(SOCKET, LPWSABUF, DWORD, LPDWORD, DWORD,
++    const struct sockaddr*, int, LPWSAOVERLAPPED, LPWSAOVERLAPPED_COMPLETION_ROUTINE);
++__declspec(dllimport) BOOL PASCAL ShizukuLc_ConnectEx(SOCKET, const struct sockaddr*, int, PVOID,
++    DWORD, LPDWORD, LPOVERLAPPED);
++__declspec(dllimport) int WSAAPI ShizukuLc_closesocket(SOCKET);
++
++/* Loop port lifetime (core.c, req-inl.h). */
++#define uv__iocp_create ShizukuLc_CreateIoCompletionPort
++#define uv__iocp_post ShizukuLc_PostQueuedCompletionStatus
++#define uv__iocp_get_ex ShizukuLc_GetQueuedCompletionStatusEx
++#define uv__iocp_close ShizukuLc_CloseIoCompletionPort
++/* Association and socket I/O call sites in tcp.c, udp.c, pipe.c, poll.c,
++ * fs-event.c. Non-socket association fails with ERROR_NOT_SUPPORTED. */
++#define CreateIoCompletionPort ShizukuLc_CreateIoCompletionPort
++#define PostQueuedCompletionStatus ShizukuLc_PostQueuedCompletionStatus
++#define WSARecv ShizukuLc_WSARecv
++#define WSASend ShizukuLc_WSASend
++#define WSARecvFrom ShizukuLc_WSARecvFrom
++#define WSASendTo ShizukuLc_WSASendTo
++#define closesocket ShizukuLc_closesocket
++/* ConnectEx is emulated with connect(); the socket context is already
++ * updated, and Win98 has no SO_UPDATE_CONNECT_CONTEXT. */
++#define uv__tcp_update_connect_context(s) 0
++#else
++#define uv__iocp_create CreateIoCompletionPort
++#define uv__iocp_post PostQueuedCompletionStatus
++#define uv__iocp_get_ex GetQueuedCompletionStatusEx
++#define uv__iocp_close CloseHandle
++#define uv__tcp_update_connect_context(s)                                     \
++  setsockopt((s), SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, NULL, 0)
++#endif
++
++#endif /* UV_WIN_SHIZUKU_LCIOCP_H_ */
+diff --git a/src/win/tcp.c b/src/win/tcp.c
+index 66e005f..6a663c4 100644
+--- a/src/win/tcp.c
++++ b/src/win/tcp.c
+@@ -186,6 +186,7 @@ static int uv__tcp_set_socket(uv_loop_t* loop,
+     non_ifs_lsp = uv_tcp_non_ifs_lsp_ipv4;
+   }
+ 
++#ifndef UV_SHIZUKU_LCIOCP /* Win98: no SetFileCompletionNotificationModes */
+   if (!(handle->flags & UV_HANDLE_EMULATE_IOCP) && !non_ifs_lsp) {
+     UCHAR sfcnm_flags =
+         FILE_SKIP_SET_EVENT_ON_HANDLE | FILE_SKIP_COMPLETION_PORT_ON_SUCCESS;
+@@ -193,6 +194,9 @@ static int uv__tcp_set_socket(uv_loop_t* loop,
+       return GetLastError();
+     handle->flags |= UV_HANDLE_SYNC_BYPASS_IOCP;
+   }
++#else
++  (void) non_ifs_lsp;
++#endif
+ 
+   if (handle->flags & UV_HANDLE_TCP_NODELAY) {
+     err = uv__tcp_nodelay(handle, socket, 1);
+@@ -856,9 +860,13 @@ static int uv__tcp_try_connect(uv_connect_t* req,
+   }
+ 
+   if (!handle->tcp.conn.func_connectex) {
++#ifdef UV_SHIZUKU_LCIOCP
++    handle->tcp.conn.func_connectex = ShizukuLc_ConnectEx;
++#else
+     if (!uv__get_connectex_function(handle->socket, &handle->tcp.conn.func_connectex)) {
+       return WSAEAFNOSUPPORT;
+     }
++#endif
+   }
+ 
+   /* This makes connect() fail instantly if the target port on the localhost
+@@ -1279,11 +1287,7 @@ void uv__process_tcp_connect_req(uv_loop_t* loop, uv_tcp_t* handle,
+     if (handle->flags & UV_HANDLE_CLOSING) {
+       /* use UV_ECANCELED for consistency with Unix */
+       err = ERROR_OPERATION_ABORTED;
+-    } else if (setsockopt(handle->socket,
+-                          SOL_SOCKET,
+-                          SO_UPDATE_CONNECT_CONTEXT,
+-                          NULL,
+-                          0) == 0) {
++    } else if (uv__tcp_update_connect_context(handle->socket) == 0) {
+       uv__connection_init((uv_stream_t*)handle);
+       handle->flags |= UV_HANDLE_READABLE | UV_HANDLE_WRITABLE;
+     } else {
+diff --git a/src/win/winapi.c b/src/win/winapi.c
+--- a/src/win/winapi.c
++++ b/src/win/winapi.c
+@@ -51,6 +51,47 @@
+ /* api-ms-win-core-file-l2-1-4.dll function pointer */
+ sGetFileInformationByName pGetFileInformationByName;
+ 
++#ifdef UV_SHIZUKU_LCIOCP
++/* ShizukuOS / Windows 98: there is no ntdll.dll and GetModuleHandleW is a
++ * stub. The mandatory NT entry points are provided by LCIOCP.DLL (ShizukuOS
++ * ntwin32/legcord_iocp lc_ntdll) under ShizukuLc_* names and resolved by ANSI
++ * lookups. Required set is identical to upstream (fatal when absent);
++ * RtlGetVersion stays optional. The optional powrprof/bcryptprimitives/
++ * user32/ws2_32/api-ms entry points are not resolved and stay NULL, which
++ * their callers already handle. */
++static void uv__lciocp_bind(HMODULE module, const char* name, void* slot,
++                            int required) {
++  FARPROC proc = GetProcAddress(module, name);
++  if (proc == NULL && required) {
++    uv_fatal_error(GetLastError(), "GetProcAddress");
++  }
++  memcpy(slot, &proc, sizeof(proc));
++}
++
++void uv__winapi_init(void) {
++  HMODULE lciocp_module = LoadLibraryA("LCIOCP.DLL");
++  if (lciocp_module == NULL) {
++    uv_fatal_error(GetLastError(), "LoadLibraryA");
++  }
++  uv__lciocp_bind(lciocp_module, "ShizukuLc_RtlGetVersion", &pRtlGetVersion, 0);
++  uv__lciocp_bind(lciocp_module, "ShizukuLc_RtlNtStatusToDosError",
++                  &pRtlNtStatusToDosError, 1);
++  uv__lciocp_bind(lciocp_module, "ShizukuLc_NtDeviceIoControlFile",
++                  &pNtDeviceIoControlFile, 1);
++  uv__lciocp_bind(lciocp_module, "ShizukuLc_NtQueryInformationFile",
++                  &pNtQueryInformationFile, 1);
++  uv__lciocp_bind(lciocp_module, "ShizukuLc_NtSetInformationFile",
++                  &pNtSetInformationFile, 1);
++  uv__lciocp_bind(lciocp_module, "ShizukuLc_NtQueryVolumeInformationFile",
++                  &pNtQueryVolumeInformationFile, 1);
++  uv__lciocp_bind(lciocp_module, "ShizukuLc_NtQueryDirectoryFile",
++                  &pNtQueryDirectoryFile, 1);
++  uv__lciocp_bind(lciocp_module, "ShizukuLc_NtQuerySystemInformation",
++                  &pNtQuerySystemInformation, 1);
++  uv__lciocp_bind(lciocp_module, "ShizukuLc_NtQueryInformationProcess",
++                  &pNtQueryInformationProcess, 1);
++}
++#else
+ void uv__winapi_init(void) {
+   HMODULE ntdll_module;
+   HMODULE powrprof_module;
+@@ -171,3 +212,4 @@
+     pGetFileInformationByName = u.pGetFileInformationByName;
+   }
+ }
++#endif /* UV_SHIZUKU_LCIOCP */

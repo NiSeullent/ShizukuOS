@@ -81,6 +81,12 @@ int ds_preview_init(void)
     for(unsigned i=0;i<DS_REGS;++i)example.reg[i]=0x1000+i;
     example.frames[0]=example.ip;example.frame_count=1;
     ready=ds_latch(&state,DS_KERNEL_FATAL,&example)==1;
+    /* Web preview only: a synthetic proven context (IF clear, 16 KiB headroom,
+     * one CPU) so the real admission gate offers the games. Not panic evidence. */
+    {
+        const ds_context preview={0x46,0x20000+16384,0x20000,0x28000,0,0,1};
+        if(ready && ds_admit_games(&state,&preview)) ready=0;
+    }
     trace_length=0;
     if(!ready || ds_fallback(&state,trace_writer,0)) {ready=0;return -1;}
     return ds_preview_render();

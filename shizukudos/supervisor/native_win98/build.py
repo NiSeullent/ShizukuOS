@@ -21,6 +21,7 @@ import stat
 import struct
 import subprocess
 import sys
+import termios
 import time
 
 HERE = Path(__file__).resolve().parent
@@ -30,9 +31,15 @@ ROM_BYTES = 256 << 10
 ESP_MIB = 2304
 RESERVE = 17 << 30
 CONFIG = (0x38395753, 1, 128, 0)
-OPTIONAL_NATIVE_SIZES = {"VGACFG.BIN": 136, "VGAROM.BIN": 65536, "W98PERS.BIN": 192}
+OPTIONAL_NATIVE_SIZES = {"VGACFG.BIN": 136, "VGAROM.BIN": 65536, "W98PERS.BIN": 192, "W98INPT.BIN": 96}
+# W98INPT.BIN (input_policy.h): explicit owned-machine Q35 i8042 input option.
+INPUT_POLICY = (0x4E493957, 1, 96)
+INPUT_FLAGS_KNOWN, INPUT_MACHINE_Q35_I8042 = 3, 1
 VGA_PROVENANCE_NAME = "vga-build-receipt"
 VGA_RECEIPT_MAX = 1 << 20
+PIPE_COALESCE = 1 << 20
+COALESCE_WAITS = 4
+COALESCE_SLEEP = 0.0005
 
 
 def safe_path(path):
@@ -356,13 +363,31 @@ def validate_persistence_config(data):
     # Syntax/resource admission does not grant an actual owned PCI-device epoch.
 
 
+def validate_input_policy(data, vga_config=None):
+    """Exact W98INPT.BIN syntax; the nonce is checked only by the live owner/gate.
+
+    A well-formed file is not authority: the Supervisor admits it only when
+    the fw_cfg policy of the same live Attempt seals its SHA-256 (bytes 216..247).
+    """
+    if type(data) is not bytes or len(data) != 96:
+        raise ValueError("W98INPT.BIN must have its separate exact 96-byte ABI")
+    magic, version, extent, flags, machine = struct.unpack_from("<IHHII", data)
+    if ((magic, version, extent) != INPUT_POLICY or not flags or flags & ~INPUT_FLAGS_KNOWN or
+        machine != INPUT_MACHINE_Q35_I8042 or not any(data[16:48]) or not any(data[48:80]) or any(data[80:])):
+        raise ValueError("unsupported input policy version/flags/machine/nonce/reserved fields")
+    if vga_config is not None and data[48:80] != hashlib.sha256(vga_config).digest():
+        raise ValueError("input policy is not bound to the copied VGACFG.BIN")
+    return flags
+
+
 def optional_native_names(names, provenance_names):
     names, provenance_names = set(names), set(provenance_names)
     vga = {"VGACFG.BIN", "VGAROM.BIN"}
     if (names - set(OPTIONAL_NATIVE_SIZES) or provenance_names - {VGA_PROVENANCE_NAME} or
         bool(names & vga) != (vga <= names) or
-        bool(names & vga) != bool(provenance_names)):
-        raise ValueError("only complete known VGA pair/receipt and separate persistence opt-ins are allowed")
+        bool(names & vga) != bool(provenance_names) or
+        ("W98INPT.BIN" in names and not vga <= names)):
+        raise ValueError("only complete known VGA pair/receipt, separate persistence and VGA-bound input opt-ins are allowed")
 
 
 def validate_optional_native(descriptors, provenance_descriptors):
@@ -437,6 +462,8 @@ def validate_optional_native(descriptors, provenance_descriptors):
             type(row["bytes"]) is not int or not 0 < row["bytes"] <= VGA_RECEIPT_MAX or
             (size is not None and row["bytes"] != size) or row["sha256"] != digest):
             raise ValueError("independent VGA producer artifact pin mismatch")
+    if "W98INPT.BIN" in descriptors:
+        validate_input_policy(held_bytes(descriptors["W98INPT.BIN"], 96), config)
 
 
 def boot_policy(names):
@@ -447,6 +474,8 @@ def boot_policy(names):
         raw += b"win98_vga=yes\r\n"
     if "W98PERS.BIN" in names:
         raw += b"win98_persistence=yes\r\n"
+    if "W98INPT.BIN" in names:
+        raw += b"win98_input=yes\r\n"
     return raw
 
 
@@ -472,6 +501,8 @@ def validate_contents(name, fd):
         validate_vga_rom(held_bytes(fd, 65536))
     elif name == "W98PERS.BIN":
         validate_persistence_config(held_bytes(fd, 192))
+    elif name == "W98INPT.BIN":
+        validate_input_policy(held_bytes(fd, 96))
     os.lseek(fd, 0, os.SEEK_SET)
 
 
@@ -509,6 +540,15 @@ def verify_esp_member(esp, name, expected, size, receipt, timeout=120):
     digest, count = hashlib.sha256(), 0
     child = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     deadline = time.monotonic() + timeout
+    # mtools writes one 1-4 KiB cluster per write(2). Waking per write made a
+    # 2 GiB member cost ~10^6 pipe reads (counted in this process's syscr), so
+    # the reader lets a 1 MiB pipe fill before each read. Every byte is still
+    # read, counted and hashed; only the wakeup granularity changes.
+    pipe = child.stdout.fileno()
+    try:
+        fcntl.fcntl(pipe, getattr(fcntl, "F_SETPIPE_SZ", 1031), PIPE_COALESCE)
+    except OSError:
+        pass  # Smaller pipe only means more reads, never fewer bytes.
     try:
         with selectors.DefaultSelector() as selector:
             selector.register(child.stdout, selectors.EVENT_READ)
@@ -518,7 +558,12 @@ def verify_esp_member(esp, name, expected, size, receipt, timeout=120):
                     raise TimeoutError("ESP member streaming readback timed out")
                 if not selector.select(remaining):
                     raise TimeoutError("ESP member streaming readback timed out")
-                block = os.read(child.stdout.fileno(), 1 << 20)
+                for _ in range(COALESCE_WAITS):
+                    available = struct.unpack("i", fcntl.ioctl(pipe, termios.FIONREAD, b"\0" * 4))[0]
+                    if available >= PIPE_COALESCE // 2 or child.poll() is not None or deadline - time.monotonic() <= 0.01:
+                        break
+                    time.sleep(COALESCE_SLEEP)
+                block = os.read(pipe, 1 << 20)
                 if not block:
                     break
                 count += len(block)
@@ -606,7 +651,10 @@ def _stage_ram_source(fd, checkpoint, placement, expected, size):
     return result
 
 
-def assemble(out, copies, loader, receipt, *, scratch=None, original_disk=None):
+def assemble(out, copies, loader, receipt, *, scratch=None, original_disk=None, held=None, registry=None):
+    """held (dict) + registry: the final ESP and staged-source leases are entered into
+    held["stack"] under the caller's registry and returned as held["final"] /
+    held["staged"], so the caller does not re-open and re-hash identical bytes."""
     if scratch is None:
         return _assemble(out, copies, loader, receipt)
     guard_path = HERE / "ram_assembly.py"
@@ -645,13 +693,16 @@ def assemble(out, copies, loader, receipt, *, scratch=None, original_disk=None):
                         source = safe_path(source)
                     staged = _stage_ram_source(original_fd, original_check, placement, pin, size)
                     staged["original_path"] = str(source)
-                    staged_fd, staged_check = artifacts.enter_context(read_leased(staged["path"], pin, size))
+                    keeper = artifacts if held is None else held["stack"]
+                    staged_fd, staged_check = keeper.enter_context(read_leased(staged["path"], pin, size, registry=registry))
                     if list(stable(os.fstat(staged_fd))) != staged["identity"]:
                         raise ValueError("RAM source copied writer identity changed before lease")
                     staged_check(); placement.check()
                     prepared_copies = {**copies, "DISK.IMG": Path(staged["path"])}
                 esp, identities = _assemble(out, prepared_copies, loader, receipt, placement=placement,
-                    ram_guard=(guard_fd, guard_size, guard_sha, guard_path, plan_path, plan_sha))
+                    ram_guard=(guard_fd, guard_size, guard_sha, guard_path, plan_path, plan_sha),
+                    held_disk=None if staged is None else (staged_fd, staged_check, size, pin),
+                    esp_lease_by_caller=True)
                 checkpoint(); placement.check()
                 produced = receipt.get("disk_insertion", {}).get("result", {}).get("esp")
                 if not produced or produced["path"] != str(esp) or list(stable(esp.stat())) != produced["identity"]:
@@ -663,7 +714,8 @@ def assemble(out, copies, loader, receipt, *, scratch=None, original_disk=None):
                     raise ValueError("RAM ESP producer identity changed during lease admission")
                 copied = copy_fd(source_fd, source_check, final, pin, size,
                                  maximum=ESP_MIB << 20, prefer_reflink=True, record_identity=True)
-                final_fd, final_check = artifacts.enter_context(read_leased(final, pin, size, maximum=ESP_MIB << 20))
+                final_fd, final_check = (artifacts if held is None else held["stack"]).enter_context(
+                    read_leased(final, pin, size, maximum=ESP_MIB << 20, registry=registry))
                 if list(stable(os.fstat(final_fd))) != copied["identity"]:
                     raise ValueError("NAS ESP differs from its actual copied inode")
                 os.fsync(placement.fds["sink"])
@@ -675,12 +727,21 @@ def assemble(out, copies, loader, receipt, *, scratch=None, original_disk=None):
                     "final_directory_fsync_completed": True, "worker_deadline_seconds": 120,
                     "source_staging": staged,
                     "NAS_reserve_bytes": RESERVE, "independent_NAS_copy_full_SHA_verified": True}
+                if held is not None:
+                    held["final"] = (final_fd, final_check)
+                    if staged is not None:
+                        held["staged"] = (staged_fd, staged_check)
             checkpoint(); placement.check()
         checkpoint()
     return final, identities
 
 
-def _assemble(out, copies, loader, receipt, *, placement=None, ram_guard=None):
+def _assemble(out, copies, loader, receipt, *, placement=None, ram_guard=None, held_disk=None, esp_lease_by_caller=False):
+    """held_disk=(fd, checkpoint, size, pin): DISK.IMG copy already full-SHA verified under
+    the caller's live read lease; its pin is reused instead of re-hashing (the worker
+    still hashes it before and while streaming). esp_lease_by_caller: the caller
+    immediately full-SHA verifies the returned ESP under a read lease against the
+    worker's reported SHA, so the identical unleased pass here is skipped."""
     space(out, ESP_MIB << 20)
     work = out if placement is None else Path(placement.plan["scratch"]["path"])
     def step(argv):
@@ -715,7 +776,14 @@ def _assemble(out, copies, loader, receipt, *, placement=None, ram_guard=None):
         space(out)
     if "SHZDOS/DISK.IMG" in members:
         source = safe_path(members["SHZDOS/DISK.IMG"])
-        size, pin = source.stat().st_size, file_sha(source)
+        if held_disk is None:
+            size, pin = source.stat().st_size, file_sha(source)
+        else:
+            held_fd, held_check, size, pin = held_disk
+            held_check()
+            if stable(os.fstat(held_fd)) != stable(source.stat()) or os.fstat(held_fd).st_size != size:
+                raise ValueError("held DISK.IMG lease does not name the inserted source")
+            pin = pin_format(pin)
         space(out, size)
         if stable(esp.stat())[:3] != owned_esp:
             raise ValueError("fresh owned ESP inode/extent changed before disk insertion")
@@ -826,7 +894,8 @@ def _assemble(out, copies, loader, receipt, *, placement=None, ram_guard=None):
                         target["path"] != request["esp"]["path"] or target["bytes"] != request["esp"]["bytes"] or
                         target["identity"] != list(stable(esp.stat())) or target["identity"][:3] != list(owned_esp) or
                         target["independent_inode"] is not True or target["fsync_completed"] is not True or
-                        file_sha(esp) != pin_format(target["sha256"])):
+                        type(target["sha256"]) is not str or target["sha256"] != pin_format(target["sha256"]) or
+                        (not esp_lease_by_caller and file_sha(esp) != target["sha256"])):
                         raise ValueError("post-worker owned ESP identity/hash differs")
                     if (set(member) != {"path", "bytes", "sha256", "clusters", "cluster_bytes", "zero_bytes_omitted", "data_bytes_written", "padding_zero_bytes"} or
                         member["path"] != "SHZDOS/DISK.IMG" or member["bytes"] != size or member["sha256"] != pin or
@@ -863,7 +932,7 @@ def main(argv=None, *, receipt_sink=None):
         raise TypeError("receipt_sink must be callable")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--make-config", type=Path, help="create a new public 16-byte opt-in config and print its SHA")
-    optional_args = ("vga-config", "vga-rom", "persistence-config", "vga-build-receipt")
+    optional_args = ("vga-config", "vga-rom", "persistence-config", "input-policy", "vga-build-receipt")
     for name in ("disk", "rom", "config", "kernel32", "kernel64", "win64-img", *optional_args):
         parser.add_argument("--" + name, type=Path)
         parser.add_argument("--" + name + "-sha256")
@@ -871,7 +940,11 @@ def main(argv=None, *, receipt_sink=None):
     parser.add_argument("--assembly-scratch", type=Path,
                         help="fresh owned tmpfs workspace; final ESP still uses --out and its 17GiB reserve")
     parser.add_argument("--validate-only", action="store_true", help="check all explicit inputs without output or compilation")
-    args = parser.parse_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    options = [str(item).split("=", 1)[0] for item in raw_argv if str(item).startswith("--")]
+    if len(options) != len(set(options)):
+        parser.error("each option (including every optional native input) may appear at most once")
+    args = parser.parse_args(raw_argv)
     if args.make_config:
         if (any(getattr(args, name) for name in ("disk", "rom", "config", "kernel32", "kernel64", "win64_img", "out")) or
             any(getattr(args, name.replace("-", "_") + suffix) for name in optional_args for suffix in ("", "_sha256"))):
@@ -887,11 +960,11 @@ def main(argv=None, *, receipt_sink=None):
     if args.win64_img and not args.kernel64:
         parser.error("WIN64.IMG requires an explicit Kernel64 input")
     sizes = {"disk": DISK_BYTES, "rom": ROM_BYTES, "config": 16,
-             "vga_config": 136, "vga_rom": 65536, "persistence_config": 192}
+             "vga_config": 136, "vga_rom": 65536, "persistence_config": 192, "input_policy": 96}
     targets = {"disk": "DISK.IMG", "rom": "SEABIOS.BIN", "config": "WIN98CFG.BIN",
                "kernel32": "KERNEL32.BIN", "kernel64": "KERNEL64.BIN", "win64_img": "WIN64.IMG"}
     base_names = set(targets.values())
-    targets.update(vga_config="VGACFG.BIN", vga_rom="VGAROM.BIN", persistence_config="W98PERS.BIN",
+    targets.update(vga_config="VGACFG.BIN", vga_rom="VGAROM.BIN", persistence_config="W98PERS.BIN", input_policy="W98INPT.BIN",
                    vga_build_receipt=VGA_PROVENANCE_NAME)
     # The current loader gives K64 64 MiB and puts its archive at 32 MiB.
     # Larger archives require an explicit RAM/layout change, not a success claim.
@@ -981,18 +1054,24 @@ def main(argv=None, *, receipt_sink=None):
                     esp, members = assemble(out, copies, loader, receipt)
                 else:
                     original = inputs["DISK.IMG"]
+                    held = {"stack": artifact_stack}
                     esp, members = assemble(out, copies, loader, receipt, scratch=args.assembly_scratch,
-                        original_disk=(descriptors["DISK.IMG"], registry.check, original["path"], original["bytes"], original["sha256"]))
+                        original_disk=(descriptors["DISK.IMG"], registry.check, original["path"], original["bytes"], original["sha256"]),
+                        held=held, registry=artifact_registry)
                     known = receipt["ram_assembly"]
-                    final_fd, final_check = artifact_stack.enter_context(read_leased(esp, known["final_copy"]["sha256"],
-                        known["final_copy"]["bytes"], maximum=ESP_MIB << 20, registry=artifact_registry))
+                    # Leases taken (full SHA verified) inside assemble stay held here; no second read pass.
+                    final_fd, final_check = held["final"]
+                    if (os.fstat(final_fd).st_size != known["final_copy"]["bytes"] or
+                        stable(os.fstat(final_fd)) != stable(esp.stat())):
+                        raise ValueError("final NAS ESP lease does not name the returned artifact")
                     if list(stable(os.fstat(final_fd))) != known["final_identity"]:
                         raise ValueError("final NAS ESP changed after assembly return")
                     final_check()
                     staged = known.get("source_staging")
                     if staged is not None:
-                        staged_fd, staged_check = artifact_stack.enter_context(read_leased(staged["path"],
-                            staged["sha256"], staged["bytes"], maximum=DISK_BYTES, registry=artifact_registry))
+                        staged_fd, staged_check = held["staged"]
+                        if os.fstat(staged_fd).st_size != staged["bytes"]:
+                            raise ValueError("RAM source lease extent differs after assembly return")
                         if list(stable(os.fstat(staged_fd))) != staged["identity"]:
                             raise ValueError("RAM source copied writer identity changed after assembly return")
                         staged_check()

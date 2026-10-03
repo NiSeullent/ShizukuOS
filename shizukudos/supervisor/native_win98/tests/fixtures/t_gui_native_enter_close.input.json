@@ -1,0 +1,1 @@
+{"start_after_s":150,"steps":[{"delay_ms":0,"tap":"ret"},{"delay_ms":4000,"key":"alt","down":true},{"delay_ms":100,"tap":"f4"},{"delay_ms":200,"key":"alt","down":false}]}

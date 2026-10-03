@@ -40,7 +40,9 @@ struct ntwv_w64_open {                      /* 64 bytes */
     uint32_t slot_count, pool_bytes;        /* ring depth and shared pool size of the mapped channel */
     uint32_t sent, received;                /* frames pushed / popped by this VxD instance */
     uint32_t proto_errors, notify_errors;   /* malformed slots dropped; NOTIFY hypercalls that failed */
-    uint32_t pending_pool, reserved;        /* pool blocks awaiting their reply */
+    uint32_t pending_pool;                  /* pool blocks awaiting their reply */
+    uint32_t attested;                      /* SHZ_CHAN_ATTEST_* bits the Supervisor recorded for this generation
+                                             * (0: legacy forwarding VxD, old Supervisor, or attestation refused) */
 };
 
 /* VWIN32-owned structure. Buffer fields remain untrusted 32-bit addresses. */
@@ -70,6 +72,8 @@ struct ntwv_hv {
     /* VMCALL with the ABI register convention: EAX = op, EBX/ECX = arguments; returns EAX status, EBX/ECX results. */
     int32_t (*hcall)(uint32_t op, uint32_t a, uint32_t b, uint32_t *ebx_out, uint32_t *ecx_out);
     void *(*map_phys)(uint32_t phys, uint32_t bytes);   /* system linear alias of a guest-physical window, NULL on failure */
+    /* Optional VMCALL with a third argument in EDX (SHZ_HC_CHANNEL_ATTEST). NULL => channel never attested. */
+    int32_t (*hcall3)(uint32_t op, uint32_t a, uint32_t b, uint32_t c, uint32_t *ebx_out, uint32_t *ecx_out);
 };
 
 int ntwv_initialize(const struct ntw_lock_ops *ops);
@@ -80,6 +84,10 @@ uint32_t ntwv_dioc_ex(const struct ntwv_dioc *request, const struct ntwv_pages *
  * leave it intact. Pending buffers remain peer-visible until a terminal reply
  * or Supervisor-owned channel teardown: reset is not cancellation/rundown. */
 void ntwv_w64_reset(void);
+#ifdef NTWV_W64_DERIVED_OWNER
+/* Diagnostics: K64 processes whose custody the VxD still tracks (created by a derived owner, not yet released). */
+uint32_t ntwv_w64_tracked(void);
+#endif
 int ntwv_native_init(void);
 int ntwv_native_exit(void);
 uint32_t ntwv_native_dioc(const struct ntwv_dioc *request);

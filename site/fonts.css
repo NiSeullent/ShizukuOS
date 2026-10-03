@@ -1,0 +1,12 @@
+/* Pretendard 1.3.9 · SIL OFL 1.1. Original license: fonts/OFL.txt.
+ * Source and exact bytes: fonts/manifest.json. Self-hosted; no local() alias or CDN. */
+@font-face {
+  font-family: "Pretendard Variable";
+  font-style: normal;
+  font-weight: 45 930;
+  font-display: swap;
+  src: url("./fonts/PretendardVariable.woff2") format("woff2");
+}
+:root { --site-font: "Pretendard Variable", sans-serif; }
+html { font-family: var(--site-font); font-synthesis: none; }
+button, input, select, textarea, code, pre, kbd, samp { font-family: var(--site-font); }

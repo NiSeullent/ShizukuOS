@@ -13,7 +13,8 @@
  *    translate (GM_ADVANCED; scaling, rotation and shear are refused with ERROR_NOT_SUPPORTED, see gdi_path.c).
  *  - Paths (BeginPath..EndPath) are recorded in device coordinates, as on Windows (gdi_path.c). Enhanced metafiles are
  *    recorded as raster pictures plus comments (gdi_emf.c).
- *  - The only font is the built-in 8x16 bitmap font (see gdi_text.c). One coarse lock protects all GDI state.
+ *  - The only font is the built-in 16-pixel bitmap font: ASCII 8 wide, Unifont Hangul 16 wide (gdi_font.c, gdi_text.c).
+ *    One coarse lock protects all GDI state.
  */
 #ifndef SHZ_GDI_INTERNAL_H
 #define SHZ_GDI_INTERNAL_H

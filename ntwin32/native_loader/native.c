@@ -7,8 +7,9 @@
 #include <windows.h>
 #include "pe.h"
 #include "tls_runtime.h"
+#include "../chromium_port/api_contract.h"
 #define MODULES 16
-typedef struct module {char name[128],path[MAX_PATH];np_image pe;np_tls_info tls;uint8_t *file,*mapped;HMODULE native;uint32_t dependencies,dynamic_refs;int state,attached,attaching,tls_attached,disable_thread_calls;} module;
+typedef struct module {char name[128],path[MAX_PATH];np_image pe;np_tls_info tls;uint8_t *file,*mapped;HMODULE native;ac_target contract;uint32_t dependencies,dynamic_refs;int state,attached,attaching,tls_attached,disable_thread_calls;} module;
 typedef FARPROC (WINAPI *ntw_resolve_fn)(HMODULE,LPCSTR);
 typedef void *(WINAPI *provider_open_fn)(LPCSTR);
 typedef FARPROC (WINAPI *provider_find_fn)(void *,LPCSTR,LPCSTR);
@@ -20,6 +21,8 @@ typedef struct loader {
  HANDLE threads_done;DWORD thread_slot;unsigned workers;int runtime,lock_ready,closing;
  HMODULE ntw,bridge;ntw_resolve_fn ntw_find;provider_find_fn provider_find;
  provider_close_fn provider_close;void *providers;
+ HMODULE contract_dll[4];char contract_name[4][16];
+ BOOL (WINAPI *register_image)(PVOID,DWORD,LPCSTR);BOOL (WINAPI *unregister_image)(PVOID);
 } loader;
 typedef struct thread_job {loader *owner;LPTHREAD_START_ROUTINE start;void *argument;ntw_tls_thread tls;int entered,finished;} thread_job;
 static loader *active_loader;
@@ -47,6 +50,8 @@ static int read_file(module *m)
  if(!ReadFile(h,m->file,size,&got,NULL)||got!=size){CloseHandle(h);return 0;}CloseHandle(h);
  for(i=0;i<size;i++){fnv^=m->file[i];fnv*=16777619u;}
  line("FILE=",m->path);value("FILE_BYTES=",size);value("FILE_FNV1A=",fnv);
+ /* Chromium import contract: identity is the SHA-256 of the immutable file. */
+ if(ac_init(&m->contract,m->file,size))line("CONTRACT_IDENTITY=",m->contract.role==AC_ROLE_CHROME_ELF?"CHROMIUM157_CHROME_ELF":"CHROMIUM157_CHROME_EXE");
  if(!np_parse(&m->pe,m->file,size,&error)||!np_imports(&m->pe,1,NULL,NULL,NULL,&error)||
     !np_relocations(&m->pe,NULL,NULL,&error)) {line("PE_INVALID=",error?error:"UNKNOWN");return 0;}
  {uint32_t ignored;const char *forward;
@@ -99,9 +104,42 @@ static FARPROC resolve(loader *l,module *m,const char *name,uint16_t ordinal,uns
  return l->execute?(FARPROC)(m->mapped+rva):(FARPROC)(UINT_PTR)1;
 }
 typedef struct bind_context {loader *l;module *m;} bind_context;
+/* Hash-bound per-importer provider route (api_contract.c). Providers are
+ * real Win98 DLLs loaded by Win98 from the target directory (system
+ * directory for native OEM DLLs); unavailable providers stay MISSING. */
+static FARPROC contract_proc(loader *l,const ac_route *r)
+{
+ unsigned n;char path[MAX_PATH];HMODULE h=NULL;
+ if(!r->provider||!r->symbol||length(r->provider)>=sizeof(l->contract_name[0]))return NULL;
+ for(n=0;n<4&&l->contract_dll[n];n++)if(equal_ci(l->contract_name[n],r->provider)){h=l->contract_dll[n];break;}
+ if(!h){
+  if(n>=4){line("CONTRACT_BLOCKER=","PROVIDER_LIMIT");return NULL;}
+  if(r->kind==AC_NATIVE_POWER){char system[MAX_PATH];DWORD size=GetSystemDirectoryA(system,sizeof(system));
+   if(!size||size>=sizeof(system)||!join(path,system,r->provider))return NULL;}
+  else if(!join(path,l->directory,r->provider))return NULL;
+  h=LoadLibraryA(path);
+  if(!h){line("CONTRACT_PROVIDER_UNAVAILABLE=",path);value("WIN32_ERROR=",GetLastError());return NULL;}
+  l->contract_dll[n]=h;copy(l->contract_name[n],r->provider,length(r->provider)+1);line("CONTRACT_PROVIDER=",path);
+  if((r->kind==AC_PRIVATE_KERNEL32||r->kind==AC_KERNEL32_UNSUPPORTED)&&!l->register_image){unsigned k;
+   /* M98K32CE resolves GetModuleHandleExW(FROM_ADDRESS)/PSAPI for images this loader mapped itself. */
+   l->register_image=(BOOL (WINAPI *)(PVOID,DWORD,LPCSTR))(void *)GetProcAddress(h,"M98K32CE_RegisterImage");
+   l->unregister_image=(BOOL (WINAPI *)(PVOID))(void *)GetProcAddress(h,"M98K32CE_UnregisterImage");
+   if(!l->register_image||!l->unregister_image){l->register_image=NULL;l->unregister_image=NULL;line("CONTRACT_IMAGE_REGISTRY=","UNAVAILABLE");}
+   else for(k=0;k<l->count;k++)if(l->modules[k].mapped)line(l->register_image(l->modules[k].mapped,l->modules[k].pe.size,l->modules[k].path)?"CONTRACT_IMAGE_REGISTERED=":"CONTRACT_IMAGE_REGISTER_FAILED=",l->modules[k].name);
+  }
+ }
+ return GetProcAddress(h,r->symbol);
+}
 static int bind_import(void *opaque,const char *dll,const char *name,uint16_t ordinal,uint32_t slot,int delay)
 {
- bind_context *b=opaque;loader *l=b->l;module *dependency=load_module(l,dll,NULL);FARPROC p=resolve(l,dependency,name,ordinal,0);
+ bind_context *b=opaque;loader *l=b->l;module *dependency=load_module(l,dll,NULL);FARPROC p;
+ ac_route route;
+ /* A hash-authorized route replaces native resolution (and its execution
+  * blocklist) for exactly this importer/symbol; nothing else changes. */
+ if(name&&b->m->contract.magic&&ac_lookup(&b->m->contract,dll,name,ordinal,&route)){
+  p=contract_proc(l,&route);text("CONTRACT_ROUTE=");text(dll);text("!");text(name);text(" -> ");text(route.provider);
+  text(route.kind==AC_KERNEL32_UNSUPPORTED?(p?" BOUND_EXPLICIT_UNSUPPORTED\r\n":" UNAVAILABLE\r\n"):(p?" BOUND\r\n":" UNAVAILABLE\r\n"));
+ }else p=resolve(l,dependency,name,ordinal,0);
  if(dependency)b->m->dependencies|=1u<<(unsigned)(dependency-l->modules);
  if(l->runtime&&b->m->tls.present){np_tls_info *t=&b->m->tls;
   if((slot>=t->index_rva&&slot<t->index_rva+4)||
@@ -151,6 +189,7 @@ static module *load_module(loader *l,const char *name,const char *root_path)
  if(m->state==-1){l->blocked++;if(l->execute)return NULL;}m->state=1;
  if(root_path==NULL&&!(m->pe.characteristics&0x2000)){line("IMPORT_BLOCKER=","DEPENDENCY_NOT_DLL");m->state=-2;l->blocked++;return NULL;}
  if(l->execute&&!map_image(m)){m->state=-2;l->blocked++;return NULL;}
+ if(m->mapped&&l->register_image&&!l->register_image(m->mapped,m->pe.size,m->path))line("CONTRACT_IMAGE_REGISTER_FAILED=",m->name);
  binding.l=l;binding.m=m;
  if(!np_imports(&m->pe,1,bind_import,&binding,NULL,&error)){line("PE_INVALID=",error);m->state=-2;l->blocked++;return NULL;}
  m->state=2;return m;
@@ -231,7 +270,9 @@ static void cleanup(loader *l)
   LeaveCriticalSection(&l->lock);DeleteCriticalSection(&l->lock);l->lock_ready=0;
   if(l->thread_slot!=TLS_OUT_OF_INDEXES)TlsFree(l->thread_slot);if(l->threads_done)CloseHandle(l->threads_done);
  }else while(l->attached){module *m=&l->modules[l->order[--l->attached]];if((m->pe.characteristics&0x2000)&&m->pe.entry)((entry_fn)(void *)(m->mapped+m->pe.entry))((HINSTANCE)m->mapped,DLL_PROCESS_DETACH,NULL);}
- for(n=l->count;n;n--){module *m=&l->modules[n-1];if(m->mapped)VirtualFree(m->mapped,0,MEM_RELEASE);if(m->native)FreeLibrary(m->native);if(m->file)HeapFree(GetProcessHeap(),0,m->file);}
+ for(n=l->count;n;n--){module *m=&l->modules[n-1];if(m->mapped&&l->unregister_image)l->unregister_image(m->mapped);if(m->mapped)VirtualFree(m->mapped,0,MEM_RELEASE);if(m->native)FreeLibrary(m->native);if(m->file)HeapFree(GetProcessHeap(),0,m->file);}
+ l->register_image=NULL;l->unregister_image=NULL;
+ for(n=4;n;n--)if(l->contract_dll[n-1]){FreeLibrary(l->contract_dll[n-1]);l->contract_dll[n-1]=NULL;}
  if(l->providers&&l->provider_close)l->provider_close(l->providers);
  if(l->bridge)FreeLibrary(l->bridge);if(l->ntw)FreeLibrary(l->ntw);
 }

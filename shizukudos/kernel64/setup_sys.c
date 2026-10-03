@@ -2,6 +2,7 @@
  * Kernel64 installer support (SHZSETUP.EXE): block-device enumeration, raw sector I/O and the post-setup power
  * request (syscalls 0xb0-0xbf, setup_abi.h), and the `shz.setup=auto` autostart run after the boot self-tests.
  */
+#include "laptop_power.h"
 #include "proc_internal.h"
 #include "fs.h"
 #include "blk_compat.h"
@@ -169,6 +170,11 @@ void setup_autostart(const shz_bootinfo_t *bi)
             power_request == SHZ_SETUP_POWER_REBOOT ? "reboot" : power_request == SHZ_SETUP_POWER_SHUTDOWN ? "shutdown" : "none");
 #ifdef SHZ_STANDALONE
     if (power_request == SHZ_SETUP_POWER_REBOOT) {
+        if (k64_laptop_power_generation()) {                 /* FADT RESET_REG, only if laptop_power was opened */
+            kprintf("K64 setup: rebooting (ACPI FADT reset register)\n");
+            kprintf("K64 setup: ACPI reset did not reset the platform (%d), falling back to the keyboard controller\n",
+                    k64_laptop_power_reset());
+        }
         kprintf("K64 setup: rebooting (keyboard controller reset)\n");
         __asm__ volatile("outb %0, $0x64" :: "a"((uint8_t)0xfe));
         for (;;) __asm__ volatile("hlt");

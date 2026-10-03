@@ -1,5 +1,5 @@
 {
-  "description": "Winsock 1 exports and bounded Wine-compatible AcceptEx address decoder",
+  "description": "Winsock 1 exports and kernel-leased bounded AcceptEx address decoder (NtShzSockIoctl 0x53480014)",
   "libs": ["ws2_32"],
   "ordinals": {"GetAcceptExSockaddrs": 1142},
   "forwarders": [

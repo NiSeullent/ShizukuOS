@@ -66,7 +66,11 @@ static void copy_value(char *dst, size_t cap, const char *src, size_t n)
  * yields to its threads and safely reaps it. Do not use the QA autorun timeout. */
 unsigned k64_desktop(void)
 {
-    const char *image = "C:\\SHZ\\SYS64\\SHZDESK.EXE";
+    /* Shell selection: the Korean ShizukuOS shell is the default when its image is packed; `shz.shell=shzdesk`
+     * selects the earlier SHZDESK shell. A named shell that is missing fails visibly (no silent substitution);
+     * only the unnamed default falls back to SHZDESK when the new shell image is absent. */
+    const char *image = "C:\\SHZ\\SYS64\\SHIZUKU_SHELL.EXE";
+    char shell[16];
     process_t *p = 0;
     thread_t *t = 0;
     int64_t code = -1;
@@ -83,6 +87,10 @@ unsigned k64_desktop(void)
         if(proc_wait(p->pid,&code,&faulted)||code||faulted)return 1;
         p=0;t=0;
     }
+    if (!cmdline_value("shz.shell", shell, sizeof shell)) {
+        if (!strcmp(shell, "shzdesk")) image = "C:\\SHZ\\SYS64\\SHZDESK.EXE";
+        else if (strcmp(shell, "shizuku")) { kprintf("K64 desktop: result unknown-shell %s\n", shell); return 1; }
+    } else if (!fs_lookup(image)) image = "C:\\SHZ\\SYS64\\SHZDESK.EXE";
     kprintf("K64 desktop: production profile (self-tests not run)\n");
     if (net_ensure_init()) {
         kprintf("K64 desktop: result network-init-failed\n");

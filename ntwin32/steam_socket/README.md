@@ -57,13 +57,15 @@ thread-safe.
 
 ## Integration gate
 
-The current Win64 WS2_32 source explicitly lacks AcceptEx/ConnectEx and socket
-overlapped I/O. No current provider produces this format. An integrator must
-first implement accept-into-existing-socket, initial receive, event/IOCP
-completion, cancellation/teardown and SO_UPDATE_ACCEPT_CONTEXT. The provider
-must own its buffer layout and extension lookup. A bounded allocation tracked
-by that provider is needed to adapt this helper to the VOID public ABI. A DLL
-forwarder or decoder by itself does not supply these behaviors.
+The Win64 source now wires IPv4 TCP ConnectEx/DisconnectEx and overlapped-only
+AcceptEx through `shizukudos/win64/dlls/ws2_32/ws2_extensions.c` and WS2_32
+extension lookup to `kernel64/net_sock.c` / `net_sock_extensions.h`. The kernel
+owns the accept operation registry, event/IOCP IRP completion, cancellation,
+context update and leased GetAcceptExSockaddrs lookup. The provider-produced
+buffer layout and bounded tracked allocation remain part of the contract.
+This source integration is limited to the implemented paths; it is not a
+claim of all socket extensions, native socket execution or useful Steam behavior.
+A decoder or export alone still cannot establish those application results.
 
 ## Focused host validation
 
@@ -89,3 +91,32 @@ DWORD overflow, insufficient reservation, alias rejection and preserved output
 on failure.
 These checks validate parsing on the host only. There is no Windows, Wine
 socket-provider integration or application-functionality result.
+
+## Provider-side AcceptEx registry (`accept_op.c`)
+
+`accept_op.h/.c` is the provider half required by the integration gate above.
+It is freestanding (no allocation, libc or locks; compiles for the kernel64
+`-mcmodel=kernel -mno-red-zone` profile and MinGW x64) and must be called with
+the provider's own serialization (kernel64 net mutex).
+
+- `ntw_acceptex_plan_make` validates the original AcceptEx reservations
+  (family sockaddr + 16, DWORD overflow) before any work is queued.
+- `ntw_acceptex_encode_blocks` writes the Wine-layout length32 + sockaddr
+  blocks at the receive *reservation* offset, zeroes reservation tails, and
+  never touches the receive area; `accept_buffer.c` decodes it back exactly.
+- `ntw_acceptex_submit/complete/cancel/release/forget` keep a fixed table of
+  operations bound to owner, listen and accept `(id, generation)` refs and a
+  16-bit slot generation in each token (0 never issued). The accepted byte
+  count is recorded separately and refused above the receive reservation.
+  Buffer reuse retires an older completed record; closing a socket or process
+  frees its records and reports pending ones for IRP cancellation.
+- `ntw_acceptex_update_context` implements the SO_UPDATE_ACCEPT_CONTEXT
+  binding check; `ntw_acceptex_lookup` gives GetAcceptExSockaddrs the tracked
+  allocation length, refusing a received count passed as the reservation.
+
+Host check: `accept_op_test.c` (writer/reader round trip and lifetimes).
+The kernel `SHZ_SOCK_ACCEPT_EX` ioctl and WS2_32 `WSAID_ACCEPTEX` extension
+pointer are source-integrated with the shared private opcode table. These
+host fixtures retain their narrower scope; current-artifact execution inside
+ShizukuOS and useful Steam functionality remain required. No Steam or native
+socket execution result is reported here.

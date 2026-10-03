@@ -4,13 +4,13 @@
 CC ?= cc
 B := build
 LIB := $(addprefix libsfs/,sfs_crc.c sfs_cache.c sfs_super.c sfs_inode.c sfs_extent.c sfs_alloc.c sfs_hash.c \
-                          sfs_dir.c sfs_file.c sfs_jbd2.c sfs_api.c)
+                          sfs_dir.c sfs_file.c sfs_jbd2.c sfs_api.c sfs_access.c sfs_subject.c)
 HOST := tools/sfs_host.c tools/sha256.c
 HDRS := $(wildcard libsfs/*.h tools/*.h)
 WARN := -std=c11 -Wall -Wextra -Wshadow -Wstrict-prototypes -Wno-unused-parameter -Wvla
 SAN := -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer
 
-all: $(B)/sfstool $(B)/sfstool-fast $(B)/sfsfuzz $(B)/sfsperf freestanding
+all: $(B)/sfstool $(B)/sfstool-fast $(B)/sfsfuzz $(B)/sfsperf $(B)/sfsaccess $(B)/sfssubject freestanding
 
 $(B):
 	mkdir -p $(B)
@@ -23,6 +23,12 @@ $(B)/sfstool-fast: $(LIB) $(HOST) tools/sfstool.c $(HDRS) | $(B)
 
 $(B)/sfsfuzz: $(LIB) $(HOST) tests/sfsfuzz.c $(HDRS) | $(B)
 	$(CC) $(WARN) -O1 -g $(SAN) -o $@ $(LIB) $(HOST) tests/sfsfuzz.c
+
+$(B)/sfsaccess: $(LIB) $(HOST) tests/sfsaccess.c $(HDRS) | $(B)
+	$(CC) $(WARN) -O1 -g $(SAN) -o $@ $(LIB) $(HOST) tests/sfsaccess.c
+
+$(B)/sfssubject: $(LIB) $(HOST) tests/sfssubject.c $(HDRS) | $(B)
+	$(CC) $(WARN) -O1 -g $(SAN) -o $@ $(LIB) $(HOST) tests/sfssubject.c
 
 $(B)/sfsperf: $(LIB) $(HOST) tests/sfsperf.c $(HDRS) | $(B)
 	$(CC) $(WARN) -O2 -g -o $@ $(LIB) $(HOST) tests/sfsperf.c
@@ -37,6 +43,8 @@ freestanding: $(LIB) $(HDRS) | $(B)
 
 # Host test suites (need e2fsprogs: mkfs.ext4, e2fsck, debugfs, dumpe2fs, e2image). SFS_TMP picks the scratch dir.
 test: all
+	$(B)/sfsaccess $${SFS_TMP:-/tmp}
+	$(B)/sfssubject
 	python3 tests/run_clean_sync.py
 	python3 tests/run_jbd2_interop.py
 	python3 tests/run_matrix.py

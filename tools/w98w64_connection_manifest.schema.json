@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "w98w64.connection.build.v1",
+  "type": "object",
+  "required": ["schema", "complete", "scope", "built_utc", "git", "steps", "sources_sha256", "artifacts", "details"],
+  "properties": {
+    "schema": {"const": "w98w64.connection.build.v1"},
+    "complete": {"type": "boolean", "description": "true only when all six steps ran"},
+    "scope": {"const": "HOST_COMPILED_MATCHING_SET_NOT_GUEST_OR_VM_EVIDENCE"},
+    "git": {"type": "object", "required": ["head", "dirty_relevant", "allow_dirty"],
+            "properties": {"head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                           "dirty_relevant": {"type": "array", "items": {"type": "string"}},
+                           "allow_dirty": {"type": "boolean"}, "dirty_all": {"type": "array", "items": {"type": "string"}}}},
+    "steps": {"type": "array", "items": {"enum": ["vxd", "platform", "presenter", "supervisor", "kernel32", "kernel64", "runtime"]}},
+    "sources_sha256": {"type": "object", "additionalProperties": {"type": "object", "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}},
+    "artifacts": {"type": "object", "additionalProperties": {"type": "object", "additionalProperties": {
+      "type": "object", "required": ["path", "sha256", "bytes"],
+      "properties": {"path": {"type": "string"}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "bytes": {"type": "integer"}}}}},
+    "loaded_module_closure": {"type": "object", "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                              "description": "sha256 of every project .py builder/helper module loaded during the build"},
+    "details": {"type": "object"}
+  }
+}

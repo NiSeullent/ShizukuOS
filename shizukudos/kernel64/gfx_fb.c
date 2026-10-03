@@ -5,9 +5,12 @@
  * framebuffer is the active display, so the BGA backend declines and the GOP backend keeps the firmware's mode.
  *
  * Scope and honesty notes
- *  - ONLY the SHZ_STANDALONE profile (QEMU TCG/KVM booted by the standalone stub) has a display device. Under the
- *    Supervisor the I/O bitmap traps ports 0xCF8/0xCFC/0x1CE/0x1CF and no display is passed through, so there
- *    gfx_fb_init() returns STATUS_NO_SUCH_DEVICE without touching any port and the whole GUI stack stays inert.
+ *  - The SHZ_STANDALONE profile probes display devices itself. Under the Supervisor the I/O bitmap traps ports
+ *    0xCF8/0xCFC/0x1CE/0x1CF and no PCI device is passed through; the only display is a GOP framebuffer the Supervisor
+ *    explicitly granted (BOOT.INI k64_display=yes, bootinfo SHZ_BIF_FB_SUPERVISOR_GRANT, identity EPT mapping), driven
+ *    by gfx_gop.c without any port access. Without that grant the only other backend is the w64-hosted private buffer
+ *    (no scanout), available only while the Win98 channel is Supervisor-attested for derived W64 owners; otherwise
+ *    gfx_fb_init() returns STATUS_NO_SUCH_DEVICE and the whole GUI stack stays inert.
  *  - Initialisation is lazy: the first GUI system call probes the PCI bus, programs the mode and allocates the back
  *    buffer. (kmain is not touched; a machine without the device simply never pays for any of this.)
  *  - Mode: 1024x768, 32 bits per pixel. A pixel is a little-endian dword 0x00RRGGBB (blue in the lowest byte), which is
@@ -16,14 +19,16 @@
  *    gfx_fb_present(): the BGA backend copies them into its uncached linear framebuffer (mmio_map has no write-combining);
  *    the virtio-gpu backend uses the back buffer itself as the guest backing of the host-side scanout resource and sends
  *    TRANSFER_TO_HOST_2D + RESOURCE_FLUSH for the rectangle.
- *  - The single font is the public-domain 8x8 IBM VGA lineage font (supervisor/src/font8x8_basic.h, ASCII 0..127),
- *    each row doubled to form an 8x16 cell. Nothing else exists: no other sizes, no bold/italic, no non-ASCII.
+ *  - Kernel captions share GDI32's freestanding glyph lookup and grayscale coverage: the public-domain 8x8 IBM VGA
+ *    ASCII font in 8x16 cells and the licensed GNU Unifont Hangul data in 16x16 cells. The original font notices stay
+ *    with gdi_font.c/h/data.c. Text blends real coverage over the destination; there is no subpixel rendering claim.
  */
 #include "gfx.h"
+#include "gfx_fb.h"
 #include "gfx_address.h"
 #include "../dead_screen/native.h"
 #include "pci.h"
-#include "../supervisor/src/font8x8_basic.h"
+#include "../win64/dlls/gdi32/gdi_font.h"
 
 gfx_fb_t g_fb;
 
@@ -183,22 +188,34 @@ static void bga_present(int x, int y, int w, int h)
 }
 
 static const gfx_backend_t gfx_backend_bga = { "Bochs VBE", SHZ_GPU_BACKEND_BGA, bga_probe, bga_present };
+#endif
 
 /* THE backend hook: display drivers in the order they are tried. The paravirtual virtio-gpu (gfx_virtio.c) comes first;
  * it only exists when QEMU runs with -device virtio-vga / virtio-gpu-pci, and then there is no BGA (the VGA-compatible
  * part of virtio-vga has a different PCI id). Then the Bochs VBE linear framebuffer, except after a UEFI direct boot (it
  * declines), and last the UEFI GOP framebuffer (gfx_gop.c), which exists only after a UEFI direct boot: any firmware
  * display with a linear 32 bpp framebuffer (a PCI adapter in firmware mode, QEMU ramfb, ...). */
-static const gfx_backend_t *const gfx_backends[] = { &gfx_backend_virtio, &gfx_backend_bga, &gfx_backend_gop };
+#ifdef SHZ_STANDALONE
+/* Software hosted backend (w64_gui_service.c) is strictly LAST: it only wins when virtio/BGA/GOP all decline, never
+ * scans out, reports SHZ_GPU_BACKEND_NONE (no GOP, no acceleration claim) and its probe refuses unless
+ * w64_gui_enabled(). Frames are pulled by the Win98 presenter through the W64 GUI service. */
+extern const gfx_backend_t gfx_backend_w64_hosted;
+static const gfx_backend_t *const gfx_backends[] = { &gfx_backend_virtio, &gfx_backend_bga, &gfx_backend_gop,
+                                                     &gfx_backend_w64_hosted };
+#else
+/* Supervisor profile: the Supervisor's explicit GOP grant (gfx_gop.c refuses an ungranted boot info), else the
+ * w64-hosted private buffer, which probes only while the Win98 channel is attested (w64_gui_enabled()); it never
+ * scans out, claims no GOP/acceleration and exists only so remote-presented W64 windows have frames to pull. */
+extern const gfx_backend_t gfx_backend_w64_hosted;
+static const gfx_backend_t *const gfx_backends[] = { &gfx_backend_gop, &gfx_backend_w64_hosted };
+#endif
 
 static kmutex_t init_lock;
 static int init_state;                                  /* 0 not tried, 1 ready, -1 failed */
 static int32_t init_status = STATUS_NO_SUCH_DEVICE;
-#endif
 
 int gfx_fb_init(void)
 {
-#ifdef SHZ_STANDALONE
     unsigned i;
     uint64_t bytes;
     mutex_lock(&init_lock);
@@ -223,10 +240,21 @@ int gfx_fb_init(void)
     for (i = 0; i < sizeof gfx_backends / sizeof gfx_backends[0] && !g_fb.backend; ++i)
         if (gfx_backends[i]->probe(&g_fb) == 0) g_fb.backend = gfx_backends[i];
     if (!g_fb.backend) {
+#ifdef SHZ_STANDALONE
         kprintf("K64 gfx: no display device (virtio-gpu 1af4:1050, Bochs VBE 1234:1111 or a UEFI GOP framebuffer); "
                 "GUI subsystem inactive\n");
+#else
+        kprintf("K64 gfx: no display granted by the Supervisor (BOOT.INI k64_display=yes absent or grant refused); "
+                "GUI subsystem inactive\n");
+#endif
         gfx_pages_free(g_fb.back, bytes);
         g_fb.back = 0;
+#ifndef SHZ_STANDALONE
+        /* Supervised profile: no GOP grant and the w64-hosted buffer declined, which it does only while the Win98
+         * channel is not (yet/any longer) attested. Keep NO_SUCH_DEVICE retryable instead of latching it, so a later
+         * attested W64 GUI QUERY performs the real init (no re-check here: that would race the probe's answer). */
+        init_state = 0;
+#endif
         goto out;
     }
     g_fb.ready = 1;
@@ -237,9 +265,6 @@ int gfx_fb_init(void)
 out:
     mutex_unlock(&init_lock);
     return init_state > 0 ? 0 : init_status;
-#else
-    return STATUS_NO_SUCH_DEVICE;                       /* Supervisor profile: no display device is passed through */
-#endif
 }
 
 void gfx_fb_present(int x, int y, int w, int h)
@@ -290,28 +315,56 @@ void gfx_fb_test_pattern(void)
     gfx_fb_present(0, 0, (int)W, (int)H);
 }
 
+int gfx_text_width(const uint16_t *s, unsigned n)
+{
+    unsigned i;
+    int width = 0;
+    if (!s) return 0;
+    for (i = 0; i < n; ++i) {
+        const int advance = gdi_font_advance(s[i]);
+        if (width > INT32_MAX - advance) return INT32_MAX;
+        width += advance;
+    }
+    return width;
+}
+
 void gfx_text(uint32_t *buf, int stride, int bufw, int bufh, int x, int y, const uint16_t *s, unsigned n, uint32_t rgb,
               int cx0, int cy0, int cx1, int cy1)
 {
     unsigned i;
+    int64_t pen = x;
+    const int64_t bottom = (int64_t)y + GDI_FONT_CELL_H;
+    int top, end;
+    if (!buf || !s || !n || bufw <= 0 || bufh <= 0 || stride < bufw) return;
     if (cx0 < 0) cx0 = 0;
     if (cy0 < 0) cy0 = 0;
     if (cx1 > bufw) cx1 = bufw;
     if (cy1 > bufh) cy1 = bufh;
-    for (i = 0; i < n; ++i, x += GFX_FONT_W) {
-        const unsigned ch = s[i] < 0x80 ? s[i] : '?';
-        int row, col;
-        if (x + GFX_FONT_W <= cx0 || x >= cx1) continue;
-        for (row = 0; row < GFX_FONT_H; ++row) {
-            const int py = y + row;
-            const uint8_t bits = font8x8_basic[ch][row >> 1];
-            if (py < cy0 || py >= cy1) continue;
-            for (col = 0; col < GFX_FONT_W; ++col) {
-                const int px = x + col;
-                if (px >= cx0 && px < cx1 && ((bits >> col) & 1))
-                    buf[(uint64_t)py * (uint64_t)stride + (uint64_t)px] = rgb;
+    if (cx0 >= cx1 || cy0 >= cy1 || bottom <= cy0 || y >= cy1) return;
+    top = y < cy0 ? cy0 : y;
+    end = bottom > cy1 ? cy1 : (int)bottom;
+    for (i = 0; i < n; ++i) {
+        gdi_glyph_t glyph;
+        int left, right, py, px;
+        int64_t next;
+        if (pen >= cx1) break;
+        gdi_font_glyph(s[i], &glyph);
+        next = pen + glyph.width;
+        if (glyph.width && next > cx0) {
+            left = pen < cx0 ? cx0 : (int)pen;
+            right = next > cx1 ? cx1 : (int)next;
+            for (py = top; py < end; ++py) {
+                for (px = left; px < right; ++px) {
+                    const unsigned coverage = gdi_font_coverage(&glyph, 1, 1, 0,
+                                                               (int)((int64_t)px - pen), (int)((int64_t)py - y));
+                    if (coverage) {
+                        uint32_t *dst = buf + (uint64_t)py * (uint64_t)stride + (uint64_t)px;
+                        *dst = gdi_font_blend(*dst, rgb, coverage);
+                    }
+                }
             }
         }
+        pen = next;
     }
 }
 

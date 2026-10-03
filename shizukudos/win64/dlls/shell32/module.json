@@ -16,13 +16,22 @@
   "ILIsEqual": 21,
   "ILIsParent": 23,
   "ILCombine": 25,
+  "PathYetAnotherMakeUniqueName": 75,
   "ILGetSize": 152,
   "ILGetNext": 153,
   "ILAppendID": 154,
   "ILFree": 155,
   "SHSimpleIDListFromPath": 162,
+  "SHCreateDirectory": 165,
   "ILCreateFromPathA": 189,
   "ILCreateFromPathW": 190,
+  "SHFree": 195,
+  "SHAlloc": 196,
   "IsUserAnAdmin": 680
- }
+ },
+ "forwarders": [
+  "SHGetDiskFreeSpaceA = kernel32.GetDiskFreeSpaceExA",
+  "SHGetDiskFreeSpaceExA = kernel32.GetDiskFreeSpaceExA",
+  "SHGetDiskFreeSpaceExW = kernel32.GetDiskFreeSpaceExW"
+ ]
 }

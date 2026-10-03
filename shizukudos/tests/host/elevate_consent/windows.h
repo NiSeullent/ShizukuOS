@@ -28,6 +28,7 @@ typedef struct {WNDPROC lpfnWndProc;HINSTANCE hInstance;const WCHAR *lpszClassNa
 #define WM_GETTEXTLENGTH 14u
 #define WM_CHAR 258u
 #define WM_LBUTTONUP 514u
+#define WM_TIMER 275u
 #define WM_COPY 769u
 #define WM_CUT 768u
 #define WM_PASTE 770u
@@ -71,4 +72,8 @@ HWND SetFocus(HWND);
 int GetMessageW(MSG *,HWND,UINT,UINT);
 BOOL TranslateMessage(const MSG *);
 LRESULT DispatchMessageW(const MSG *);
+typedef void (*TIMERPROC)(HWND,UINT,uintptr_t,DWORD);
+uintptr_t SetTimer(HWND,uintptr_t,UINT,TIMERPROC);
+BOOL KillTimer(HWND,uintptr_t);
+DWORD GetTickCount(void);
 #endif

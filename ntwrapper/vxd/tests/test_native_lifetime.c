@@ -15,6 +15,7 @@ uint32_t ntwv_vmm_unlock(uint32_t page,uint32_t n,uint32_t flags){CHECK(!flags &
 uint32_t ntwv_vmm_ptes(uint32_t a,uint32_t b,uint32_t *c,uint32_t d){(void)a;(void)b;(void)c;(void)d;return 0;}
 uint32_t ntwv_vmm_map_phys(uint32_t a,uint32_t b,uint32_t c){(void)a;(void)b;(void)c;return 0;}
 int32_t ntwv_vmcall(uint32_t a,uint32_t b,uint32_t c,uint32_t *d,uint32_t *e){(void)a;(void)b;(void)c;(void)d;(void)e;return SHZ_E_UNSUPPORTED;}
+int32_t ntwv_vmcall3(uint32_t a,uint32_t b,uint32_t c,uint32_t x,uint32_t *d,uint32_t *e){(void)a;(void)b;(void)c;(void)x;(void)d;(void)e;return SHZ_E_UNSUPPORTED;}
 void ntwv_cpuid(uint32_t l,uint32_t r[4]){(void)l;memset(r,0,16);}
 uint32_t ntwv_vmm_system_vm(void){return 0x100;}
 uint32_t ntwv_vmm_current_vm(void){return 0x100;}

@@ -3,38 +3,36 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#eef3f8">
-  <meta name="description" content="The ShizukuOS architecture preserves actual Windows 98. Explore public source, component licenses and verification requirements.">
+  <meta name="theme-color" content="#edf4f3">
+  <meta name="description" content="Explore the independent ShizukuOS platform, Core, executable shell, themes, sound, native apps, Linux Subsystem and ShizukuVM targets.">
   <title>Development and public source · ShizukuOS</title>
   <link rel="icon" href="../favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="../styles.css?v=20261003-rebuild1">
+  <link rel="stylesheet" href="../styles.css?v=20261003-slade1">
   <link rel="alternate" hreflang="ko" href="https://m98.nyase.kr/develop.html">
   <link rel="alternate" hreflang="en" href="https://m98.nyase.kr/en/develop.html">
 </head>
-<body class="guide-page">
+<body class="guide-page development-page">
 <a class="skip" href="#main">Skip to content</a>
 
-<header class="top site-header"><a class="brand" href="./index.html"><span class="brand-mark" aria-hidden="true">S</span><span><strong>ShizukuOS</strong><small>1.0.0 in development</small></span></a><nav class="site-nav" aria-label="Main navigation"><a href="./index.html">Project</a><a href="./downloads.html">Downloads</a><a href="./install.html">Setup</a><a href="./apps.html">App support</a><a href="./develop.html" aria-current="page">Development</a><a class="language-link" href="../develop.html" lang="ko" hreflang="ko">한국어</a></nav></header>
+<header class="top site-header"><a class="brand" href="./index.html"><span class="brand-mark" aria-hidden="true">S</span><span><strong>ShizukuOS</strong><small>ShizukuOS Core</small></span></a><nav class="site-nav" aria-label="Main navigation"><a href="./index.html">Home</a><a href="./downloads.html">Downloads</a><a href="./preview.html">Records</a><a href="./develop.html" aria-current="page">Source</a><a class="language-link" href="../develop.html" lang="ko" hreflang="ko">한국어</a></nav></header>
 
 <main id="main">
 
-<section class="page-hero"><p class="eyebrow">Development and source</p><h1>A new foundation for Windows 98.</h1><p class="lead">We are developing a hybrid OS that combines Windows 98 code and experience with ShizukuCore and 32/64-bit Win32 layers.</p></section>
-<div class="hero-actions"><a class="button primary" href="https://github.com/NiSeullent/Win98-Modern">GitHub source</a><a class="button secondary" href="../continuation/environment-guide.md">Build environment (Korean)</a></div>
-<section class="section-block" id="architecture"><h2>ShizukuCore and its subordinate layers</h2><p>The target places four layers below ShizukuCore Kernel. Existing boot and compatibility paths remain while shared resources and authority move one service at a time. The common core is not yet an integrated result.</p><div class="card-grid">
-<article class="info-card"><h3>ShizukuDOS (SZRm)</h3><p>The DOS compatibility, boot and recovery layer below ShizukuCore. Current DOS16 starts with pinned FreeDOS and FreeCOM plus recorded patches.</p></article>
-
-<article class="info-card"><h3>ShizukuOS (Windows 98)</h3><p>Preserves Windows 98 code, userland and familiar behavior. Gradual migration starts with existing VMM, USER, GDI and Explorer paths and must preserve real windows, input, files and applications.</p></article>
-
-<article class="info-card"><h3>Shizuku32 (SZPrtm)</h3><p>Develops 32-bit execution and services from the existing Kernel32 and connects the Shizuku Win32 x86 compatibility layer.</p></article>
-
-<article class="info-card"><h3>Shizuku64 (SZLm)</h3><p>Connects real 64-bit applications to APIs, windows, input and files through the existing Kernel64 and x64 runtime. Standalone component trials are separate from integration verification.</p></article>
-
-<article class="info-card"><h3>Graphics, drivers and compatibility</h3><p>Connects GOP output, storage, USB, PCI-E and NT application APIs. Basic GOP output does not establish GPU 3D acceleration.</p></article>
+<section class="page-hero"><p class="eyebrow">Development and source</p><h1>The foundation of ShizukuOS itself.</h1><p class="lead">ShizukuOS is the operating system itself. We are extending ShizukuOS Core and the existing Korean executable shell, connecting themes, sound, drivers, apps, Linux Subsystem and virtualization. The features below are targets awaiting implementation and execution verification.</p></section>
+<div class="hero-actions"><a class="button primary" href="https://github.com/NiSeullent/ShizukuOS">GitHub source</a><a class="button secondary" href="../continuation/environment-guide.md">Build environment (Korean)</a></div>
+<section class="section-block" id="architecture"><h2>An architecture rooted in ShizukuOS</h2><p>ShizukuOS is the root platform. ShizukuOS Core contains ShizukuDOS, the Kernel Layer and the Driver Layer, connected to ShizukuVM, Linux Subsystem and Native Runtime. The structure below requires implementation, integration and actual execution verification.</p><div class="card-grid">
+<article class="info-card"><h3>ShizukuDOS</h3><p>DOS Mode, Protected Mode, Long Mode and v8086 execution environments. Existing implementations are inspected and extended without duplicate components.</p></article>
+<article class="info-card"><h3>Kernel Layer</h3><p>Connects Kernel32, Kernel64, SHZLB.sys and VM Services. Resource authority and lifetime follow ShizukuOS service contracts.</p></article>
+<article class="info-card"><h3>Driver Layer</h3><p>Layers Native, Legacy and Wrapped drivers. Standard ACPI, PCI/PCIe, USB, storage, networking, audio and display hardware are priorities.</p></article>
+<article class="info-card"><h3>Native Runtime</h3><p>The foundation for the OS's own shell and apps, built, packaged and executed as ShizukuOS binaries. Windows 10 x86/x64 API compatibility is a target requiring real behavior.</p></article>
 </div></section>
+<section class="section-block" id="shell-themes"><h2>An executable shell and data-driven themes</h2><p>Extend the existing native shell and reuse license-compatible components. Slade is the default theme target, alongside clean Flute and experimental Jade. Theme definitions should control windows, typography, icons, buttons, menus, effects, animations, wallpaper, cursors and sound.</p><p>Startup, shutdown, login, notifications, errors and device events require system sound. Implementation must check available existing sound sources first. Complete theme and sound behavior remains unverified.</p></section>
+<section class="section-block" id="subsystems"><h2>ShizukuVM and Linux Subsystem</h2><p>ShizukuVM defines the OS's own VM API and kernel virtualization services. Linux Subsystem is a Core component connecting a Linux-kernel sandbox and POSIX environment through SHZLB.sys. Initial <code>chkrnl /mode linux</code> and <code>chkrnl /mode msdos</code> modes require kernel-supported execution environments.</p><p>ShizukuLB — Shizuku Linux Basebuild uses Nix for packages; <code>pkgs</code> operations synchronize with that Nix environment. Linux X sessions should pass through SHZLB.sys and Shizuku Window Bridge into ordinary managed desktop windows. Completion of this path remains unverified.</p></section>
+<section class="section-block" id="native-apps"><h2>Native baseline application targets</h2><div class="card-grid"><article class="info-card"><h3>Terrasphere</h3><p>A lightweight native WebKit browser targeting usable browsing and a modern interface.</p></article><article class="info-card"><h3>Muzik</h3><p>A music and video library application with metadata, playlists and visualization.</p></article><article class="info-card"><h3>Sapphire</h3><p>Lightweight photo viewing, with image editing and drawing loaded when needed.</p></article><article class="info-card"><h3>Folio</h3><p>Reuse existing open-source document processing and adapt its interface to the ShizukuOS family.</p></article></div><p>Each application requires an executable path and real functionality verification. Names and UI demonstrations do not establish completion.</p></section>
 
-<section class="scope-note"><h2>Acceptance criteria for 1.0.0</h2><p>Actual execution must verify Windows 98 userland boot and real ShizukuCore service round trips at the declared migration stage, two cold boots, drivers, acceleration, app functionality, clean exits and the project installer. Final acceptance remains incomplete.</p></section>
+<section class="scope-note"><h2>Acceptance criteria for 1.0.0</h2><p>Actual ShizukuOS execution must verify stable boot, drivers, shell, customizable themes, sound, networking, filesystems, apps, browser, media, graphics, Linux Subsystem, virtualization and games. The installer, two cold boots, security and clean exits also require verification. Kernel boot or historical captures do not establish completion; final acceptance remains incomplete.</p></section>
 
-<section class="section-block" id="source"><h2>Development documents</h2><ul><li><a href="https://github.com/NiSeullent/Win98-Modern/blob/8f4fe690ca472148c94f7ca58b9886cf11cc946d/docs/SHIZUKU_HYBRID_TRANSITION.md">Common core and hybrid OS architecture</a></li><li><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/SHIZUKUDOS_WINDOWS98_ARCHITECTURE.md">Existing DOS → Windows 98 path audit</a></li><li><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/docs/SHIZUKUOS_ARCHITECTURE_SUPPLEMENT.md">Integration contract and limits</a></li><li><a href="../continuation/modern-apps-guide.md">Application retesting and next steps (Korean)</a></li><li><a href="./preview.html">Original success and failure records</a></li></ul></section>
+<section class="section-block" id="source"><h2>Development documents</h2><ul><li><a href="https://github.com/NiSeullent/ShizukuOS/blob/main/docs/SHIZUKUOS_ARCHITECTURE_CONTRACT.md">ShizukuOS architecture and goals</a></li><li><a href="https://github.com/NiSeullent/Win98-Modern/blob/8f4fe690ca472148c94f7ca58b9886cf11cc946d/docs/SHIZUKU_HYBRID_TRANSITION.md">Historical migration contract</a></li><li><a href="https://github.com/NiSeullent/ShizukuOS/blob/main/docs/SHIZUKUDOS_WINDOWS98_ARCHITECTURE.md">Existing DOS → Windows 98 path audit</a></li><li><a href="https://github.com/NiSeullent/ShizukuOS/blob/main/docs/SHIZUKUOS_ARCHITECTURE_SUPPLEMENT.md">Earlier integration contract and limits</a></li><li><a href="../continuation/modern-apps-guide.md">Application retesting and next steps (Korean)</a></li><li><a href="./preview.html">Original success and failure records</a></li></ul></section>
 
 <section class="section-block" id="licenses"><h2>Source and licenses</h2>
 <details><summary id="licenses-title">Licenses of major components</summary><div class="table-wrap" role="region" aria-labelledby="licenses-title" tabindex="0"><table><caption>Key licenses recorded in public source · Check original per-file terms and included notices first.</caption>
@@ -44,23 +42,23 @@
 
 <tbody>
 
-<tr><th scope="row">Project-authored code</th><td>GPL-2.0-only. External code and data retain their respective original notices.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/LICENSE">LICENSE</a> · <a href="https://github.com/NiSeullent/Win98-Modern/blob/main/THIRD_PARTY.md">Per-file record</a></td></tr>
+<tr><th scope="row">Project-authored code</th><td>GPL-2.0-only. External code and data retain their respective original notices.</td><td><a href="https://github.com/NiSeullent/ShizukuOS/blob/main/LICENSE">LICENSE</a> · <a href="https://github.com/NiSeullent/ShizukuOS/blob/main/THIRD_PARTY.md">Per-file record</a></td></tr>
 
 
-<tr><th scope="row">FreeDOS kernel · FreeCOM</th><td>GPL-2.0-or-later. Pinned revisions and project patches are recorded; external implementations are not labeled original project code.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/shizukudos/upstream/manifest.json">Pinned upstream manifest</a></td></tr>
+<tr><th scope="row">FreeDOS kernel · FreeCOM</th><td>GPL-2.0-or-later. Pinned revisions and project patches are recorded; external implementations are not labeled original project code.</td><td><a href="https://github.com/NiSeullent/ShizukuOS/blob/main/shizukudos/upstream/manifest.json">Pinned upstream manifest</a></td></tr>
 
 
-<tr><th scope="row">CSMWrap · SeaBIOS</th><td>CSMWrap's own code is LGPL-2.1-only; the pinned SeaBIOS CSM code is LGPL-3.0-only. Included subprojects retain separate terms.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/shizukudos/upstream/manifest.json">Firmware source and license pins</a></td></tr>
+<tr><th scope="row">CSMWrap · SeaBIOS</th><td>CSMWrap's own code is LGPL-2.1-only; the pinned SeaBIOS CSM code is LGPL-3.0-only. Included subprojects retain separate terms.</td><td><a href="https://github.com/NiSeullent/ShizukuOS/blob/main/shizukudos/upstream/manifest.json">Firmware source and license pins</a></td></tr>
 
 
-<tr><th scope="row">Wine · ReactOS references and ports</th><td>Selected Wine code and data are LGPL-2.1-or-later; ReactOS GPL/LGPL notices must be checked per file. Reference-only files are distinguished from actual ports.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/THIRD_PARTY.md">Revisions and per-file attribution</a></td></tr>
+<tr><th scope="row">Wine · ReactOS references and ports</th><td>Selected Wine code and data are LGPL-2.1-or-later; ReactOS GPL/LGPL notices must be checked per file. Reference-only files are distinguished from actual ports.</td><td><a href="https://github.com/NiSeullent/ShizukuOS/blob/main/THIRD_PARTY.md">Revisions and per-file attribution</a></td></tr>
 
 
-<tr><th scope="row">Shizuku GOP external foundation</th><td>Pinned VMDisp9x and fixlink are MIT; the project's GOP parser and framebuffer code are GPL-2.0-only.</td><td><a href="https://github.com/NiSeullent/Win98-Modern/blob/main/THIRD_PARTY.md#native-shizuku-gop-display-package">GOP package attribution</a></td></tr>
+<tr><th scope="row">Shizuku GOP external foundation</th><td>Pinned VMDisp9x and fixlink are MIT; the project's GOP parser and framebuffer code are GPL-2.0-only.</td><td><a href="https://github.com/NiSeullent/ShizukuOS/blob/main/THIRD_PARTY.md#native-shizuku-gop-display-package">GOP package attribution</a></td></tr>
 
     </tbody>
 </table></div></details>
-<p>Read the <a href="https://github.com/NiSeullent/Win98-Modern/blob/main/THIRD_PARTY.md">per-file source notices</a> and licenses bundled with each ZIP.</p></section>
+<p>Read the <a href="https://github.com/NiSeullent/ShizukuOS/blob/main/THIRD_PARTY.md">per-file source notices</a> and licenses bundled with each ZIP.</p><p class="small"><a href="../fonts/OFL.txt">Website font: Pretendard · SIL OFL 1.1</a></p></section>
 
 <section class="section-block"><h2>Distribution</h2><p>ISOs are exclusive to <strong>m98.nyase.kr</strong>. GitHub hosts public source and patches. Windows media, product keys, private disks and secrets are excluded.</p><a href="./downloads.html">Current downloads</a></section>
 

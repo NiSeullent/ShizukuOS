@@ -66,7 +66,7 @@ class SiteRefactor(unittest.TestCase):
     def test_exact_eight_routes_and_source_only_exclusions(self):
         prepared = self.prepare()
         assets = prepared['assets']
-        self.assertEqual(len(assets), 100)
+        self.assertEqual(len(assets), 104)
         self.assertTrue(NEW.issubset(assets))
         self.assertIsNone(prepared['iso'])
         self.assertIsNone(prepared['component_installer_proof'])
@@ -227,7 +227,7 @@ class SiteRefactor(unittest.TestCase):
             source = {name: (publisher.SITE / name).read_bytes() for name in ('index.html', 'en/index.html', 'downloads.html', 'en/downloads.html')}
             prepared = publisher.prepare_assets(path, COMMIT)
             try:
-                self.assertEqual(len(prepared['assets']) + 1, 103)
+                self.assertEqual(len(prepared['assets']) + 1, 107)
                 metadata = prepared['iso'].metadata
                 self.assertFalse(metadata['validation']['windows98_installer_complete'])
                 self.assertFalse(metadata['validation']['latest_apps_complete'])

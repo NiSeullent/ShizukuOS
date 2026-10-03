@@ -4,7 +4,8 @@
  *  - access tokens (NtShzToken): one primary token per process (medium integrity, session 1, a fresh LUID) and duplicates
  *    of it; advapi32 renders the Windows information classes from shz_token_info. Thread impersonation records which
  *    token a thread impersonates (OpenThreadToken reports it). Token queries require the handle's TOKEN_QUERY right;
- *    token operations enforce handle rights, but descriptor-based identity checks remain incomplete;
+ *    token operations enforce handle rights; DuplicateTokenEx access is authorized by a kernel-derived token object
+ *    policy (subject/session/integrity, see shz_token_object_rights), but descriptor-based identity checks remain incomplete;
  *  - security descriptors (NtShzSecurityObject): stored per object as the self-relative blob advapi32 composes (not
  *    token-aware DACL evaluation is incomplete), returned by queries admitted by READ_CONTROL.
  *    Descriptor replacement requires WRITE_DAC; owner/SACL authorization remains separate work.
@@ -266,9 +267,46 @@ static int32_t sys_token(process_t *p, struct regs *r, uint64_t op, uint64_t a2,
         if (st) return st;
         if (!(granted & SHZ_TOKEN_DUPLICATE)) { ob_deref(tok); return STATUS_ACCESS_DENIED; }
         desired = granted;
-        if (op == SHZ_TOKEN_OP_DUPLICATE_EX && (uint32_t)a3 &&
-            !shz_token_map_access((uint32_t)a3, granted, &desired)) {
-            ob_deref(tok); return STATUS_ACCESS_DENIED;
+        if (op == SHZ_TOKEN_OP_DUPLICATE_EX && (uint32_t)a3) {
+            /* Nonzero access is authorized against the token object, not the
+             * source handle, for the effective caller: the kernel-owned primary
+             * subject and, when the current thread impersonates, that thread
+             * token (level/type checked; see shz_token_effective_rights). Both
+             * tokens are referenced and their mutable labels snapshotted under
+             * the IRQ lock together with the target token's subject. */
+            kobject_t *primary = process_token(p), *imp = 0;
+            shz_token_subject caller, effective = {0, 0, 0}, owner;
+            uint32_t imp_type = 0, imp_level = 0, rights = 0;
+            int bound;
+            if (!primary) { ob_deref(tok); return STATUS_NO_MEMORY; }
+            const uint64_t g = irq_save();
+            thread_t *th = thread_current();
+            bound = th && th->proc == p && p->token == primary;
+            if (bound) {
+                ob_ref(primary);
+                imp = th->impersonation;
+                if (imp) ob_ref(imp);
+                const shz_token_info *ci = primary->u.token.t, *ti = tok->u.token.t;
+                caller.auth_id = ci->auth_id; caller.session = ci->session; caller.integrity_rid = ci->integrity_rid;
+                owner.auth_id = ti->auth_id; owner.session = ti->session; owner.integrity_rid = ti->integrity_rid;
+                if (imp) {
+                    const shz_token_info *ii = imp->type == OB_TOKEN ? imp->u.token.t : 0;
+                    if (ii) {
+                        effective.auth_id = ii->auth_id; effective.session = ii->session;
+                        effective.integrity_rid = ii->integrity_rid;
+                        imp_type = ii->type; imp_level = ii->imp_level;
+                    }
+                }
+            }
+            irq_restore(g);
+            if (bound) {
+                rights = shz_token_effective_rights(&caller, imp ? &effective : 0, imp_type, imp_level, &owner);
+                if (imp) ob_deref(imp);
+                ob_deref(primary);
+            }
+            if (!bound || !shz_token_duplicate_access((uint32_t)a3, granted, rights, &desired)) {
+                ob_deref(tok); return STATUS_ACCESS_DENIED;
+            }
         }
         const uint64_t f = irq_save();
         copy = *(shz_token_info *)tok->u.token.t;

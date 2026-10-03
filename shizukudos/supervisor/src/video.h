@@ -13,4 +13,7 @@ void video_render(void);                    /* draws the text page to the frameb
 void video_clear(uint8_t attr);
 /* Irreversible for this Supervisor lifetime: hardware VGA owns the display. */
 void video_native_vga_own(void);
+/* The GOP framebuffer was granted to domain `dom` (display_grant.c): stop rendering the text page there while that
+ * domain is RUNNABLE/WAITING; once it has EXITED/FAILED the console takes the framebuffer back. */
+void video_delegate_display(uint32_t dom);
 #endif

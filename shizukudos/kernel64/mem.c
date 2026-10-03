@@ -5,8 +5,9 @@
  *   0xFFFFFFFF80000000  kernel image alias (physical 0, first 1 GiB, 2 MiB pages)
  *   0xFFFF800000000000  direct map of all guest-physical memory this kernel owns or may touch
  *   0x0000000000010000..0x00007FFFFFFEEFFF  user space (per process)
- * Guest-physical layout: 0..1 MiB boot structures, 1..3 MiB kernel image + bss (every loader zeroes exactly this
- * window; link.ld refuses an image that outgrows it), 3..15 MiB heap, 15 MiB.. page allocator (initrd range excluded). RAM up to MAX_PAGES (4 GiB of guest-physical) is managed;
+ * Guest-physical layout (standalone/memholes.h SHZ_K64_*, the one contract every loader checks): 0..1 MiB boot
+ * structures, 1..4 MiB kernel image + bss (every loader zeroes exactly this window; link.ld refuses an image that
+ * outgrows it), 4..15 MiB heap, 15 MiB.. page allocator (initrd range excluded). RAM up to MAX_PAGES (4 GiB of guest-physical) is managed;
  * the standalone stub caps what it reports below 4 GiB (boot32.c MAX_RAM), 256 MiB configurations still work.
  * The direct map is built for all of RAM with 2 MiB pages (a 3.5 GiB guest costs 4 page directories).
  * Standalone builds (SHZ_STANDALONE) also take firmware memory holes from standalone/memholes.h: their pages stay
@@ -15,18 +16,16 @@
 #include "k64.h"
 #include "cpu_memory_owner.h"
 #include "mem_lock.h"
-#ifdef SHZ_STANDALONE
-#include "standalone/memholes.h"
-#endif
+#include "standalone/memholes.h"              /* layout constants in every build; holes only when SHZ_STANDALONE */
 
-#define HEAP_PA 0x300000ull                    /* = end of the kernel window [1 MiB, 3 MiB) */
-#define HEAP_BYTES 0xC00000ull
-#define PMM_BASE 0xF00000ull
+#define HEAP_PA ((uint64_t)SHZ_K64_HEAP_GPA)    /* = end of the kernel window [1 MiB, 4 MiB) */
+#define HEAP_BYTES ((uint64_t)SHZ_K64_HEAP_BYTES)   /* 11 MiB, [4 MiB, 15 MiB) */
+#define PMM_BASE ((uint64_t)SHZ_K64_PMM_GPA)
 #define MAX_PAGES (4096ull * 1024 * 1024 / PAGE_SIZE)
+_Static_assert(HEAP_PA == SHZ_K64_KERNEL_END && HEAP_PA + HEAP_BYTES == PMM_BASE && HEAP_BYTES >= SHZ_K64_HEAP_KEEP,
+               "heap starts at the kernel window end and ends at the page allocator");
 
 #ifdef SHZ_STANDALONE
-_Static_assert(HEAP_PA == SHZ_K64_HEAP_GPA && PMM_BASE == SHZ_K64_PMM_GPA && HEAP_PA + HEAP_BYTES == PMM_BASE,
-               "standalone/memholes.h plans holes for this layout");
 static uint64_t hole_gpa[SHZ_MEMHOLES_MAX], hole_end[SHZ_MEMHOLES_MAX];
 static unsigned hole_count;
 #endif

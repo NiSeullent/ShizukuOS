@@ -425,6 +425,7 @@ int32_t sys_extended(process_t *p, struct regs *r, uint32_t num, uint64_t a1, ui
         extern int32_t shz_query_processor_times(process_t *,uint64_t,uint64_t,uint64_t);
         if (a1 == 0x102) return shz_query_processor_times(p,a2,a3,a4);
         if (a1 == 0x103) { extern int32_t shz_query_pnp_catalog(process_t *,uint64_t,uint64_t,uint64_t); return shz_query_pnp_catalog(p,a2,a3,a4); }
+        if (a1 == 0x105) { extern int32_t driver_inventory_query_user(process_t *,uint64_t,uint64_t,uint64_t); return driver_inventory_query_user(p,a2,a3,a4); }   /* driver_inventory.h DRVINV_QUERY_CLASS */
         if (a1 == 0) {
             struct { uint32_t reserved, timer_res, page_size, phys_pages, low_page, high_page, alloc_gran; uint64_t min_addr, max_addr, affinity; uint8_t nproc; } b;
             if (a3 < sizeof b) return STATUS_BUFFER_TOO_SMALL;

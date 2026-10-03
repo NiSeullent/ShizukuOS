@@ -23,6 +23,7 @@ typedef struct {
     uint64_t start_tsc;
     uint32_t pit_count,kbc_count,pit_dropped,kbc_dropped,kbc_reply_dropped,pit2_terminal_seen;
     uint32_t pit2_interval_open,pit2_restored_after_terminal;
+    uint32_t key_delivered,key_dropped; /* optional owned keyboard source only */
     dev_native_io_record_t pit[DEV_NATIVE_PIT_RECORDS],kbc[DEV_NATIVE_KBC_RECORDS];
 } dev_native_observation_t;
 void dev_native_win98_enable(void);
@@ -40,6 +41,17 @@ int dev_native_pointer_detach(void *context);
 /* Input uses HID coordinates (positive Y down), converted to PS/2 positive Y up.
  * Full movement is retained across FIFO pressure. Failure publishes nothing. */
 int dev_native_pointer_input(void *context,int32_t x,int32_t y,uint8_t buttons);
+/* Serialized trusted native keyboard owner (same lifecycle rules as the
+ * pointer). Input is one whole raw scan-set-2 key sequence (1..8 bytes);
+ * the inner KBC encodes it for the guest's selected set/translation. */
+struct dev_native_keyboard_ops {
+    void *context;
+    int (*validate)(void *);
+    int (*poll)(void *);
+};
+int dev_native_keyboard_attach(const struct dev_native_keyboard_ops *);
+int dev_native_keyboard_detach(void *context);
+int dev_native_keyboard_input(void *context,const uint8_t *set2,unsigned bytes);
 /* Passive bounded numeric I/O evidence, valid until the next dev_init. */
 const dev_native_observation_t *dev_native_observation(void);
 /* Port I/O. Return 1 if the port belongs to a modelled device. size is 1, 2 or 4. */

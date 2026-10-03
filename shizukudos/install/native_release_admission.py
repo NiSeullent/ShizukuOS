@@ -21,6 +21,7 @@ import native_build_tool_custody
 ROOT = Path(__file__).resolve().parent
 MAX_ENCODED = 512 << 20
 MAGIC = 0x31524e53
+PHASE_MAGIC = 0x50554f53  # 'SOUP' setup_native_phase_record_v1
 
 
 def digest(raw):
@@ -66,19 +67,68 @@ def manifest_expected(ingest, request_pin, lineage, sim):
     }
 
 
-def render_record(manifest, sim, evidence):
+def render_record(manifest, sim, evidence, original=None):
     require(0 < manifest['bytes'] <= 4 << 20 and 0 < sim['bytes'] <= MAX_ENCODED,
             'actual encoded source exceeds kernel sealed-copy capability')
     def array(value):
         raw = bytes.fromhex(value)
         require(len(raw) == 32 and any(raw), 'nonzero SHA256 required')
         return '{' + ','.join('0x%02x' % byte for byte in raw) + '}'
-    return ('/* Private generated data: never publish or add to Git. */\n'
+    text = ('/* Private generated data: never publish or add to Git. */\n'
             '#include "setup_native_release.h"\n'
             'const setup_native_release_record_v1 shz_installer_release_v1 = {\n'
             f'0x{MAGIC:08x}u,1u,128u,0u,{manifest["bytes"]}ull,{sim["bytes"]}ull,\n'
             f'{array(manifest["sha256"])},{array(sim["sha256"])},{array(evidence)}\n'
-            '};\n').encode()
+            '};\n')
+    if original is not None:
+        # Role-2 SZOU pin: same TU, same custody, evidence identical to v1 (which covers this stage).
+        stage = original['stage']
+        require(0 < stage['bytes'] <= MAX_ENCODED, 'SZOU stage exceeds kernel sealed-copy capability')
+        text += ('const setup_native_phase_record_v1 shz_installer_phase_v1 = {\n'
+                 f'0x{PHASE_MAGIC:08x}u,1u,96u,0u,{stage["bytes"]}ull,0ull,\n'
+                 f'{array(stage["sha256"])},{array(evidence)}\n'
+                 '};\n'
+                 'const setup_native_phase_record_v1 *const shz_installer_phase_ref = &shz_installer_phase_v1;\n')
+    else:
+        # Explicit absence (never a placeholder record): kernel role 2 refuses.
+        text += 'const setup_native_phase_record_v1 *const shz_installer_phase_ref = 0;\n'
+    return text.encode()
+
+
+def original_userland_stage(ingest, held, manifest_path):
+    """Role-2 source: held SZOU stage from the explicit original-userland ingest route.
+
+    Requires an independently approved stage anchor in native_release_policy
+    (ORIGINAL_USERLAND_STAGE = (bytes, sha256)); absent anchor refuses. Saved
+    JSON alone is never authority: the stage is leased, its pin must match the
+    anchor and it is re-read through the producer's own SZOU verifier."""
+    approved = getattr(policy, 'ORIGINAL_USERLAND_STAGE', None)
+    require(approved is not None,
+            'independently approved original-userland stage anchor absent; role 2 refused')
+    orow = file_pin(ingest, manifest_path)
+    require(orow['bytes'] <= ingest.MAX_JSON, 'bounded saved original-userland manifest required')
+    saved = held.json(orow)
+    require(type(saved) is dict and saved.get('schema') == ingest.ORIGINAL_SCHEMA and
+            saved.get('status') == 'PRIVATE_ORIGINAL_USERLAND_STAGED_NOT_INSTALLED' and
+            saved.get('route') == 'original-userland' and saved.get('private') is True and
+            saved.get('public_artifact') is False and saved.get('independent_SZOU_readback') is True and
+            saved.get('native_release_admission') == 'NOT_PERFORMED_SEPARATE_GATE' and
+            all(saved.get(name) is False for name in ingest.ORIGINAL_FALSE_FLAGS),
+            'exact original-userland stage manifest required')
+    request = held.json(saved.get('source_request'))
+    require(type(request) is dict and request.get('schema') == ingest.ORIGINAL_REQUEST_SCHEMA and
+            request.get('route') == 'original-userland', 'exact original-userland stage request required')
+    stage = saved.get('stage')
+    require(type(stage) is dict and stage.get('format') == 'SZOU' and type(stage.get('bytes')) is int and
+            0 < stage['bytes'] <= MAX_ENCODED and type(stage.get('sha256')) is str and
+            type(stage.get('path')) is str, 'bounded SZOU stage pin required')
+    pin = {'path': stage['path'], 'bytes': stage['bytes'], 'sha256': stage['sha256']}
+    anchored(pin, approved, 'original-userland SZOU stage')
+    entry = held.add(pin)
+    summary, _ = ingest.szou_verify(entry['fd'], pin['bytes'], lambda: held.io_check(entry))
+    require(type(summary) is dict and all(stage.get(k) == v for k, v in summary.items()),
+            'SZOU readback differs from saved stage summary')
+    return {'manifest': orow, 'stage': pin}
 
 
 def file_pin(ingest, value):
@@ -134,7 +184,8 @@ class BuildCustody:
 
 
 @contextmanager
-def admit_for_build(manifest_path, output, build_pins=(), *, build_tool_pins=None):
+def admit_for_build(manifest_path, output, build_pins=(), *, build_tool_pins=None,
+                    original_userland_manifest=None):
     require(policy.NATIVE_SOURCE_MAP_SHA is not None and policy.NATIVE_ARTIFACTS is not None,
             'independently approved native producer anchors absent; admission refused')
     ingest = load_ingester()
@@ -199,10 +250,15 @@ def admit_for_build(manifest_path, output, build_pins=(), *, build_tool_pins=Non
         expected = manifest_expected(ingest, request_pin, lineage, sim)
         require(held.bytes(mrow) == (json.dumps(expected, indent=2) + '\n').encode(),
                 'saved manifest differs from independently reconstructed producer result')
-        evidence = digest(canonical({'policy_sha256': digest((ROOT / 'native_release_policy.py').read_bytes()),
-                                     'request': request_pin, 'source_custody': source_custody, 'lineage': lineage,
-                                     'manifest': mrow, 'sim': sim}))
-        raw = render_record(mrow, sim, evidence)
+        original = (None if original_userland_manifest is None else
+                    original_userland_stage(ingest, held, original_userland_manifest))
+        bound = {'policy_sha256': digest((ROOT / 'native_release_policy.py').read_bytes()),
+                 'request': request_pin, 'source_custody': source_custody, 'lineage': lineage,
+                 'manifest': mrow, 'sim': sim}
+        if original is not None:   # absent: v1 evidence and record bytes unchanged
+            bound['original_userland'] = original
+        evidence = digest(canonical(bound))
+        raw = render_record(mrow, sim, evidence, original)
         output.mkdir(mode=0o700)
         owned = ingest.identity(output.stat())[:2]
         def guard():
@@ -243,6 +299,7 @@ def admit_for_build(manifest_path, output, build_pins=(), *, build_tool_pins=Non
         try:
             yield {'profile': private_profile, 'custody': custody, 'source': generated, 'record': record, 'manifest': mrow, 'sim': sim,
                'evidence_sha256': evidence, 'private': True, 'public_artifact': False,
+               'original_userland': original,
                'producer_anchors': {'DOS_receipt': policy.DOS_RECEIPT,
                                    'native_source_map_sha256': policy.NATIVE_SOURCE_MAP_SHA,
                                    'native_artifacts': policy.NATIVE_ARTIFACTS},

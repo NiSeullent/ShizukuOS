@@ -6,11 +6,12 @@
  * Winsock 1 ordinals follow that revision's dlls/wsock32/wsock32.spec, which
  * differs from ws2_32 at ordinals 10-12. Only implemented ws2_32 APIs are
  * forwarded. Legacy Winsock 1 IP-option translation is not implemented.
- * This parses existing Wine-provider-format bytes; it neither accepts a
- * connection nor adds AcceptEx/overlapped I/O/WSAIoctl extension support.
- * The API has no total buffer-size argument: callers must provide readable
- * storage for their declared segments. Arbitrary inaccessible pointers cannot
- * be validated here; returned addresses borrow that storage without copying.
+ * GetAcceptExSockaddrs reads nothing without a kernel allocation lease: the
+ * kernel confirms a COMPLETED AcceptEx of this process wrote exactly this buffer
+ * with exactly these reservations (private opcode 0x53480014), then the bounded
+ * decoder ntwin32/steam_socket/accept_buffer.c reads at most that total and
+ * accepts only exact IPv4/IPv6 sockaddrs within a sockaddr+16 reservation.
+ * Returned addresses borrow that storage without copying.
  * Microsoft contract: https://learn.microsoft.com/en-us/windows/win32/api/mswsock/nf-mswsock-getacceptexsockaddrs
  *
  * Copyright (C) 1993,1994,1996,1997 John Brezak, Erik Bos, Alex Korobka.
@@ -31,43 +32,15 @@
  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 #include "wsock32_compat.h"
-#include <limits.h>
 
-static uint32_t length_prefix(const unsigned char *p)
-{
-    /* Provider data is little endian. Byte reads also handle unaligned buffers. */
-    return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
-}
+LONG NTAPI NtShzSockIoctl(ULONG_PTR, ULONG_PTR, const void *, ULONG_PTR, void *, ULONG_PTR, PULONG);
+#define NTW_SOCKADDRS_SET_ERROR(code) WSASetLastError(code)
+#include "../../../../ntwin32/steam_socket/acceptex_sockaddrs.c"
 
 DLLAPI VOID WINAPI GetAcceptExSockaddrs(PVOID buffer, DWORD received, DWORD local_size, DWORD remote_size,
                                       struct sockaddr **local, LPINT local_length,
                                       struct sockaddr **remote, LPINT remote_length)
 {
-    uintptr_t base = (uintptr_t)buffer, local_at, remote_at, end;
-    uint32_t local_n, remote_n;
-    if (local) *local = 0;
-    if (local_length) *local_length = 0;
-    if (remote) *remote = 0;
-    if (remote_length) *remote_length = 0;
-    if (!buffer || !local || !local_length || !remote || !remote_length ||
-        local_size < 6 || remote_size < 6 || base > UINTPTR_MAX - received)
-        goto invalid;
-    local_at = base + received;
-    if (local_at > UINTPTR_MAX - local_size) goto invalid;
-    remote_at = local_at + local_size;
-    if (remote_at > UINTPTR_MAX - remote_size) goto invalid;
-    end = remote_at + remote_size;
-    (void)end;                 /* validated total range before reading either prefix */
-    local_n = length_prefix((const unsigned char *)local_at);
-    remote_n = length_prefix((const unsigned char *)remote_at);
-    if (local_n < 2 || local_n > INT_MAX || local_n > local_size - 4 ||
-        remote_n < 2 || remote_n > INT_MAX || remote_n > remote_size - 4)
-        goto invalid;
-    *local = (struct sockaddr *)(local_at + 4);
-    *remote = (struct sockaddr *)(remote_at + 4);
-    *local_length = (int)local_n;
-    *remote_length = (int)remote_n;
-    return;
-invalid:
-    WSASetLastError(WSAEINVAL);
+    /* `received` is the AcceptEx dwReceiveDataLength reservation (Microsoft contract). */
+    ntw_get_acceptex_sockaddrs(buffer, received, local_size, remote_size, local, local_length, remote, remote_length);
 }

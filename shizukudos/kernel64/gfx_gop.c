@@ -15,19 +15,22 @@
  *    firmware mode) that function is recorded as driven by "gfx_fb (UEFI GOP)" (pci_claim); a firmware framebuffer in
  *    reserved RAM (QEMU ramfb) has no PCI owner. No mode set, no cursor plane, no acceleration: the device itself is never
  *    programmed, only the memory the firmware already set up is written.
+ *  - Supervisor profile: the same backend drives a framebuffer the Supervisor granted (supervisor/src/display_grant.c:
+ *    validated mode, identity EPT mapping, SHZ_BIF_FB_SUPERVISOR_GRANT; k64_boot_framebuffer() refuses anything else).
+ *    PCI configuration ports trap there, so no BAR owner lookup is attempted and no PCI function is claimed.
  */
 #include "gfx.h"
 #include "../dead_screen/native.h"
 #include "pci.h"
 #include "gfx_pixfmt.h"
 
-#ifdef SHZ_STANDALONE
 static struct {
     volatile uint32_t *fb;
     uint32_t pitch_px;
     int rgbx;
 } gop;
 
+#ifdef SHZ_STANDALONE
 /* The PCI display function (class 03) with a memory BAR containing `pa`. BARs are sized with memory decoding switched off
  * so the live framebuffer never moves while a BAR briefly reads back all ones. */
 static int gop_owner(uint64_t pa, pci_dev_t *out)
@@ -53,12 +56,15 @@ static int gop_owner(uint64_t pa, pci_dev_t *out)
     }
     return -1;
 }
+#endif
 
 static int gop_probe(gfx_fb_t *fb)
 {
     k64_boot_fb_t b;
+#ifdef SHZ_STANDALONE
     pci_dev_t dev;
     int owned;
+#endif
     if (k64_boot_framebuffer(&b)) return -1;
     if (b.width > 8192 || b.height > 8192) {
         kprintf("K64 gfx: UEFI GOP mode %ux%u is larger than this GUI handles\n", b.width, b.height);
@@ -89,9 +95,10 @@ static int gop_probe(gfx_fb_t *fb)
     fb->lfb_pa = b.base;
     fb->lfb = 0;                                                      /* the Bochs VBE copy loop must never see this mapping */
     fb->bga_version = 0;
-    owned = gop_owner(b.base, &dev) == 0;
     kprintf("K64 gfx: UEFI GOP framebuffer %ux%u, pitch %u, %s, at %llx (%llu KiB)\n", b.width, b.height, b.pitch,
             gop.rgbx ? "RGBX" : "BGRX", b.base, ((uint64_t)b.pitch * b.height) >> 10);
+#ifdef SHZ_STANDALONE
+    owned = gop_owner(b.base, &dev) == 0;
     if (owned) {
         kprintf("K64 gfx: UEFI GOP framebuffer lies in a BAR of PCI display %x:%x.%x %04x:%04x\n", dev.bus, dev.dev, dev.fn,
                 dev.vendor, dev.device);
@@ -99,6 +106,9 @@ static int gop_probe(gfx_fb_t *fb)
     } else {
         kprintf("K64 gfx: UEFI GOP framebuffer lies in no PCI display BAR (a firmware RAM framebuffer)\n");
     }
+#else
+    kprintf("K64 gfx: framebuffer granted by the Supervisor (identity EPT mapping); no PCI function is visible here\n");
+#endif
     ds_native_bind(gop.fb, b.width, b.height, b.pitch, (size_t)b.pitch * b.height, gop.rgbx);
     return 0;
 }
@@ -119,4 +129,3 @@ static void gop_present(int x, int y, int w, int h)
 }
 
 const gfx_backend_t gfx_backend_gop = { "UEFI GOP", SHZ_GPU_BACKEND_GOP, gop_probe, gop_present };
-#endif

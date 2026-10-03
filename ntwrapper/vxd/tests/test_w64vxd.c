@@ -63,7 +63,7 @@ static int32_t hcall(uint32_t op, uint32_t a, uint32_t b, uint32_t *ebx, uint32_
 static void *map_phys(uint32_t phys, uint32_t bytes)
 { CHECK(phys == channel_gpa && bytes == SHZ_IPC_REGION_SIZE); return map_fail ? 0 : channel; }
 static const struct ntwv_pages ops = { check_range, lock_range, unlock_range, ptes, enter, leave, write_alias, read_alias };
-static const struct ntwv_hv hv = { hypervisor_present, hcall, map_phys };
+static const struct ntwv_hv hv = { hypervisor_present, hcall, map_phys, 0 };
 static void try_reenter(void)
 {
     const struct ntwv_dioc nested = { .code = NTWV_IOCTL_W64_OPEN,

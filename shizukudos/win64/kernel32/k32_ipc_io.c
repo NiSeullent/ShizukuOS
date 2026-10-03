@@ -10,6 +10,7 @@
  * thread's next alertable wait.
  */
 #include "k32_ipc.h"
+#include "k32_create_access.h"
 
 int k32_console_handle(HANDLE h, int *kind);
 
@@ -97,7 +98,7 @@ K32API HANDLE WINAPI CreateFileW(LPCWSTR name, DWORD access, DWORD share, LPSECU
     oa.ObjectName = &us;
     oa.Attributes = NT_OBJ_CASE_INSENSITIVE | (sa && sa->bInheritHandle ? SHZ_OBJ_INHERIT : 0);
     memset(&iosb, 0, sizeof iosb);
-    st = NtCreateFile(&h, access | SYNCHRONIZE | FILE_READ_ATTRIBUTES, &oa, &iosb, 0, flags & 0xffffu & ~FILE_ATTRIBUTE_DIRECTORY,
+    st = NtCreateFile(&h, k32_create_native_access(access, flags), &oa, &iosb, 0, flags & 0xffffu & ~FILE_ATTRIBUTE_DIRECTORY,
                       share, d, opts, 0, 0);
     if (st) {
         if (st == STATUS_OBJECT_NAME_COLLISION) shz_set_last_error(ERROR_FILE_EXISTS);   /* CREATE_NEW on an existing file */

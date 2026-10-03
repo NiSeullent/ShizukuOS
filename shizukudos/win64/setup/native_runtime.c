@@ -7,7 +7,7 @@ static int call(shz_native_call_v1 *r){return shz_native_call(r)==0?0:-1;}
 static int text(const char *p,size_t max,size_t *n)
 {size_t i;if(!p)return -1;for(i=0;i<max;i++)if(!p[i]){if(!i)return -1;*n=i;return 0;}return -1;}
 static shz_native_runtime_source *source(shz_native_runtime *v,void *h)
-{unsigned i;for(i=0;i<2;i++)if(h==&v->source[i]&&v->source[i].live)return &v->source[i];return 0;}
+{unsigned i;for(i=0;i<3;i++)if(h==&v->source[i]&&v->source[i].live)return &v->source[i];return 0;}
 static int source_check(void *ctx,void *h)
 {
  shz_native_runtime *v=ctx;shz_native_runtime_source *s=source(v,h);shz_native_call_v1 r;
@@ -20,11 +20,11 @@ static int source_open(void *ctx,const char *path,void **h,uint64_t *bytes)
 {
  shz_native_runtime *v=ctx;shz_native_runtime_source *s;shz_native_call_v1 r;size_t n;
  if(!v->initialized||!h||!bytes||text(path,SHZ_NATIVE_SYS_PATH,&n))return -1;
- for(unsigned i=0;i<2;i++)if(v->source[i].live&&v->source[i].preview&&!strcmp(path,v->source[i].path)){
+ for(unsigned i=0;i<3;i++)if(v->source[i].live&&v->source[i].preview&&!strcmp(path,v->source[i].path)){
   s=&v->source[i];if(source_check(v,s))return -1;
   s->preview=0;*h=s;*bytes=s->identity.bytes;return 0;
  }
- if(v->opened>=2)return -1;
+ if(v->opened>=3)return -1; /* 3rd open = role 2 (ADMIT index 2 only; never REVIEW/CLAIM) */
  s=&v->source[v->opened];shz_native_call_init(&r,SHZ_NATIVE_OPEN);memcpy(r.path,path,n+1);
  if(call(&r)||!r.handle||!r.source.bytes)return -1;
  s->token=r.handle;s->identity=r.source;s->role=v->opened;s->live=1;memcpy(s->path,path,n+1);
@@ -170,7 +170,7 @@ int shz_native_runtime_init(shz_native_runtime *v,const plat_t *base)
 int shz_native_runtime_preview_close(shz_native_runtime *v)
 {
  int rc=0;if(!v||v->claim.live)return -1;
- for(unsigned i=0;i<2;i++)if(v->source[i].live&&source_close(v,&v->source[i]))rc=-1;
+ for(unsigned i=0;i<3;i++)if(v->source[i].live&&source_close(v,&v->source[i]))rc=-1;
  return rc;
 }
 int shz_native_runtime_preview(shz_native_runtime *v,const char *manifest,const char *sim,uint8_t digest[32])
@@ -190,4 +190,12 @@ int shz_native_runtime_preview(shz_native_runtime *v,const char *manifest,const 
  memcpy(digest,pins[0].source.sha256,32);return 0;
 bad:
  shz_native_runtime_preview_close(v);return -1;
+}
+int shz_native_runtime_phase_pin(void *ctx,unsigned role,uint64_t *bytes,uint8_t sha256[32])
+{
+ shz_native_runtime *v=ctx;shz_native_call_v1 r;
+ if(!v||!v->initialized||!bytes||!sha256||role<2)return -1;
+ shz_native_call_init(&r,SHZ_NATIVE_RELEASE_INFO);r.index=role;
+ if(call(&r)||r.index!=role||!r.source.bytes||r.source.bytes>v->max_source_bytes)return -1;
+ *bytes=r.source.bytes;memcpy(sha256,r.source.sha256,32);return 0;
 }

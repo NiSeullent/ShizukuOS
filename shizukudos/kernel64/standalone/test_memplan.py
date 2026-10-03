@@ -25,13 +25,20 @@ HARNESS = r'''
 #include <stdio.h>
 #include <string.h>
 #include "memholes.h"
-int main(void)
+int main(int argc, char **argv)
 {
     static shz_memplan_t p;
     static shz_memplan_result_t r;
     static volatile shz_memholes_t h;
     unsigned long long b, e, cap, min, ig, is;
     unsigned i;
+    (void)argv;
+    if (argc > 1) {                     /* the layout contract, for the cross-file check */
+        printf("{\"kernel_gpa\": %u, \"kernel_end\": %u, \"file_max\": %u, \"heap_gpa\": %u, \"heap_bytes\": %u, "
+               "\"pmm_gpa\": %u, \"keep\": %u}\n", SHZ_K64_KERNEL_GPA, SHZ_K64_KERNEL_END, SHZ_K64_KERNEL_FILE_MAX,
+               SHZ_K64_HEAP_GPA, SHZ_K64_HEAP_BYTES, SHZ_K64_PMM_GPA, SHZ_K64_HEAP_KEEP);
+        return 0;
+    }
     shz_memplan_init(&p);
     if (scanf("%llx %llx %llx %llx", &cap, &min, &ig, &is) != 4) return 2;
     while (scanf("%llx %llx", &b, &e) == 2) {
@@ -76,6 +83,19 @@ CASES = [
      {"ok": 1, "ram": 256 * MIB, "holes": OVMF_S3_HOLES[:3]}),
     ("hole in the kernel window is refused", [(0, 0x9F000), (MIB, 2 * MIB), (0x280000, 512 * MIB)], CAP, 0,
      {"ok": 0, "why": "kernel window", "at": 2 * MIB}),
+    ("hole in [3 MiB, 4 MiB) is now inside the kernel window: refused", [(0, 0x9F000), (MIB, 3 * MIB),
+                                                                        (0x380000, 512 * MIB)], CAP, 0,
+     {"ok": 0, "why": "kernel window [1 MiB, 4 MiB)", "at": 3 * MIB}),
+    ("hole straddling the 4 MiB window end is refused", legacy(512 * MIB), CAP, 0,
+     {"ok": 0, "why": "kernel window"}, [(0x3FF000, 0x401000)]),
+    ("hole starting exactly at 4 MiB is a fenced heap hole", legacy(512 * MIB), CAP, 0,
+     {"ok": 1, "holes": [(0x400000, 0x1000)], "heap": 0x1000}, [(0x400000, 0x401000)]),
+    ("exactly 3 MiB of heap holes leaves the 8 MiB minimum: accepted", legacy(512 * MIB), CAP, 0,
+     {"ok": 1, "heap": 3 * MIB}, [(5 * MIB, 8 * MIB)]),
+    ("3 MiB + 4 KiB of heap holes is refused (8 MiB minimum kept)", legacy(512 * MIB), CAP, 0,
+     {"ok": 0, "why": "less than 8 MiB"}, [(5 * MIB, 8 * MIB + 0x1000)]),
+    ("hole bytes below 15 MiB only count against the heap", legacy(512 * MIB), CAP, 0,
+     {"ok": 1, "heap": 3 * MIB}, [(12 * MIB, 20 * MIB)]),
     ("boot pages not RAM are refused", [(0x8000, 0x9F000), (MIB, 512 * MIB)], CAP, 0,
      {"ok": 0, "why": "boot pages"}),
     ("hole over the initrd is refused", legacy(33 * MIB) + [(34 * MIB, 512 * MIB)], CAP, 4 * MIB,
@@ -141,6 +161,28 @@ def judge(got: dict, want: dict) -> list[str]:
     return bad
 
 
+def layout_contract(exe: Path) -> list[str]:
+    """memholes.h constants == kernel64/link.ld ASSERT literal == boot.ld stub origin bound == mem.c use."""
+    import re
+    got = json.loads(subprocess.run([str(exe), "layout"], capture_output=True, text=True, check=True).stdout)
+    bad = []
+    want = {"kernel_gpa": MIB, "kernel_end": 4 * MIB, "file_max": 3 * MIB, "heap_gpa": 4 * MIB,
+            "heap_bytes": 11 * MIB, "pmm_gpa": 15 * MIB, "keep": 8 * MIB}
+    bad += [f"{k} {got[k]:#x} != {v:#x}" for k, v in want.items() if got[k] != v]
+    link = (HERE.parent / "link.ld").read_text()
+    m = re.search(r"ASSERT\(__bss_end - 0xFFFFFFFF80000000 <= (0x[0-9a-fA-F]+)", link)
+    if not m or int(m.group(1), 16) != got["kernel_end"]:
+        bad.append(f"link.ld bss ASSERT {m.group(1) if m else None} != SHZ_K64_KERNEL_END")
+    stub = (HERE / "boot.ld").read_text()
+    m = re.search(r"\. = (0x[0-9a-fA-F]+);", stub)
+    if not m or int(m.group(1), 16) < got["kernel_end"] or "ASSERT(ADDR(.text) >= 0x400000" not in stub:
+        bad.append("boot.ld stub origin below the Kernel64 window end")
+    mem = (HERE.parent / "mem.c").read_text()
+    if "#define HEAP_PA ((uint64_t)SHZ_K64_HEAP_GPA)" not in mem or "0x300000" in mem:
+        bad.append("mem.c heap not bound to memholes.h")
+    return bad
+
+
 def main() -> int:
     failures = 0
     with tempfile.TemporaryDirectory(prefix="shz-memplan-") as tmp:
@@ -151,6 +193,10 @@ def main() -> int:
                 print(f"[FAIL] build {bits}-bit harness: {exc}")
                 failures += 1
                 continue
+            bad = layout_contract(exe)
+            failures += bool(bad)
+            print(f"[{'FAIL' if bad else 'PASS'}] {bits}-bit: layout contract (memholes.h/link.ld/boot.ld/mem.c)"
+                  + (f": {'; '.join(bad)}" if bad else ""))
             for name, runs, cap, isize, want, *rest in CASES:
                 got = run_case(exe, runs, cap, isize, *rest)
                 bad = judge(got, want)

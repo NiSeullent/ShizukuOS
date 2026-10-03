@@ -1,6 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * Production decoder on fixed provider-format fixtures, all buffer alignments,
- * malformed length/output contracts and bounded randomized provider data. */
+ * malformed length/output contracts and bounded randomized provider data.
+ * NtShzSockIoctl here models only the kernel lease reply (exact owner/buffer/
+ * reservation match is proven in test_net_extensions_host against the real
+ * kernel lookup); the decoder must never read without, or beyond, a lease. */
 #define SHZ_WSOCK32_HOST_TEST
 #include "../dlls/wsock32/wsock32.c"
 #include <stdio.h>
@@ -10,6 +13,18 @@
 static unsigned checks;
 static int last_error;
 void WINAPI WSASetLastError(int error) { last_error = error; }
+static uintptr_t lease_buffer;
+static uint32_t lease_r, lease_l, lease_rm, lease_total;
+static unsigned lookups;
+static void grant(const void *b, uint32_t r, uint32_t l, uint32_t rm, uint32_t total) { lease_buffer=(uintptr_t)b; lease_r=r; lease_l=l; lease_rm=rm; lease_total=total; }
+LONG NTAPI NtShzSockIoctl(ULONG_PTR h, ULONG_PTR cmd, const void *in, ULONG_PTR insize, void *out, ULONG_PTR outsize, PULONG ret)
+{
+    const struct shz_sock_acceptex_lookup *q = in; struct shz_sock_acceptex_lease l = {lease_total, 0};
+    ++lookups;
+    if (h || cmd != 0x53480014u || insize != sizeof *q || outsize < sizeof l || !ret || q->reserved) return (LONG)0xe0a02726;
+    if (q->buffer != lease_buffer || q->receive_reserved != lease_r || q->local_reserved != lease_l || q->remote_reserved != lease_rm) return (LONG)0xe0a02726;
+    memcpy(out, &l, sizeof l); *ret = sizeof l; return 0;
+}
 #define CHECK(c) do { ++checks; if (!(c)) { fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #c); exit(1); } } while (0)
 
 /* IPv4 port 8080 and 127.0.0.1; IPv6 port 443 and ::1. Literal independently
@@ -39,6 +54,7 @@ int main(void)
         buffer = storage + alignment;
         memcpy(buffer + 7, ipv4, sizeof ipv4);
         memcpy(buffer + 7 + 32, ipv6, sizeof ipv6);
+        grant(buffer, 7, 32, 44, 83);
         local = remote = NULL; local_n = remote_n = -1; last_error = 0x3456;
         GetAcceptExSockaddrs(buffer, 7, 32, 44, &local, &local_n, &remote, &remote_n);
         CHECK((void *)local == buffer + 11 && local_n == 16);
@@ -58,6 +74,10 @@ int main(void)
             rejected(buffer, 7, i, 44);
             rejected(buffer, 7, 32, i);
         }
+        grant(buffer, 7, 32, 60, 99); rejected(buffer, 7, 32, 44);     /* no lease for these segments */
+        grant(buffer, 7, 32, 44, 60); rejected(buffer, 7, 32, 44);     /* lease smaller than declared: over-read refused */
+        grant(buffer, 7, 32, 44, 83);
+        buffer[11] = 23; rejected(buffer, 7, 32, 44); buffer[11] = 2;  /* IPv4 length with IPv6 family */
         buffer[7] = 0; rejected(buffer, 7, 32, 44);
         buffer[7] = 1; rejected(buffer, 7, 32, 44);
         buffer[7] = 29; rejected(buffer, 7, 32, 44);
@@ -66,6 +86,7 @@ int main(void)
         buffer[39] = 41; rejected(buffer, 7, 32, 44);
         memset(buffer + 39, 0xff, 4); rejected(buffer, 7, 32, 44);
     }
+    grant(0, 0, 0, 0, 0);
     rejected(NULL, 0, 32, 32);
     rejected((void *)(UINTPTR_MAX - 3), 7, 32, 44);
     rejected((void *)(UINTPTR_MAX - 10), 0, 32, 44);
@@ -73,6 +94,7 @@ int main(void)
     /* Undersized segments reject before reading even an inaccessible address. */
     rejected((void *)1, 0, 3, 32);
     rejected((void *)1, 0, 32, 3);
+    lookups = 0; rejected((void *)1, 0, 32, 32); CHECK(lookups == 1);  /* refused by kernel lease, never dereferenced */
     for (i = 0; i < 100000; ++i) {
         DWORD receive, local_size, remote_size;
         unsigned k;
@@ -81,13 +103,16 @@ int main(void)
             storage[k] = (unsigned char)rng;
         }
         receive = rng & 31; local_size = rng >> 5 & 63; remote_size = rng >> 11 & 63;
+        grant(storage, receive, local_size, remote_size, receive + local_size + remote_size);
         local = remote = NULL; local_n = remote_n = 0; last_error = 0;
         GetAcceptExSockaddrs(storage, receive, local_size, remote_size, &local, &local_n, &remote, &remote_n);
         if (last_error) {
             CHECK(last_error == WSAEINVAL && !local && !remote && !local_n && !remote_n);
         } else {
-            CHECK(local_n >= 2 && remote_n >= 2 && (unsigned)local_n <= local_size - 4 &&
-                  (unsigned)remote_n <= remote_size - 4);
+            /* Strict contract: exact IPv4/IPv6 sockaddr, reservation >= sockaddr + 16. */
+            CHECK((local_n == 16 || local_n == 28) && (remote_n == 16 || remote_n == 28) &&
+                  (unsigned)local_n + 16 <= local_size && (unsigned)remote_n + 16 <= remote_size);
+            CHECK(local->sa_family == (local_n == 16 ? 2 : 23) && remote->sa_family == (remote_n == 16 ? 2 : 23));
             CHECK((void *)local == storage + receive + 4 && (void *)remote == storage + receive + local_size + 4);
         }
     }

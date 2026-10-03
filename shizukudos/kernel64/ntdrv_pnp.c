@@ -128,6 +128,7 @@ struct ntdrv_pdo {
     uint8_t iface_guid[4][16];           /* actual registration GUID, retained without reparsing links */
     int iface_enabled[4];
     unsigned niface;
+    char native_service[32];            /* non-empty: devnode of a native Kernel64 backend (no NT function driver) */
 };
 static ntdrv_pdo_t *pdos;
 static unsigned pdo_count;
@@ -182,6 +183,11 @@ void ntdrv_pnp_add(ntdrv_driver_t *d, const pci_dev_t *dev, regkey_t *inst_key, 
     unsigned i;
     for (p = pdos; p; p = p->next)
         if (p->dev.bus == dev->bus && p->dev.dev == dev->dev && p->dev.fn == dev->fn) {
+            if (p->native_service[0]) {                 /* a native backend owns the function: never hand it to an NT FDO */
+                kprintf("K64 ntdrv: PCI %x:%x.%x is driven by native %s; %s not bound\n",
+                        dev->bus, dev->dev, dev->fn, p->native_service, d->name);
+                return;
+            }
             if (p->fdo_driver && p->fdo_driver != d) {
                 kprintf("K64 ntdrv: PCI %x:%x.%x already has a function driver (%s); %s not bound\n",
                         dev->bus, dev->dev, dev->fn, p->fdo_driver->name, d->name);
@@ -214,6 +220,62 @@ void ntdrv_pnp_add(ntdrv_driver_t *d, const pci_dev_t *dev, regkey_t *inst_key, 
     if (IoCreateDevice(root_driver(), 0, &name, 0x22 /* FILE_DEVICE_UNKNOWN */, 0, 0, &p->pdo) != STATUS_SUCCESS) { kfree(p); return; }
     p->pdo->Flags &= ~DO_DEVICE_INITIALIZING;
     p->next = pdos; pdos = p;
+}
+
+/* Native backend devnode (driver_inventory.c): a PDO with NO function driver, so ntdrv_pnp_start_pending(),
+ * remove_devices() and driver_unloading() (all filtered by fdo_driver == d) never touch it, and ntdrv_pnp_add()
+ * refuses to bind a hosted driver over it. Only called for a function whose pci_claim() owner is a catalogue
+ * backend. Returns 0, or -1 (bad argument, already present, no memory, IoCreateDevice failure). */
+int ntdrv_pnp_publish_native(const pci_dev_t *dev, const char *service, const char *description, const char *hwid)
+{
+    static const char hx[] = "0123456789ABCDEF";
+    ntdrv_pdo_t *p;
+    UNICODE_STRING name;
+    uint16_t wname[32];
+    char aname[32];
+    unsigned i, n;
+    if (!dev || !service || !service[0] || !hwid || !hwid[0]) return -1;
+    for (p = pdos; p; p = p->next)
+        if (p->dev.bus == dev->bus && p->dev.dev == dev->dev && p->dev.fn == dev->fn) return -1;
+    p = kzalloc(sizeof *p);
+    if (!p) return -1;
+    p->dev = *dev;
+    p->index = pdo_count++;
+    for (i = 0; service[i] && i + 1 < sizeof p->native_service; ++i) p->native_service[i] = service[i];
+    n = 0;                                                  /* <hwid>\B<bus>D<dev>F<fn>, as shzpnp names Enum\PCI */
+    for (i = 0; hwid[i] && n + 12 < sizeof p->instance; ++i) p->instance[n++] = hwid[i];
+    p->instance[n++] = '\\';
+    p->instance[n++] = 'B'; p->instance[n++] = hx[dev->bus >> 4]; p->instance[n++] = hx[dev->bus & 15];
+    p->instance[n++] = 'D'; p->instance[n++] = hx[dev->dev >> 4 & 15]; p->instance[n++] = hx[dev->dev & 15];
+    p->instance[n++] = 'F'; p->instance[n++] = hx[dev->fn & 15]; p->instance[n] = 0;
+    if (description) ntdrv_ascii_to_wide(description, p->desc, 128);
+    ntdrv_ascii_to_wide("ShizukuOS", p->mfg, 128);
+    p->started = 1;                                         /* the native backend already drives it (pci_claim) */
+    {
+        static const char pfx[] = "\\Device\\NTPNP_PCI";
+        unsigned k = p->index;
+        n = 0;
+        for (i = 0; pfx[i]; ++i) aname[n++] = pfx[i];
+        aname[n++] = (char)('0' + k / 1000 % 10); aname[n++] = (char)('0' + k / 100 % 10);
+        aname[n++] = (char)('0' + k / 10 % 10); aname[n++] = (char)('0' + k % 10); aname[n] = 0;
+        ntdrv_ascii_to_wide(aname, wname, 32);
+        name.Buffer = wname; name.Length = (uint16_t)(n * 2); name.MaximumLength = (uint16_t)(n * 2 + 2);
+    }
+    if (IoCreateDevice(root_driver(), 0, &name, 0x22 /* FILE_DEVICE_UNKNOWN */, 0, 0, &p->pdo) != STATUS_SUCCESS) { kfree(p); return -1; }
+    p->pdo->Flags &= ~DO_DEVICE_INITIALIZING;
+    p->next = pdos; pdos = p;
+    kprintf("K64 ntdrv: native devnode %s for %s\n", p->instance, service);
+    return 0;
+}
+
+/* -1: no devnode for the function; 0: recorded (not started); 1: started (native, or START_DEVICE succeeded). */
+int ntdrv_pnp_function_state(const pci_dev_t *dev)
+{
+    ntdrv_pdo_t *p;
+    if (!dev) return -1;
+    for (p = pdos; p; p = p->next)
+        if (p->dev.bus == dev->bus && p->dev.dev == dev->dev && p->dev.fn == dev->fn) return p->started ? 1 : 0;
+    return -1;
 }
 
 /* ---------------------------------------------------------------- resources of a function */
@@ -645,6 +707,7 @@ static void catalog_row(ntdrv_pdo_t *node, shz_pnp_row_t *row, unsigned interfac
     memcpy(row->description,node->desc,sizeof row->description);
     memcpy(row->manufacturer,node->mfg,sizeof row->manufacturer);
     if(node->fdo_driver)for(i=0;node->fdo_driver->name[i]&&i+1<sizeof row->service;++i)row->service[i]=node->fdo_driver->name[i];
+    else for(i=0;node->native_service[i]&&i+1<sizeof row->service;++i)row->service[i]=node->native_service[i];
     if(interface<node->niface){row->enabled=node->iface_enabled[interface]!=0;memcpy(row->interface_guid,node->iface_guid[interface],16);memcpy(row->link,node->iface[interface],sizeof row->link);}
 }
 int32_t shz_query_pnp_catalog(process_t *process,uint64_t output,uint64_t length,uint64_t return_length)

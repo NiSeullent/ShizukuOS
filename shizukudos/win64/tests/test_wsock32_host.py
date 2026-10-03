@@ -65,9 +65,13 @@ def main():
     definition.write_text("LIBRARY wsock32.dll\nEXPORTS\n  GetAcceptExSockaddrs @1142\n" +
                           "\n".join("  " + f for f in cfg["forwarders"]) + "\n")
     dll = out / "wsock32.dll"
+    # GetAcceptExSockaddrs imports the private ntdll lease syscall (production build links -lntdll).
+    ntdll_def = out / "ntdll_shz.def"
+    ntdll_def.write_text("LIBRARY ntdll.dll\nEXPORTS\n  NtShzSockIoctl\n")
+    subprocess.run(["x86_64-w64-mingw32-dlltool", "-d", str(ntdll_def), "-l", str(out / "libntdll_shz.a")], check=True, timeout=60)
     subprocess.run(["x86_64-w64-mingw32-gcc", *common, "-O2", "-ffreestanding", "-fno-builtin",
                     "-fno-stack-protector", "-mno-red-zone", "-shared", "-nostdlib", "-Wl,--entry,0",
-                    str(module / "wsock32.c"), str(definition), "-lws2_32", "-o", str(dll)], check=True, timeout=60)
+                    str(module / "wsock32.c"), str(definition), "-lws2_32", str(out / "libntdll_shz.a"), "-o", str(dll)], check=True, timeout=60)
     exports = pe_exports(dll)
     assert exports["GetAcceptExSockaddrs"] == {"ordinal": 1142, "forwarder": None}
     for forwarder in cfg["forwarders"]:

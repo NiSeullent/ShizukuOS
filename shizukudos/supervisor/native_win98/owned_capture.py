@@ -119,6 +119,7 @@ class OwnedQMP:
                 self.buffer.extend(chunk)
 
     def call(self, command, arguments=None):
+        if command in INPUT_COMMANDS:input_events_count(command, arguments)
         stop = min(self.deadline, time.monotonic() + 5)
         self._remaining(stop);self.request += 1
         identifier = 'native-' + str(self.request)
@@ -151,6 +152,175 @@ class OwnedQMP:
     def close(self):
         if self.socket is not None:
             self.socket.close();self.socket = None
+
+
+# ---- Scoped scripted input (owned QMP only; tiny allow-list, bounded) ----
+INPUT_COMMANDS = ('input-send-event', 'send-key')
+INPUT_KEYS = frozenset(list('abcdefghijklmnopqrstuvwxyz0123456789') + ['ret', 'spc', 'esc', 'tab', 'up', 'down', 'left', 'right', 'shift', 'ctrl', 'alt', 'f4'])  # f4: Alt+F4 -> WM_CLOSE
+INPUT_BUTTONS = frozenset(('left', 'right', 'middle'))
+INPUT_MAX_STEPS = 64
+INPUT_MAX_EVENTS = 128           # total input-send-event items over the whole script
+INPUT_MAX_DELAY_MS = 5000
+INPUT_MAX_TOTAL_MS = 60000
+INPUT_MIN_GAP_S = 0.02           # rate bound between two sends
+INPUT_MAX_START_S = 600
+INPUT_RECIPE_MAX_BYTES = 16 << 10
+
+
+def _int(value, low, high):
+    return type(value) is int and low <= value <= high
+
+
+def input_events_count(command, arguments):
+    """Validate one allow-listed input QMP command; return its event count."""
+    if command not in INPUT_COMMANDS:
+        raise ValueError('QMP command is not in the scoped input allow-list')
+    if type(arguments) is not dict:
+        raise ValueError('exact input arguments required')
+    if command == 'send-key':
+        if set(arguments) - {'keys', 'hold-time'} or 'keys' not in arguments:
+            raise ValueError('exact send-key arguments required')
+        keys = arguments['keys']
+        if type(keys) is not list or not 1 <= len(keys) <= 3:
+            raise ValueError('one to three send-key keys required')
+        for key in keys:
+            if type(key) is not dict or set(key) != {'type', 'data'} or key['type'] != 'qcode' or key['data'] not in INPUT_KEYS:
+                raise ValueError('send-key key is outside the bounded qcode set')
+        if 'hold-time' in arguments and not _int(arguments['hold-time'], 0, 500):
+            raise ValueError('send-key hold-time out of range')
+        return len(keys)
+    if set(arguments) != {'events'} or type(arguments['events']) is not list or not 1 <= len(arguments['events']) <= 4:
+        raise ValueError('one to four input events required')
+    for event in arguments['events']:
+        if type(event) is not dict or set(event) != {'type', 'data'} or type(event['data']) is not dict:
+            raise ValueError('exact input event shape required')
+        kind, data = event['type'], event['data']
+        if kind == 'key':
+            key = data.get('key')
+            if set(data) != {'down', 'key'} or type(data['down']) is not bool or type(key) is not dict or set(key) != {'type', 'data'} \
+                    or key['type'] != 'qcode' or key['data'] not in INPUT_KEYS:
+                raise ValueError('key event is outside the bounded qcode set')
+        elif kind == 'rel':
+            if set(data) != {'axis', 'value'} or data['axis'] not in ('x', 'y') or not _int(data['value'], -127, 127):
+                raise ValueError('relative pointer movement out of range')
+        elif kind == 'abs':
+            if set(data) != {'axis', 'value'} or data['axis'] not in ('x', 'y') or not _int(data['value'], 0, 32767):
+                raise ValueError('absolute pointer coordinate out of range')
+        elif kind == 'btn':
+            if set(data) != {'down', 'button'} or type(data['down']) is not bool or data['button'] not in INPUT_BUTTONS:
+                raise ValueError('pointer button outside the allow-list')
+        else:
+            raise ValueError('input event type is not allow-listed')
+    return len(arguments['events'])
+
+
+def input_arguments_valid(command, arguments):
+    """Boolean wrapper for guardian-side enforcement."""
+    try:
+        input_events_count(command, arguments)
+        return True
+    except ValueError:
+        return False
+
+
+def _step_arguments(step):
+    if type(step) is not dict or set(step) - {'delay_ms', 'key', 'down', 'rel', 'abs', 'btn', 'tap'} or not _int(step.get('delay_ms', 0), 0, INPUT_MAX_DELAY_MS):
+        raise ValueError('recipe step shape or delay out of range')
+    kinds = [name for name in ('key', 'rel', 'abs', 'btn', 'tap') if name in step]
+    if len(kinds) != 1:
+        raise ValueError('exactly one action per recipe step')
+    kind = kinds[0]
+    if kind == 'tap':  # press+release via send-key
+        return 'send-key', {'keys': [{'type': 'qcode', 'data': step['tap']}], 'hold-time': 100}
+    if kind == 'key':
+        down = step.get('down')
+        return 'input-send-event', {'events': [{'type': 'key', 'data': {'down': down, 'key': {'type': 'qcode', 'data': step['key']}}}]}
+    if kind in ('rel', 'abs'):
+        value = step[kind]
+        if type(value) is not list or len(value) != 2:
+            raise ValueError('pointer step needs [x, y]')
+        return 'input-send-event', {'events': [{'type': kind, 'data': {'axis': axis, 'value': coordinate}} for axis, coordinate in zip('xy', value)]}
+    return 'input-send-event', {'events': [{'type': 'btn', 'data': {'down': step.get('down'), 'button': step['btn']}}]}
+
+
+class InputScript:
+    """Hash-pinned recipe: {"start_after_s":n,"steps":[{"delay_ms":n,<one action>},...]}.
+
+    Actions: {"tap":"ret"}, {"key":"a","down":true}, {"rel":[dx,dy]},
+    {"abs":[x,y]}, {"btn":"left","down":true}. Compiled and fully validated
+    before the VM starts; delivery re-validates every command.
+    """
+    def __init__(self, raw, sha256):
+        import hashlib
+        if type(raw) is not bytes or not 0 < len(raw) <= INPUT_RECIPE_MAX_BYTES:
+            raise ValueError('bounded input recipe bytes required')
+        if hashlib.sha256(raw).hexdigest() != sha256:
+            raise ValueError('input recipe differs from its pinned SHA-256')
+        def unique(pairs):
+            if len({key for key, _ in pairs}) != len(pairs):
+                raise ValueError('duplicate input recipe field')
+            return dict(pairs)
+        recipe = json.loads(raw, object_pairs_hook=unique,
+                            parse_constant=lambda _: (_ for _ in ()).throw(ValueError('nonfinite input recipe value')))
+        if type(recipe) is not dict or set(recipe) != {'start_after_s', 'steps'} or not _int(recipe['start_after_s'], 0, INPUT_MAX_START_S):
+            raise ValueError('exact input recipe object required')
+        steps = recipe['steps']
+        if type(steps) is not list or not 1 <= len(steps) <= INPUT_MAX_STEPS:
+            raise ValueError('input recipe step budget exceeded')
+        self.sha256, self.bytes, self.start_after = sha256, len(raw), recipe['start_after_s']
+        self.commands = []
+        total_ms = events = 0
+        for step in steps:
+            command, arguments = _step_arguments(step)
+            events += input_events_count(command, arguments)
+            total_ms += step.get('delay_ms', 0)
+            self.commands.append((total_ms, command, arguments))
+        if events > INPUT_MAX_EVENTS or total_ms > INPUT_MAX_TOTAL_MS:
+            raise ValueError('input recipe total event/time budget exceeded')
+        self.event_total = events
+
+
+class ScopedInput:
+    """Sends a compiled InputScript through an already-admitted owned monitor."""
+    def __init__(self, script, monitor):
+        self.script, self.monitor, self.index, self.origin, self.last_send = script, monitor, 0, None, 0.0
+        self.log = []
+        self.sent_events = 0
+
+    @property
+    def done(self):
+        return self.index >= len(self.script.commands)
+
+    def next_due(self, elapsed):
+        """Seconds until the next send (0 if due); None when finished."""
+        if self.done:
+            return None
+        base = self.script.start_after if self.origin is None else self.origin + self.script.commands[self.index][0] / 1000.0
+        return max(0.0, base - elapsed)
+
+    def poll(self, elapsed):
+        """Send due commands (rate-limited); `elapsed` is VM-relative seconds."""
+        if self.origin is None and elapsed >= self.script.start_after:
+            self.origin = elapsed
+        while self.origin is not None and not self.done:
+            due, command, arguments = self.script.commands[self.index]
+            if elapsed < self.origin + due / 1000.0:
+                return
+            wait = self.last_send + INPUT_MIN_GAP_S - time.monotonic()
+            if wait > 0:
+                time.sleep(wait)
+            count = input_events_count(command, arguments)
+            if self.sent_events + count > INPUT_MAX_EVENTS:
+                raise RuntimeError('input event budget exceeded at delivery')
+            self.last_send = time.monotonic()
+            reply = self.monitor.call(command, arguments)
+            self.sent_events += count
+            self.log.append({'step': self.index, 'seconds': round(elapsed, 3), 'command': command, 'arguments': arguments, 'reply': reply})
+            self.index += 1
+
+    def evidence(self):
+        return {'recipe_sha256': self.script.sha256, 'recipe_bytes': self.script.bytes, 'steps_total': len(self.script.commands),
+                'steps_sent': self.index, 'events_sent': self.sent_events, 'complete': self.done, 'sent': self.log}
 
 
 class BoundedLogs:

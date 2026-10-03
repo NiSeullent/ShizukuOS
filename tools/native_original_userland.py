@@ -459,12 +459,68 @@ def generate(request_path, request_sha, out):
                 os.close(directory_fd)
 
 
+EPOCH_INTENT_SCHEMA = 'shizukuos.native-original-userland-epoch-intent.v1'
+OWNED_INPUT_SCHEMA = 'shizukuos.w98-owned-input-option.v1'
+
+
+def owned_input_option(spec):
+    """Explicit opt-in -> the exact guardian `owned_input` object, or None for 'none'.
+
+    Selects only; the guardian generates W98INPT.BIN from its live Attempt, so no
+    nonce, hash or port is carried here and a VGA pair alone never implies input."""
+    need(type(spec) is str and spec, 'explicit --owned-input keyboard,mouse|none required')
+    if spec == 'none':
+        return None
+    parts = spec.split(',')
+    need(all(part in ('keyboard', 'mouse') for part in parts) and len(set(parts)) == len(parts),
+         'owned input devices must be unique keyboard and/or mouse')
+    return {'schema': OWNED_INPUT_SCHEMA, 'machine': 'q35-i8042',
+            'keyboard': 'keyboard' in parts, 'mouse': 'mouse' in parts}
+
+
+def add_owned_input(intent_path, spec, out):
+    """Copy an existing original-epoch intent adding only `owned_input` (none: verbatim bytes)."""
+    option = owned_input_option(spec)
+    source = Path(intent_path)
+    fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        need(stat.S_ISREG(os.fstat(fd).st_mode), 'regular intent file required')
+        raw = os.read(fd, MAX_JSON + 1)
+    finally:
+        os.close(fd)
+    intent = object_bytes(raw)
+    need(intent.get('schema') == EPOCH_INTENT_SCHEMA, 'original-epoch intent schema required')
+    need('owned_input' not in intent, 'intent already carries owned_input; refusing to overwrite')
+    if option is not None:
+        intent = {**intent, 'owned_input': option}
+        raw = (json.dumps(intent, indent=2) + '\n').encode()
+    out = Path(out)
+    private_output(out)
+    fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    try:
+        need(os.write(fd, raw) == len(raw), 'short intent write')
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    return option
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--request', type=Path, required=True)
-    parser.add_argument('--request-sha256', required=True)
+    parser.add_argument('--request', type=Path)
+    parser.add_argument('--request-sha256')
     parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--owned-input', help='keyboard,mouse|none: add the explicit owned Q35 i8042 input option to --intent')
+    parser.add_argument('--intent', type=Path, help='existing original-epoch intent (with --owned-input)')
     args = parser.parse_args(argv)
+    if args.owned_input is not None:
+        if args.request or args.request_sha256 or not args.intent:
+            parser.error('--owned-input edits --intent only and takes no --request')
+        add_owned_input(args.intent, args.owned_input, args.out)
+        print('ORIGINAL_EPOCH_INTENT_OWNED_INPUT_OPTION_WRITTEN_NOT_BOOTED')
+        return 0
+    if args.intent or not args.request or not args.request_sha256:
+        parser.error('--request and --request-sha256 are required (or --owned-input with --intent)')
     generate(args.request, args.request_sha256, args.out)
     print('ORIGINAL_USERLAND_SOURCE_OBSERVED_NOT_BOOTED')
     return 0

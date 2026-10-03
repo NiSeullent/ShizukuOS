@@ -47,7 +47,8 @@ void gfx_fb_test_pattern(void);
 void *gfx_pages_alloc(uint64_t bytes);
 void gfx_pages_free(void *p, uint64_t bytes);
 uint64_t gfx_pages_in_use(void);
-/* 8x16 text (the only font): draws `n` UTF-16 code units, glyphs >= 0x80 as '?', clipped to [cx0,cx1)x[cy0,cy1). */
+/* Native 16-pixel grayscale text: ASCII advances 8 pixels, Hangul 16; shared Unifont glyphs and missing-glyph rules.
+ * Draws n UTF-16 units inside [cx0,cx1)x[cy0,cy1); gfx_text_width() measures the same advances (gfx_fb.h). */
 #define GFX_FONT_W 8
 #define GFX_FONT_H 16
 void gfx_text(uint32_t *buf, int stride, int bufw, int bufh, int x, int y, const uint16_t *s, unsigned n, uint32_t rgb,

@@ -50,6 +50,22 @@ PCI_PREPARATION_SOURCE='tools/native_pci_preparation.py'
 GOP_NONCE_SOURCE='shizukudos/supervisor/native_win98/gop_nonce_staging.py'
 GOP_CONSTRUCTOR_SOURCE='shizukudos/win98_boot/prepare_replacement.py'
 ORIGINAL_MANIFEST_SCHEMA='shizukuos.native-original-userland-custody-manifest.v1'
+ORIGINAL_EPOCH_INTENT_SCHEMA='shizukuos.native-original-userland-epoch-intent.v1'
+# Optional original-phase scripted input recipe {path,bytes,sha256}; == owned_capture.INPUT_RECIPE_MAX_BYTES.
+INPUT_RECIPE_MAX=16<<10
+OWNED_INPUT_SCHEMA='shizukuos.w98-owned-input-option.v1'
+def owned_input_flags(option):
+    """Explicit versioned owned-machine input choice -> W98INPT flags (unknown fields refused).
+
+    The choice selects only; authority is the live Attempt's sealed policy SHA."""
+    need(type(option) is dict and set(option)=={'schema','machine','keyboard','mouse'} and option['schema']==OWNED_INPUT_SCHEMA and
+         option['machine']=='q35-i8042' and type(option['keyboard']) is bool and type(option['mouse']) is bool and
+         (option['keyboard'] or option['mouse']),'exact versioned owned Q35 i8042 keyboard/mouse input option required')
+    return (1 if option['keyboard'] else 0)|(2 if option['mouse'] else 0)
+# An original-observation device epoch never confers these; they stay literal False.
+ORIGINAL_EPOCH_FALSE=('DOS3_replacement_profile','MSDOS_replacement_under_Windows98','default_GOP_registered',
+                      'GPU_active','Windows98_release_approved','genuine_Windows_verified','HostGrant_transmitted',
+                      'VM_executed','ISO_verified','apps_verified','public_artifact')
 
 def identity(s):return s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns
 
@@ -61,16 +77,38 @@ def pin(row,maximum=8<<30):
     need(type(row['sha256']) is str and re.fullmatch('[0-9a-f]{64}',row['sha256']) and row['sha256']!='0'*64,'explicit nonzero SHA')
     return p
 
-def full_hash(fd,size,check=lambda:None):
-    digest=hashlib.sha256();at=0
+# Streaming reads use bounded large blocks. A full SHA pass is still complete;
+# only the syscall/block granularity changes (perf-b9: 1 MiB -> 4 MiB).
+HASH_BLOCK=4<<20
+# Namespace sweep cadence for long streaming reads (full hashes, FAT
+# observation). Every block still checks the global SIGIO latch plus the
+# exact streamed FD/path/lease; a complete sweep of all held rows and their
+# ancestors runs at stream start/end and at least every SWEEP_SECONDS or
+# SWEEP_TICKS blocks, and every explicit union.check() decision point stays a
+# complete sweep. Nothing observed is cached across sweeps.
+SWEEP_SECONDS=.25
+SWEEP_TICKS=1024
+PROGRESS_BYTES=512<<20
+
+def progress(phase,done,total,started):
+    """Bounded guardian stderr marker for long held-source phases (no paths)."""
+    print('task_custody progress phase=%s bytes=%d/%d elapsed=%.1fs'%(phase,done,total,time.monotonic()-started),
+          file=sys.stderr,flush=True)
+
+def full_hash(fd,size,check=lambda:None,phase=None):
+    digest=hashlib.sha256();at=0;started=time.monotonic();marker=PROGRESS_BYTES
     while at<size:
-        check();block=os.pread(fd,min(1<<20,size-at),at);need(block,'short immutable input read');digest.update(block);at+=len(block)
+        check();block=os.pread(fd,min(HASH_BLOCK,size-at),at);need(block,'short immutable input read');digest.update(block);at+=len(block)
+        if phase is not None and size>=PROGRESS_BYTES and (at>=marker or at==size):
+            progress(phase,at,size,started);marker+=PROGRESS_BYTES
     check();need(not os.pread(fd,1,size),'unexpected extent');return digest.hexdigest()
 
 class LeaseUnion:
     """One guardian-only SIGIO latch, including subsequently frozen sources."""
     def __init__(self):
         self.rows={};self.broken=False;self.previous=signal.getsignal(signal.SIGIO);self.closed=False
+        # Lexical names only (fixed at admission); every sweep re-observes them.
+        self._ancestors=set();self._ticks=0;self._swept=time.monotonic()
         signal.signal(signal.SIGIO,self._break)
     def _break(self,*_):self.broken=True
     def add(self,row):
@@ -81,22 +119,47 @@ class LeaseUnion:
         try:
             before=os.fstat(fd);need(stat.S_ISREG(before.st_mode) and before.st_size==row['bytes'],'regular exact input')
             fcntl.fcntl(fd,fcntl.F_SETOWN,os.getpid());fcntl.fcntl(fd,fcntl.F_SETLEASE,fcntl.F_RDLCK)
-            entry={'fd':fd,'pin':dict(row),'identity':identity(before),'full_SHA_admitted':False};self.rows[name]=entry
-            need(full_hash(fd,row['bytes'],self.check)==row['sha256'],'full leased SHA mismatch')
-            entry['full_SHA_admitted']=True;self.check();return entry
+            entry={'fd':fd,'pin':dict(row),'identity':identity(before),'full_SHA_admitted':False,
+                   'lexical':(name,tuple(str(q) for q in (p,*p.parents)))};self.rows[name]=entry
+            # Entry-local per block (scheduled complete sweeps); a complete
+            # sweep per tiny admitted source made admission O(rows^2).
+            self._entry(entry)
+            need(full_hash(fd,row['bytes'],lambda:self.tick(entry),'admit-full-sha')==row['sha256'],'full leased SHA mismatch')
+            # Close the stream: exact entry path/lease and its own ancestors now;
+            # all other rows at the next scheduled or explicit complete sweep.
+            self._entry(entry,ancestors=True);self._ancestors.update(entry['lexical'][1])
+            entry['full_SHA_admitted']=True;self.tick(entry);return entry
         except BaseException:
             self.rows.pop(name,None);os.close(fd);raise
+    def _entry(self,entry,ancestors=False):
+        """One held FD: latch, owner, read-only lease, inode and path identity."""
+        need(not self.broken and not self.closed,'guardian lease break requested')
+        fd=entry['fd'];info=os.fstat(fd)
+        need(stat.S_ISREG(info.st_mode) and fcntl.fcntl(fd,fcntl.F_GETFL)&os.O_ACCMODE==os.O_RDONLY and
+             fcntl.fcntl(fd,fcntl.F_GETLEASE)==fcntl.F_RDLCK and fcntl.fcntl(fd,fcntl.F_GETOWN)==os.getpid() and
+             identity(info)==entry['identity'] and identity(os.stat(entry['lexical'][0]))==entry['identity'],
+             'guardian lease/path identity changed')
+        if ancestors:need(not any(stat.S_ISLNK(os.lstat(q).st_mode) for q in entry['lexical'][1]),'guardian original ancestor became a symlink')
+    def tick(self,entry):
+        """Per-block streaming guard; escalates to a complete sweep on schedule."""
+        self._entry(entry);self._ticks+=1
+        if self._ticks>=SWEEP_TICKS or time.monotonic()-self._swept>=SWEEP_SECONDS:self.check()
+    def stream_guard(self,entry):
+        need(self.rows.get(entry['lexical'][0]) is entry,'stream guard requires a currently held row')
+        self.check()
+        return lambda:self.tick(entry)
     def check(self):
         need(not self.broken,'guardian lease break requested')
-        ancestors=set()
-        for path,row in self.rows.items():
-            p=Path(path);ancestors.update((p,*p.parents))
-            info=os.fstat(row['fd'])
-            need(stat.S_ISREG(info.st_mode) and fcntl.fcntl(row['fd'],fcntl.F_GETFL)&os.O_ACCMODE==os.O_RDONLY and
-                 fcntl.fcntl(row['fd'],fcntl.F_GETLEASE)==fcntl.F_RDLCK and fcntl.fcntl(row['fd'],fcntl.F_GETOWN)==os.getpid() and
-                 identity(info)==row['identity'] and identity(p.stat())==row['identity'],'guardian lease/path identity changed')
-        # Deduplicate only within this checkpoint; never cache namespace checks.
-        need(not any(p.is_symlink() for p in ancestors),'guardian original ancestor became a symlink')
+        pid=os.getpid();ancestors=self._ancestors
+        for name,row in self.rows.items():
+            if 'lexical' not in row:ancestors=ancestors|{str(q) for q in (Path(name),*Path(name).parents)}
+            fd=row['fd'];info=os.fstat(fd)
+            need(stat.S_ISREG(info.st_mode) and fcntl.fcntl(fd,fcntl.F_GETFL)&os.O_ACCMODE==os.O_RDONLY and
+                 fcntl.fcntl(fd,fcntl.F_GETLEASE)==fcntl.F_RDLCK and fcntl.fcntl(fd,fcntl.F_GETOWN)==pid and
+                 identity(info)==row['identity'] and identity(os.stat(name))==row['identity'],'guardian lease/path identity changed')
+        # Lexical ancestor names are fixed; their lstat is re-observed every sweep.
+        need(not any(stat.S_ISLNK(os.lstat(q).st_mode) for q in ancestors),'guardian original ancestor became a symlink')
+        self._ticks=0;self._swept=time.monotonic()
     def raw(self,row,maximum):
         entry=self.add(row);need(row['bytes']<=maximum,'bounded metadata/source');raw=os.pread(entry['fd'],row['bytes']+1,0)
         need(len(raw)==row['bytes'] and hashlib.sha256(raw).hexdigest()==row['sha256'],'held raw snapshot differs');self.check();return raw
@@ -108,7 +171,10 @@ class LeaseUnion:
         error=None
         try:
             self.check()
-            for row in self.rows.values():need(full_hash(row['fd'],row['pin']['bytes'],self.check)==row['pin']['sha256'],'late leased full SHA differs')
+            for row in self.rows.values():
+                guard=(lambda row=row:self.tick(row)) if 'lexical' in row else self.check
+                need(full_hash(row['fd'],row['pin']['bytes'],guard,'late-full-sha')==row['pin']['sha256'],'late leased full SHA differs')
+            self.check()
         except BaseException as caught:error=caught
         for row in reversed(list(self.rows.values())):
             try:fcntl.fcntl(row['fd'],fcntl.F_SETLEASE,fcntl.F_UNLCK)
@@ -225,15 +291,21 @@ class Owner:
         args=list(self.expected);serial=args.index('-serial')+1;debug=args.index('-debugcon')+1
         args[serial]='file:/proc/self/fd/%d'%rights[0];args[debug]='file:/proc/self/fd/%d'%rights[1]
         need(threading.active_count()==1,'guardian fork/exec requires its single thread')
+        attempt=self.epoch_context['attempt'] if hasattr(self,'epoch_context') else None
+        # The sealed policy is inherited by the TARGET (QEMU), never the
+        # controller: prove the guardian FD number is the sealed memfd now.
+        if attempt is not None:attempt.check();policy_fds=(attempt.policy_fd,)
+        else:policy_fds=()
         source=self.union.add(self.executable_pin);gate_read,gate_write=os.pipe()
         try:
             launch=[str(Path(sys.executable).resolve()),'-B','-c',GATE_CODE,str(gate_read),str(source['fd']),json.dumps(args)]
-            self.process=subprocess.Popen(launch,cwd=self.output,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=rights[2],pass_fds=(rights[0],rights[1],gate_read,source['fd'],*(([self.epoch_context['attempt'].policy_fd]) if hasattr(self,'epoch_context') else [])),preexec_fn=self.group.place_before_exec)
+            self.process=subprocess.Popen(launch,cwd=self.output,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=rights[2],pass_fds=(rights[0],rights[1],gate_read,source['fd'],*policy_fds),preexec_fn=self.group.place_before_exec)
             self.actual_args=args;self.record['owned_pid']=self.process.pid
             # Target exec remains gated even if pidfd allocation/ACK fails.
             self.pidfd=os.pidfd_open(self.process.pid,0)
             self.union.check();self.group.check()
             need(not self.exited(),'gated launcher exited before pidfd admission')
+            if attempt is not None:self.assert_child_policy_fd(attempt)
             self.start=time.monotonic()
             need(os.write(gate_write,b'X')==1,'target gate release failed')
             self.target_released=True;self.record['VM_launch_may_have_occurred']=True
@@ -254,6 +326,14 @@ class Owner:
             if hasattr(self,'epoch_context'):
                 self.epoch_context['attempt'].bind_child(binding,self.epoch_context['listener'])
         return {'pid':self.process.pid,'argv':args}
+    def assert_child_policy_fd(self,attempt):
+        """Before the exec gate opens: the gated child's own FD N is the sealed policy memfd."""
+        attempt.check();fd=attempt.policy_fd
+        need(type(fd) is int and fd>2,'sealed policy FD number required')
+        child=os.stat('/proc/%d/fd/%d'%(self.process.pid,fd))
+        need((child.st_dev,child.st_ino,child.st_size)==tuple(attempt.policy_identity[:3]),'actual gated child inherited policy FD differs')
+        need(not self.exited(),'gated launcher exited during policy FD admission')
+        self.record['target_policy_fd_identity_verified_before_exec']=True
     def assert_owned(self):
         need(self.process is not None and self.pidfd is not None and not self.exited(),'owned live pidfd required')
         need(os.readlink('/proc/self/fd/%d'%self.pidfd)=='anon_inode:[pidfd]','actual pidfd required')
@@ -495,11 +575,15 @@ class Owner:
                                          'actual completed HostGrant/owner resume required before controller observation')
         command,arguments,deadline = (request[k] for k in ('command','arguments','deadline'))
         need(type(deadline) in (int,float) and math.isfinite(deadline), 'finite controller operation deadline')
-        allowed = {'query-blockstats','query-status','query-block','query-named-block-nodes','query-pci','stop','quit','screendump','pmemsave','human-monitor-command'}
+        allowed = {'query-blockstats','query-status','query-block','query-named-block-nodes','query-pci','stop','quit','screendump','pmemsave','human-monitor-command','input-send-event','send-key'}
         need(type(command) is str and command in allowed and (arguments is None or type(arguments) is dict),
              'scoped post-grant capture or cleanup command required')
         if command in {'query-blockstats','query-status','query-block','query-named-block-nodes','query-pci','stop','quit'}:
             need(arguments is None,'no arguments for scoped query/pause/quit')
+        elif command in ('input-send-event','send-key'):
+            need(context['capture'].input_arguments_valid(command,arguments),'bounded scoped input command')
+            context['input_events'] = context.get('input_events',0)+context['capture'].input_events_count(command,arguments)
+            need(context['input_events'] <= context['capture'].INPUT_MAX_EVENTS,'finite scripted input event budget')
         elif command == 'human-monitor-command':
             need(type(arguments) is dict and set(arguments) == {'command-line'},'exact readonly HMP command')
             line = arguments['command-line'];allowed_addresses = {
@@ -652,6 +736,7 @@ class Server:
     def dispatch(self,row,rights):
         need(set(row)=={'id','op','params'} and type(row['id']) is int and row['id']==self.sequence+1 and type(row['params']) is dict,'strict ordered request')
         self.sequence=row['id'];op,p=row['op'],row['params']
+        self.in_flight=op if type(op) is str and re.fullmatch('[a-z-]{1,32}',op) else '<invalid-op>'
         if op=='original':
             need(not rights and set(p)=={'pin'},'one exact original pin and no request rights')
             self.owner.union.check();name,entry=self.original(p['pin'])
@@ -702,6 +787,7 @@ class Server:
         try:
             result,returned=self.dispatch(row,rights)
             self.channel.send({'id':row['id'],'ok':True,'result':result},returned)
+            self.in_flight=None
         finally:
             for fd in rights:os.close(fd)
 
@@ -738,7 +824,7 @@ def configure_native_reaper(owner,sources,union,*,epoch_context=None):
 
 def admit_optional_native_inputs(manifest,built,union,builder):
     """Hold only explicitly declared optional originals, never infer PCI authority."""
-    sizes={'VGACFG.BIN':136,'VGAROM.BIN':65536,'W98PERS.BIN':192}
+    sizes={'VGACFG.BIN':136,'VGAROM.BIN':65536,'W98PERS.BIN':192,'W98INPT.BIN':96}
     maps={}
     for field in ('optional_native_inputs','optional_native_provenance'):
         declared=manifest.get(field,{});actual=built.get(field,{})
@@ -786,7 +872,7 @@ def admit_pci_preparation(manifest,plan,sources,union):
     union.check();return result
 
 
-def check_original_observation(profile,proof,producers,union):
+def check_original_observation(profile,proof,producers,union,epoch_context=None):
     """Re-derive the phase observations from the guardian's held disk FD.
 
     Both the observer and FAT reader execute their independently pinned held
@@ -797,27 +883,226 @@ def check_original_observation(profile,proof,producers,union):
     constructor=admitted_module('admitted_original_fat',producers[1],union)
     need(callable(getattr(observer,'observe',None)),'source-admitted original observer required')
     entry=union.add(proof['source_disk']);union.check()
+    # Per-read guard: latch + exact disk FD/path/lease every FAT read, complete
+    # namespace sweep on schedule (perf-b9: was a full O(rows) sweep twice per
+    # cluster, the measured admission stall). Complete sweeps bracket the call.
+    started=time.monotonic();progress('original-observation',0,proof['source_disk']['bytes'],started)
+    stream_check=union.stream_guard(entry)
+    if epoch_context is not None:
+        attempt=epoch_context['attempt'];outer_guard=epoch_context['guard']
+        immutable_deadline=attempt.original_deadline_ns;next_outer=[0.0]
+        def observation_check():
+            stream_check()
+            need(attempt.original_deadline_ns==immutable_deadline,'original observation deadline changed')
+            attempt.check()
+            now=time.monotonic()
+            if now>=next_outer[0]:
+                outer_guard();next_outer[0]=now+SWEEP_SECONDS
+        observation_check()
+    else:
+        observation_check=stream_check
     observed=observer.observe(entry['fd'],proof['source_disk']['bytes'],
-                              proof['observed_windows_path'][3:],constructor,union.check)
-    union.check()
+                              proof['observed_windows_path'][3:],constructor,observation_check)
+    observation_check()
+    union.check();progress('original-observation-done',proof['source_disk']['bytes'],proof['source_disk']['bytes'],started)
     fields={'observed_windows_path','observed_members','boot_sectors'}
     need(type(observed) is dict and set(observed)==fields and
          observed=={name:profile[name] for name in fields},
          'original phase observations differ from actual held disk bytes')
 
 
+def _local_pin(path):
+    """Hash one fresh local producer output; union.add re-admits it under lease."""
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
+    try:
+        st=os.fstat(fd);need(stat.S_ISREG(st.st_mode) and 0<st.st_size<=16<<30,'regular bounded producer output')
+        return {'path':str(Path(path)),'bytes':st.st_size,'sha256':full_hash(fd,st.st_size)}
+    finally:os.close(fd)
+
+
+def prepare_original_intent(intent,union,sources,guard):
+    """Original-observation device epoch: real retained Attempt, no DOS3 cohort.
+
+    The selected original disk is only read; the native builder copies it into
+    the fresh ESP, which becomes the trial's mutable target. The live Attempt
+    carries the source-built StdVGA config/ROM and optional persistence config
+    through the existing COM2/fw_cfg HostGrant. Nothing here stages a guest
+    nonce, registers a GOP driver, or grants DOS replacement/release status.
+    Returns internal live objects only, never a resumable receipt.
+    """
+    expected={'schema','repo','sources','limits','timeout','lineage','producers','native_inputs',
+              'optional_native_inputs','optional_native_provenance','raw_bars','firmware','private_root','assembly_scratch'}
+    need(type(intent) is dict and expected<=set(intent)<=expected|{'input_recipe','owned_input'} and intent['schema']==ORIGINAL_EPOCH_INTENT_SCHEMA,
+         'exact private original-observation device epoch intent required')
+    need(type(intent['timeout']) is int and 20<=intent['timeout']<=900,'original bounded observation/preparation budget')
+    need(NATIVE_EPOCH_SOURCE in sources and GOP_NONCE_SOURCE not in sources and GOP_CONSTRUCTOR_SOURCE not in sources,
+         'original phase holds the epoch source and no DOS3 GOP staging producers')
+    need(type(intent['lineage']) is list and len(intent['lineage'])==1 and type(intent['producers']) is list and len(intent['producers'])==2,
+         'exact one original observation profile and two producer pins')
+    need(type(intent['native_inputs']) is dict and set(intent['native_inputs'])=={'DISK.IMG','SEABIOS.BIN','WIN98CFG.BIN','KERNEL32.BIN','KERNEL64.BIN','WIN64.IMG'},
+         'six original native builder inputs')
+    optional=intent['optional_native_inputs']
+    need(type(optional) is dict and {'VGACFG.BIN','VGAROM.BIN'}<=set(optional)<={'VGACFG.BIN','VGAROM.BIN','W98PERS.BIN'},
+         'source-built StdVGA pair required; persistence optional')
+    need(type(intent['optional_native_provenance']) is dict and set(intent['optional_native_provenance'])=={'vga-build-receipt'},
+         'exact separately pinned source-bound VGA producer required')
+    need(type(intent['firmware']) is dict and set(intent['firmware'])=={'firmware_code','firmware_vars','qemu'},'exact firmware/executable input pins')
+    input_flags=owned_input_flags(intent['owned_input']) if 'owned_input' in intent else 0
+    roles={'1'}|({'2'} if 'W98PERS.BIN' in optional else set())
+    need(type(intent['raw_bars']) is dict and set(intent['raw_bars'])==roles and
+         all(type(words) is list and len(words)==6 and all(type(word) is int and 0<=word<1<<32 for word in words)
+             for words in intent['raw_bars'].values()),'literal six raw BAR words for exactly the selected roles')
+    need(intent['assembly_scratch'] is None or type(intent['assembly_scratch']) is str,'optional explicit private assembly path required')
+    root=Path(intent['private_root']);st=os.lstat(root)
+    need(root.is_absolute() and root.resolve()==root and stat.S_ISDIR(st.st_mode) and st.st_uid==os.geteuid() and st.st_mode&0o777==0o700,
+         'existing owned mode0700 private preparation root required')
+    names={'native':root/'native','vm':root/'vm','input':root/'input'}
+    need(not any(os.path.lexists(p) for p in (*names.values(),root/'generated-custody-manifest.json')),'fresh one-shot preparation outputs required')
+    originals=[*intent['lineage'],*intent['producers'],*intent['native_inputs'].values(),*optional.values(),
+               *intent['optional_native_provenance'].values(),*intent['firmware'].values()]
+    for row in originals:pin(row,16<<30);union.add(row)
+    if 'input_recipe' in intent:pin(intent['input_recipe'],INPUT_RECIPE_MAX);union.add(intent['input_recipe'])
+    guard()
+    # Same selected bytes as the held observation profile; the full observer
+    # re-derivation runs again inside admit_manifest on the generated plan.
+    profile=union.json(intent['lineage'][0],4<<20)
+    need(type(profile) is dict and profile.get('source_disk')==intent['native_inputs']['DISK.IMG'],
+         'builder disk must be the exact observed original source disk')
+    epoch=admitted_module('original_epoch_live_policy',sources[NATIVE_EPOCH_SOURCE],union)
+    native_builder=admitted_module('original_epoch_native_builder',sources[HELPERS[0]],union)
+    preparer=admitted_module('original_epoch_vm_preparer',sources[HELPERS[1]],union)
+    for path in native_builder.source_files():union.add(_local_pin(path))
+    deadline_ns=int((time.monotonic()+2*intent['timeout']+16)*1e9)
+    for _ in range(16):
+        if int((deadline_ns/1e9)*1e9)==deadline_ns:break
+        deadline_ns-=1
+    need(int((deadline_ns/1e9)*1e9)==deadline_ns,'exact original QMP deadline representation required')
+    bars={int(role):tuple(words) for role,words in intent['raw_bars'].items()}
+    def borrowed(name):
+        if name not in optional:return None
+        row=optional[name];return epoch.PinnedFD(union.rows[row['path']]['fd'],row)
+    attempt=epoch.Attempt(borrowed('VGACFG.BIN'),borrowed('VGAROM.BIN'),borrowed('W98PERS.BIN'),bars,deadline_ns,input_flags=input_flags)
+    listener=None;built_optional=dict(optional)
+    try:
+        preparation_stop=time.monotonic()+intent['timeout']
+        # The one pre-exec clone is the builder's ESP copy of the original disk.
+        claim=attempt.reserve_staging()
+        def check():
+            guard();union.check();attempt.check()
+            need(attempt.staging_claim is claim and attempt.owner is None and not attempt.consumed,'same prospective pre-exec Attempt must remain held')
+            need(time.monotonic()<preparation_stop,'original preparation phase budget consumed')
+        flags={'DISK.IMG':'disk','SEABIOS.BIN':'rom','WIN98CFG.BIN':'config','KERNEL32.BIN':'kernel32',
+               'KERNEL64.BIN':'kernel64','WIN64.IMG':'win64-img','VGACFG.BIN':'vga-config','VGAROM.BIN':'vga-rom',
+               'W98PERS.BIN':'persistence-config','W98INPT.BIN':'input-policy','vga-build-receipt':'vga-build-receipt'}
+        if input_flags:
+            # W98INPT.BIN comes only from THIS live reserved Attempt (nonce +
+            # VGA config SHA sealed in its policy memfd), written once into a
+            # fresh owned file and then held under the same full-SHA read lease.
+            raw=attempt.input_policy();check()
+            os.mkdir(names['input'],0o700);target=names['input']/'W98INPT.BIN'
+            fd=os.open(target,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o400)
+            try:
+                need(os.write(fd,raw)==len(raw)==96,'complete owned input policy write');os.fsync(fd)
+            finally:os.close(fd)
+            row=_local_pin(target);need(row['bytes']==96 and row['sha256']==hashlib.sha256(raw).hexdigest(),'generated input policy readback differs')
+            union.add(row);need(union.raw(row,96)==raw,'held input policy bytes differ');built_optional['W98INPT.BIN']=row
+        args=['--out',str(names['native'])]
+        for name,row in {**intent['native_inputs'],**built_optional,**intent['optional_native_provenance']}.items():
+            args+=['--'+flags[name],row['path'],'--'+flags[name]+'-sha256',row['sha256']]
+        if intent['assembly_scratch'] is not None:args+=['--assembly-scratch',intent['assembly_scratch']]
+        returned=[];check();native_builder.main(args,receipt_sink=returned.append);check()
+        result_pin=_local_pin(names['native']/'result.json');union.add(result_pin);built=union.json(result_pin)
+        need(returned==[union.raw(result_pin,16<<20)] and built.get('VM_executed') is False and
+             built.get('input_pins',{}).get('DISK.IMG')==intent['native_inputs']['DISK.IMG'],
+             'actual native builder return must equal leased output over the observed original disk')
+        need(not input_flags or (built.get('optional_native_inputs')==built_optional and
+                                 union.raw(built_optional['W98INPT.BIN'],96)==attempt.input_policy()),
+             'builder optional map/held input policy must equal the live Attempt selection')
+        esp={'path':str(names['native']/built['artifact']['path']),'bytes':built['artifact']['bytes'],'sha256':built['artifact']['sha256']}
+        union.add(esp)
+        binding={'policy_fd':attempt.policy_fd,'listener_path':str(names['vm']/'epoch.sock')}
+        if 'W98PERS.BIN' in optional:binding['modern_persistence_low32']=True
+        args=['--out',str(names['vm'])]
+        for name,row in {'esp':esp,'build-receipt':result_pin,**{k.replace('_','-'):v for k,v in intent['firmware'].items()}}.items():
+            args+=['--'+name,row['path'],'--'+name+'-sha256',row['sha256']]
+        returned=[];check();preparer.main(args,receipt_sink=returned.append,epoch_binding=binding);check()
+        plan_pin=_local_pin(names['vm']/'vm-plan.json');union.add(plan_pin);plan=union.json(plan_pin)
+        need(returned==[union.raw(plan_pin,16<<20)] and plan.get('prospective_native_epoch_recipe')==binding,
+             'actual fresh VM preparation return differs from same live policy recipe')
+        listener=epoch.PrivateListener(names['vm']/'epoch.sock')
+        policy={'policy_sha256':hashlib.sha256(attempt.policy).hexdigest(),'nonce_sha256':hashlib.sha256(attempt.nonce).hexdigest(),
+                'original_host_deadline_ns':attempt.original_deadline_ns}
+        manifest={'schema':ORIGINAL_MANIFEST_SCHEMA,'repo':intent['repo'],'sources':sources,'limits':intent['limits'],
+                  'timeout':intent['timeout'],'plan':plan_pin,'lineage':intent['lineage'],'producers':intent['producers'],
+                  'optional_native_inputs':built_optional,'optional_native_provenance':intent['optional_native_provenance'],
+                  # Intent raw_bars keep JSON string keys; the declared roles are
+                  # the same integer roles the live Attempt/admission compare.
+                  'original_device_epoch':{'live_policy':policy,'selected_roles':sorted(int(role) for role in roles),
+                                           **{name:False for name in ORIGINAL_EPOCH_FALSE}}}
+        if 'input_recipe' in intent:manifest['input_recipe']=intent['input_recipe']
+        if input_flags:manifest['owned_input']=dict(intent['owned_input'])
+        check();persist(root/'generated-custody-manifest.json',manifest)
+        return manifest,{'module':epoch,'attempt':attempt,'listener':listener,'recipe_binding':binding,
+                         'live_policy':policy,'guard':guard,'phase':ORIGINAL_MANIFEST_SCHEMA}
+    except BaseException:
+        try:
+            if listener is not None:listener.close()
+        finally:attempt.close()
+        raise
+
+
+def admit_original_epoch(manifest,sources,epoch_context):
+    """Bind the original manifest to the same in-process live Attempt."""
+    declared=manifest['original_device_epoch']
+    need(type(epoch_context) is dict and epoch_context.get('phase')==ORIGINAL_MANIFEST_SCHEMA,
+         'original-observation live Attempt required; DOS3 GOP contexts are refused')
+    need(NATIVE_EPOCH_SOURCE in sources and GOP_NONCE_SOURCE not in sources and GOP_CONSTRUCTOR_SOURCE not in sources,
+         'held epoch source without DOS3 GOP staging producers required')
+    epoch_context['guard']();attempt=epoch_context['attempt']
+    need(type(attempt) is getattr(epoch_context['module'],'Attempt',None) and attempt.staging_claim is not None and
+         attempt.owner is None and not attempt.consumed,'retained unbound pre-exec original Attempt required')
+    attempt.check()
+    actual={'policy_sha256':hashlib.sha256(attempt.policy).hexdigest(),'nonce_sha256':hashlib.sha256(attempt.nonce).hexdigest(),
+            'original_host_deadline_ns':attempt.original_deadline_ns}
+    optional=manifest.get('optional_native_inputs',{})
+    roles=sorted({1}|({2} if 'W98PERS.BIN' in optional else set()))
+    need(type(declared) is dict and set(declared)=={'live_policy','selected_roles',*ORIGINAL_EPOCH_FALSE} and
+         declared['live_policy']==actual==epoch_context['live_policy'] and declared['selected_roles']==roles and
+         all(declared[name] is False for name in ORIGINAL_EPOCH_FALSE),'same original owner live policy and false grants required')
+    need({'VGACFG.BIN','VGAROM.BIN'}<=set(optional) and
+         [source.pin for source in attempt.sources]==[optional[name] for name in ('VGACFG.BIN','VGAROM.BIN','W98PERS.BIN') if name in optional] and
+         sorted(d.role for d in attempt.expected.devices)==roles,'live Attempt must hold exactly the declared VGA/persistence pins')
+    flags=owned_input_flags(manifest['owned_input']) if 'owned_input' in manifest else 0
+    need(attempt.expected.input_flags==flags and ('W98INPT.BIN' in optional)==bool(flags),
+         'declared owned input option must equal the live Attempt policy option')
+    if flags:
+        raw=attempt.expected.input_policy(attempt.nonce);row=optional['W98INPT.BIN']
+        need(attempt.policy[216:248]==hashlib.sha256(raw).digest() and row['bytes']==96 and
+             row['sha256']==hashlib.sha256(raw).hexdigest(),'W98INPT.BIN must be the current Attempt nonce/VGA/policy-sealed bytes')
+
+
 def admit_manifest(manifest,union,*,epoch_context=None):
     fields={'schema','plan','repo','sources','lineage','producers','limits','timeout'}
     need(type(manifest) is dict and fields<=set(manifest) and
-         set(manifest)<=fields|{'preparation_receipt','optional_native_inputs','optional_native_provenance','pci_preparation','gop_cohort'} and
+         set(manifest)<=fields|{'preparation_receipt','optional_native_inputs','optional_native_provenance','pci_preparation','gop_cohort','original_device_epoch','input_recipe','owned_input'} and
          manifest['schema'] in ('shizukuos.native-custody-manifest.v1',ORIGINAL_MANIFEST_SCHEMA),'exact task manifest')
     original_phase=manifest['schema']==ORIGINAL_MANIFEST_SCHEMA
     if original_phase:
-        need('gop_cohort' not in manifest and epoch_context is None,
-             'original observation phase has no DOS-replacement GOP cohort or live epoch grant')
+        # A distinct original-observation device epoch, never the DOS3 cohort.
+        need('gop_cohort' not in manifest and ('original_device_epoch' in manifest)==(epoch_context is not None),
+             'original observation phase has no DOS-replacement GOP cohort; live epoch only via its own Attempt')
+    else:
+        need('original_device_epoch' not in manifest and (epoch_context is None or 'phase' not in epoch_context),
+             'DOS3 replacement manifests cannot carry an original-observation epoch')
     need(type(manifest['timeout']) is int and 20<=manifest['timeout']<=900,'existing observation timeout')
     repo=Path(manifest['repo']);need(repo.is_absolute() and repo.resolve()==repo,'canonical source root')
     sources=admit_runtime_sources(repo,manifest['sources'],union)
+    need(('owned_input' in manifest)==('W98INPT.BIN' in manifest.get('optional_native_inputs',{})) and
+         ('owned_input' not in manifest or (original_phase and epoch_context is not None)),
+         'owned input option only with its W98INPT.BIN and the live original-phase Attempt')
+    if 'input_recipe' in manifest:
+        need(original_phase,'scripted input recipe only in the original-userland phase')
+        pin(manifest['input_recipe'],INPUT_RECIPE_MAX);need(union.add(manifest['input_recipe'])['full_SHA_admitted'] is True,'held full-SHA input recipe lease')
     plan=union.json(manifest['plan']);out=Path(manifest['plan']['path']).parent
     need(plan.get('status')=='PASS_FRESH_PRIVATE_VM_INPUTS_PREPARED_NOT_RUN' and plan.get('private') is True and plan.get('VM_executed') is False and plan.get('source_bound_ESP') is True and plan.get('originals_before_after_match') is True,'fresh private unexecuted plan')
     need(set(plan['input_pins'])=={'esp','build_receipt','firmware_code','firmware_vars','qemu'},'five original preparation inputs')
@@ -826,7 +1111,7 @@ def admit_manifest(manifest,union,*,epoch_context=None):
     need(set(built['input_pins'])=={'DISK.IMG','SEABIOS.BIN','WIN98CFG.BIN','KERNEL32.BIN','KERNEL64.BIN','WIN64.IMG'},'six original builder inputs')
     for item in built['input_pins'].values():union.add(item)
     if (any(field in manifest or field in built for field in ('optional_native_inputs','optional_native_provenance')) or
-        any('SHZDOS/'+name in built.get('members',{}) for name in ('VGACFG.BIN','VGAROM.BIN','W98PERS.BIN'))):
+        any('SHZDOS/'+name in built.get('members',{}) for name in ('VGACFG.BIN','VGAROM.BIN','W98PERS.BIN','W98INPT.BIN'))):
         builder=admitted_module('admitted_optional_builder',sources[HELPERS[0]],union)
         admit_optional_native_inputs(manifest,built,union,builder)
     need(built['artifact']['bytes']==plan['input_pins']['esp']['bytes'] and built['artifact']['sha256']==plan['input_pins']['esp']['sha256'],'prepared ESP/builder crosslink')
@@ -845,8 +1130,9 @@ def admit_manifest(manifest,union,*,epoch_context=None):
     parser=admitted_module('admitted_disk_lineage',manifest['sources'][SOURCES[-1]],union)
     raw=[union.raw(row,maximum) for row,maximum in zip(lineage,((4<<20,) if original_phase else (1<<20,4<<20,16<<20)))]
     cohort=None
-    need(('gop_cohort' in manifest)==(epoch_context is not None),'GOP cohort requires internal retained live Attempt')
-    if epoch_context is not None:
+    if original_phase and epoch_context is not None:admit_original_epoch(manifest,sources,epoch_context)
+    need(original_phase or ('gop_cohort' in manifest)==(epoch_context is not None),'GOP cohort requires internal retained live Attempt')
+    if epoch_context is not None and not original_phase:
         need(GOP_NONCE_SOURCE in sources and GOP_CONSTRUCTOR_SOURCE in sources,'held GOP production source closure required')
         epoch_context['guard']();attempt=epoch_context['attempt'];attempt.check()
         actual={'policy_sha256':hashlib.sha256(attempt.policy).hexdigest(),
@@ -868,7 +1154,7 @@ def admit_manifest(manifest,union,*,epoch_context=None):
         need(type(profile.get('request')) is dict,'explicit held original-phase request required')
         request_raw=union.raw(profile['request'],1<<20)
         proof=parser.admit_original(raw,lineage,built['input_pins']['DISK.IMG'],producers,request_raw=request_raw)
-        check_original_observation(profile,proof,producers,union)
+        check_original_observation(profile,proof,producers,union,epoch_context)
     else:
         proof=(parser.admit(raw,lineage,built['input_pins']['DISK.IMG'],producers) if cohort is None else
                parser.admit(raw,lineage,built['input_pins']['DISK.IMG'],producers,gop_cohort=cohort))
@@ -920,6 +1206,68 @@ def persist(path,row):
     try:os.fsync(fd)
     finally:os.close(fd)
 
+FAILURE_DETAIL_BYTES=8192;FAILURE_TRACEBACK_BYTES=16384
+GRANT_FAILURE_INTS=('failure_after_grant_bytes','grant_bytes_written','transport_calls')
+
+def bounded_text(text,limit,tail=False):
+    raw=str(text).encode('utf-8','backslashreplace');raw=raw[-limit:] if tail else raw[:limit]
+    return raw.decode('utf-8','ignore')
+
+def transport_failure_facts(diagnostics):
+    """Bounded copy of native_epoch_host HostGrant.transport_failure.
+
+    Nonce secrecy: READY/REPORT carry the attempt nonce at frame offset 16, so
+    only the 16-byte frame header hex is kept and chunk-head hex is dropped.
+    """
+    if type(diagnostics) is not dict:return None
+    out={}
+    for key in ('schema','phase','direction','kind','error_class','message'):
+        if type(diagnostics.get(key)) is str:out[key]=bounded_text(diagnostics[key],512)
+    for key in ('frame_bytes_declared','frame_bytes_transferred','surplus_bytes','phase_stream_bytes','phase_io_calls','elapsed_ms','shared_transport_calls'):
+        if type(diagnostics.get(key)) is int:out[key]=diagnostics[key]
+    if type(diagnostics.get('segments_truncated')) is bool:out['segments_truncated']=diagnostics['segments_truncated']
+    for key,limit in (('frame_head_hex',32),('surplus_head_hex',64)):
+        if type(diagnostics.get(key)) is str and re.fullmatch('[0-9a-f]*',diagnostics[key]):out[key]=diagnostics[key][:limit]
+    segments=diagnostics.get('segment_lengths')
+    if type(segments) is list:out['segment_lengths']=[n for n in segments[:64] if type(n) is int]
+    console=diagnostics.get('pre_ready_console')
+    if type(console) is dict:
+        out['pre_ready_console']={k:(console[k] if type(console[k]) is int else bounded_text(console[k],64)) for k in ('bytes','sha256','head_hex','tail_hex')
+                                  if type(console.get(k)) is int or (type(console.get(k)) is str and re.fullmatch('[0-9a-f]*',console[k]))}
+    return out
+
+def grant_failure_facts(owner,error=None):
+    """Scalar post-grant exchange facts only: no nonce, policy, report or frame body bytes."""
+    context=getattr(owner,'epoch_context',None);grant=context.get('grant') if type(context) is dict else None
+    facts={}
+    if grant is not None:
+        facts.update({name:getattr(grant,name) for name in GRANT_FAILURE_INTS if type(getattr(grant,name,None)) is int})
+        if getattr(grant,'transport_failure',None) is not None:facts['transport_failure']=transport_failure_facts(grant.transport_failure)
+    if 'transport_failure' not in facts and getattr(error,'transport_diagnostics',None) is not None:
+        facts['transport_failure']=transport_failure_facts(error.transport_diagnostics)
+    return facts or None
+
+def record_actual_failure(owner,error,stage,server):
+    """First actual failure, captured BEFORE recovery/kill/cleanup; never overwritten."""
+    import traceback
+    record=owner.record
+    if 'error' in record:return
+    record['error']=type(error).__name__
+    record['error_detail']=bounded_text(error,FAILURE_DETAIL_BYTES)
+    # Frames are kept even for a huge message: the full bounded message is error_detail.
+    last='%s: %s\n'%(type(error).__name__,bounded_text(error,1024))
+    frames=bounded_text(''.join(traceback.format_tb(error.__traceback__)),FAILURE_TRACEBACK_BYTES-len(last.encode())-64,tail=True)
+    record['error_traceback']='Traceback (most recent call last):\n'+frames+last
+    record['error_stage']={'stage':stage,'rpc_op_in_flight':getattr(server,'in_flight',None),'rpc_sequence':getattr(server,'sequence',None),
+                           'target_launch_attempted':owner.attempted,'target_released':owner.target_released,'VM_executed':record.get('VM_executed') is True}
+    try:
+        facts=grant_failure_facts(owner,error)
+        if facts is not None:record['epoch_exchange_failure']=facts
+    except BaseException as nested:record['epoch_exchange_failure_unavailable']=type(nested).__name__
+    try:print(json.dumps({'native_custody_actual_failure':record['error'],'detail':record['error_detail'],'stage':record['error_stage'],
+                          'traceback':record['error_traceback']},ensure_ascii=True),file=sys.stderr,flush=True)
+    except BaseException:pass
+
 def finish_task(owner,controller,group,channel,out,failure):
     """After proven task quiescence, cleanup errors cannot skip failure receipt."""
     actual_reaped=owner.confirm_reaped();errors={}
@@ -931,8 +1279,12 @@ def finish_task(owner,controller,group,channel,out,failure):
         try:action()
         except BaseException as error:failure=failure or error;errors[name]=type(error).__name__
     owner.record['terminal_cleanup_errors']=errors
+    if failure is not None and 'error' not in owner.record:owner.record['cleanup_only_failure']=type(failure).__name__
     owner.record['controller_exit_code']=controller.process.returncode if controller is not None and controller.reaped else None
     owner.record['controller_exit_status_verified']=bool(controller is not None and controller.reaped)
+    # Reached only after recovery_tick proved owner, controller and cgroup quiescent.
+    owner.record['controller_reaped']=bool(controller is not None and controller.reaped)
+    owner.record['target_process_existed']=owner.process is not None
     owner.record['status']=('CUSTODY_RELEASED_AFTER_ACTUAL_REAP' if failure is None else 'FAILED_CUSTODY_RELEASED_AFTER_ACTUAL_REAP' if actual_reaped else 'FAILED_CUSTODY_RELEASED_AFTER_PROVEN_EXIT_UNKNOWN_STATUS')
     persist(out/'custody-result.json',owner.record);return failure
 
@@ -992,6 +1344,14 @@ def main():
             manifest,epoch_context=producer.prepare_intent(types.SimpleNamespace(**{name:globals()[name] for name in
                 ('admitted_module','persist','GOP_NONCE_SOURCE','GOP_CONSTRUCTOR_SOURCE','NATIVE_EPOCH_SOURCE','HELPERS')}),
                 manifest,union,sources,preparation_guard)
+        elif manifest.get('schema')==ORIGINAL_EPOCH_INTENT_SCHEMA:
+            preparation_root=Path(manifest['private_root'])
+            def preparation_guard():
+                need(not stopped[0],'guardian cancellation requested')
+                check_bootstrap();union.check();resource_guard(parent,limits,group,capture,preparation_root,
+                    owner is None or owner.start is None)
+            preparation_guard()
+            manifest,epoch_context=prepare_original_intent(manifest,union,sources,preparation_guard)
         plan,built,sources,proof,argv,helper_identity=admit_manifest(manifest,union,epoch_context=epoch_context)
         out=Path(manifest['plan']['path']).parent
         need(not (out/'custody-result.json').exists() and not (out/'native-result.json').exists(),'fresh one-shot native task')
@@ -1006,6 +1366,7 @@ def main():
     try:
         group=TaskGroup(parent,'custody-native',manifest['limits'])
         owner=Owner(union,group,argv,plan['input_pins']['qemu'],manifest['timeout']);owner.output=out;owner.record['disk_lineage']=proof
+        if 'original_device_epoch' in manifest:owner.record['original_device_epoch_at_preparation']=manifest['original_device_epoch']
     except BaseException:
         try:
             if epoch_context is not None:
@@ -1030,18 +1391,29 @@ def main():
         selected=json.dumps(manifest['pci_preparation'],separators=(',',':'),allow_nan=False)
         need(len(selected.encode())<=rpc.MAX_PACKET,'bounded explicit PCI preparation selection')
         command+=['--pci-preparation-json',selected]
-    controller_status=None
+    controller_status=None;stage='controller-preparation'
     try:
+        if 'input_recipe' in manifest:
+            # Compile the held bytes with the admitted capture before spawn; the
+            # controller re-reads them only through the borrowed guardian FD.
+            recipe=manifest['input_recipe'];capture.InputScript(union.raw(recipe,INPUT_RECIPE_MAX),recipe['sha256']);union.check()
+            command+=['--input-recipe',recipe['path'],'--input-recipe-sha256',recipe['sha256']];owner.record['input_recipe_pin']=dict(recipe)
+        if 'owned_input' in manifest:
+            # Selection evidence only: nothing here observed a guest key/mouse delivery.
+            owner.record['owned_input']={'option':dict(manifest['owned_input']),'w98inpt':dict(manifest['optional_native_inputs']['W98INPT.BIN']),
+                                         'status':'NOT_BOOTED_INPUT_OPTION_SELECTED','keyboard_delivery_verified':False,
+                                         'mouse_delivery_verified':False,'win98_input_verified':False}
         configure_native_reaper(owner,manifest['sources'],union,epoch_context=epoch_context)
         if epoch_context is not None:
             owner.configure_epoch_context(epoch_context['attempt'],epoch_context['listener'],capture,epoch_context['guard'])
         need(not stopped[0],'guardian cancellation requested')
+        stage='controller-spawn'
         controller=subprocess.Popen(command,stdin=subprocess.DEVNULL,pass_fds=(rpcfd,runfd,right.fileno()),preexec_fn=group.place_before_exec)
         controller_status=ParentWait(controller);controller_status.pidfd=os.pidfd_open(controller.pid,0);right.close()
         server=Server(rpc.Channel(left,controller.pid),owner,sources,out)
         preparation_stop=time.monotonic()+manifest["timeout"];finalization_stop=None
         owner.record['finalization_budget_seconds']=manifest['timeout']
-        rpc_closed=False
+        rpc_closed=False;stage='controller-observation'
         while controller_status.observe() is None:
             need(not stopped[0],'guardian cancellation requested')
             check_bootstrap();union.check();group.check();resource_guard(parent,manifest['limits'],group,capture,out,owner.start is None)
@@ -1057,6 +1429,7 @@ def main():
                 # retain every guard and the original deadline until that wait.
                 rpc_closed=True
                 owner.record['controller_rpc_EOF_observed']=True
+        stage='controller-exit-admission'
         check_bootstrap();union.check();group.check();resource_guard(parent,manifest['limits'],group,capture,out,owner.start is None)
         need(not stopped[0],'guardian cancellation requested')
         # Check the already established phase stop; completion cannot start a
@@ -1064,7 +1437,8 @@ def main():
         if time.monotonic()>task_stop(owner,preparation_stop,finalization_stop,manifest['timeout']):
             raise TimeoutError('original task observation/cleanup/finalization deadline consumed')
         need(controller_status.reaped and controller.returncode==0 and owner.confirm_reaped() and owner.record.get('QMP_peer_admitted') is True,'controller exit is not owned-child reap/QMP admission')
-    except BaseException as error:failure=error;owner.record['error']=type(error).__name__
+    except BaseException as error:
+        failure=error;record_actual_failure(owner,error,stage,server)
     finally:
         try:right.close()
         except BaseException as error:failure=failure or error

@@ -34,6 +34,7 @@ def main():
                'ntwin32/exception/k32veh.c', 'ntwin32/exception/k32veh.h',
                'ntwin32/routes.json', 'ntwin32/prepare.py', 'platform/tests/probe.c',
                'ntwin32/win64/ntw64.c', 'ntwin32/win64/ntw64.h', 'ntwin32/win64/ntw64run.c',
+               'ntwin32/win64/ntw64_gui.c', 'ntwin32/win64/ntw64_gui.h', 'shizukudos/abi/shz_w64_gui.h',
                'ntwin32/win64/ntw32imp.def', 'ntwrapper/vxd/bridge.h',
                'shizukudos/abi/shz_abi.h', 'shizukudos/abi/shz_clock.h', 'shizukudos/abi/shz_ipc.h',
                'platform/build.py']
@@ -58,7 +59,7 @@ def main():
         '-I', BUILD, 'ntwin32/runtime.c', 'ntwin32/sync.c', 'ntwin32/resolve.c',
         'ntwin32/routing.c', 'ntwin32/initonce.c', 'ntwin32/unicode/utf.c',
         'ntwin32/exception/veh.c', 'ntwin32/exception/k32veh.c',
-        'ntwin32/win64/ntw64.c', 'ntwin32/core_clock.c',
+        'ntwin32/win64/ntw64.c', 'ntwin32/win64/ntw64_gui.c', 'ntwin32/core_clock.c',
         'ntwin32/exports.def',
         BUILD/'version.o', '-lkernel32')
     # WIN64 subsystem console front end: imports the NTW32-specific API by name (not a prepared application).

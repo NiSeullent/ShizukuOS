@@ -30,6 +30,7 @@ extern int64_t stack_arg(process_t *p, struct regs *r, unsigned n);
 sock_t *g_socks;
 static void sock_extension_progress(sock_t *s);
 static void sock_extension_closed(sock_t *s);
+static void sock_acceptex_poll(void);
 
 #define SOL_SOCKET 0xffff
 #define IPPROTO_TCP_L 6
@@ -199,6 +200,7 @@ void sock_notify(sock_t *s)
     if (s->evt)
         sock_evt_update(s);
     sock_extension_progress(s);
+    sock_acceptex_poll();
 }
 
 /* ---------------------------------------------------------------- closing */
@@ -819,6 +821,8 @@ static int32_t op_setopt(process_t *p, struct regs *r, uint64_t h, uint64_t leve
         net_unlock();
         return st;
     }
+    if (level == SOL_SOCKET && opt == SHZ_SO_UPDATE_ACCEPT_CONTEXT)
+        return sock_acceptex_update_context(p, h, val, len);
     if (len < 4 || len > 8 || copy_from_user(p, &v, val, 4) || (len >= 8 && copy_from_user(p, &v2, val + 4, 4)))
         return len < 4 ? NET_ERR(WSAEFAULT) : STATUS_ACCESS_VIOLATION;
     net_lock();
@@ -956,8 +960,8 @@ static int32_t op_ioctl(process_t *p, struct regs *r, uint64_t h, uint64_t cmd, 
     sock_t *s;
     uint32_t v = 0, ret = 0;
     int32_t st = 0;
-    if (cmd == SHZ_SOCK_CONNECT_EX || cmd == SHZ_SOCK_DISCONNECT_EX)
-        return sock_extension_ioctl(p, h, (uint32_t)cmd, in, inlen);
+    if (sock_extension_owns(cmd))                          /* ConnectEx/DisconnectEx/AcceptEx/AcceptEx lease */
+        return sock_extension_command(p, h, (uint32_t)cmd, in, inlen, out, outlen, pret);
     net_lock();
     s = get_sock(p, h);
     if (!s) { net_unlock(); return STATUS_INVALID_HANDLE; }

@@ -1,0 +1,18 @@
+# ShizukuOS Win98 personalization payload: exact installer file list (batch 3)
+# Built by: python3 -B ntwddm/win98/personalization/verify.py --out build/<new-dir>   -> SHZPERS.EXE
+#           python3 -B ntwddm/win98/personalization/verify_agent.py build/<dir>/agent -> SHZWALL.EXE
+# Both: i486 PE32 GUI, subsystem/OS 4.10, imports verified against the Win98 SE native export inventory.
+files:
+  SHZPERS.EXE   -> %ProgramFiles%\Shizuku\Personalization\SHZPERS.EXE
+  SHZWALL.EXE   -> %ProgramFiles%\Shizuku\Personalization\SHZWALL.EXE   (must be a sibling of SHZPERS.EXE)
+no other files, no DLLs.
+shortcuts (installer creates; shortcut files only):
+  All Users Start Menu\Programs\Shizuku\Shizuku Personalization.lnk -> SHZPERS.EXE
+registry the INSTALLER must NOT write:
+  HKCU\Software\Microsoft\Windows\CurrentVersion\Run\ShizukuOSWallpaper   (SHZWALL /enable, started from the
+    SHZPERS UI by each user, writes it with its own quoted path under that user's HKCU)
+  HKCU\Software\ShizukuOS\Personalization\*   (written at runtime per user: DesktopWallpaper, ChromeMetrics, theme profile)
+  Optionally the installer may write the SHZPERS /restore startup entry only through SHZPERS itself (unchanged behaviour).
+per-user behaviour: the agent instance mutex and window title carry an 8-hex tag of the logged-on user name; an agent whose
+  user no longer matches stops itself within about 1 s (exit code 6) so a previous user's agent never survives a profile switch.
+uninstall: run "SHZWALL.EXE /disable" for each user that enabled it (removes that user's Run value and stops the agent), then delete both files.

@@ -478,8 +478,13 @@ class LinuxOwnership(unittest.TestCase):
             try:
                 with self.assertRaises(ValueError): sole.check()
             finally: monitor.socket = original_socket; pair[0].close(); pair[1].close()
-            attempt.exchange_stop_ns = attempt.original_exchange_stop_ns = time.monotonic_ns() + 1_000_000_000
+            # B13: a request must fit the immutable exchange stop minus the
+            # pre-GRANT reserve; below the minimum useful bound it is refused.
+            attempt.exchange_stop_ns = attempt.original_exchange_stop_ns = time.monotonic_ns() + host.QMP_GRANT_RESERVE_NS + 100_000_000
             with self.assertRaises(ValueError): sole.paused()
+            # Under 5 s left (root R5) now fits with a narrowed request bound.
+            attempt.exchange_stop_ns = attempt.original_exchange_stop_ns = time.monotonic_ns() + 3_000_000_000
+            sole.paused(); self.assertIs(monitor.deadline, deadline); self.assertLessEqual(sole.transcripts[-1]['request_bound_ms'], 2500)
         finally:
             self.finish_child(child, binding)
             if monitor is not None: monitor.close()

@@ -900,6 +900,8 @@ const char *sfs_strerror(int err)
     case SFS_EFBIG: return "file too large";
     case SFS_EBUSY: return "busy";
     case SFS_ERANGE: return "out of range";
+    case SFS_EACCES: return "permission denied";
+    case SFS_EPERM: return "operation not permitted";
     default: return "unknown error";
     }
 }

@@ -187,7 +187,8 @@ def main():
             nativetest=out/(compiler+'-native-host')
             run([compiler,*host_flags,*extra,'-DSHZ_STANDALONE','-DDS_NATIVE_HOST_TEST','-MD','-MF',out/(compiler+'-native-host.d'),
                  local/'dead_screen.c',local/'render.c',local/'native.c',local/'native_host_test.c','-o',nativetest],compiler+'-native-host-compile')
-            for mode in ('exception','panic','fallback','reentry','uartfail','small','force-text','corrupt-game'):
+            for mode in ('exception','panic','fallback','reentry','uartfail','small','force-text','corrupt-game',
+                         'unsafe-stack','unsafe-df','unsafe-smp'):
                 native_host_results.append(json.loads(run([nativetest,mode],compiler+'-native-host-'+mode).strip()))
             controltest=out/(compiler+'-control-host')
             run([compiler,*host_flags,*extra,'-DSHZ_STANDALONE','-DDS_NATIVE_HOST_TEST','-MD','-MF',out/(compiler+'-control-host.d'),

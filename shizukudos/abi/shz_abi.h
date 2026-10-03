@@ -58,10 +58,43 @@ enum shz_hcall {
                                  * For domains that receive no bootinfo (the Win98 domain's VxD). */
     SHZ_HC_NATIVE_GOP_EPOCH = 14, /* readonly: rbx=word index, rcx=contract version1;
                                   rbx<-word, rcx<-40. Actual guardian/domain only. */
-    SHZ_HC_CLOCK_SPLIT = 15    /* readonly, independently versioned shz_clock.h:
+    SHZ_HC_CLOCK_SPLIT = 15,   /* readonly, independently versioned shz_clock.h:
                                  rbx=version, rcx=0; EBX<-low32, ECX<-high32 of
                                  one elapsed-nanosecond sample. Old HC_TIME is unchanged. */
+    SHZ_HC_CHANNEL_ATTEST = 16,  /* Win98 domain CPL0 only: rbx = channel index, rcx = bound channel generation,
+                                  * rdx = SHZ_CHAN_ATTEST_* bits; set-once per (channel, generation); rbx <- bits.
+                                  * Recorded in Supervisor memory with the attester's domain generation. */
+    SHZ_HC_CHANNEL_ATTESTED = 17 /* readonly, any domain mapping the channel: rbx = channel index;
+                                  * rbx <- bits, rcx <- attested generation; E_NOENT when none/attester restarted. */
 };
+
+/* SHZ_HC_CHANNEL_ATTEST feature bits (no ABI minor bump: an old Supervisor answers E_UNSUPPORTED = not attested). */
+#define SHZ_CHAN_ATTEST_W64_DERIVED_OWNER 0x1u  /* VxD stamps capability_id of every user W64 send (DERIVED|token) */
+#define SHZ_CHAN_ATTEST_KNOWN 0x1u
+/* Pure attestation predicate shared by Kernel64 and host checks: the bit must be attested for exactly the
+ * channel generation the request arrived on. */
+static inline int shz_chan_attested_for(long status, uint64_t bits, uint64_t attested_gen, uint32_t channel_gen,
+                                        uint64_t need)
+{
+    return status == 0 && need && (bits & need) == need && channel_gen != 0 && attested_gen == channel_gen;
+}
+/* Kernel64 authorization state from ONE fresh SHZ_HC_CHANNEL_ATTESTED answer per authorization; a positive answer is
+ * never cached across authorizations (the Supervisor revokes on attester EXITED/FAILED/domain-generation change without
+ * touching the channel header). *ever is a fail-closed latch only: once any generation was attested on this channel,
+ * every later refusal is REVOKED and never falls back to the legacy unattested rules. Never attested (old Supervisor
+ * E_UNSUPPORTED, unattesting VxD) stays LEGACY. */
+#define SHZ_CHAN_AUTH_LEGACY 0
+#define SHZ_CHAN_AUTH_ATTESTED 1
+#define SHZ_CHAN_AUTH_REVOKED 2
+static inline int shz_chan_auth_state(long status, uint64_t bits, uint64_t attested_gen, uint32_t channel_gen,
+                                      uint64_t need, uint32_t *ever)
+{
+    if (shz_chan_attested_for(status, bits, attested_gen, channel_gen, need)) {
+        *ever = 1;
+        return SHZ_CHAN_AUTH_ATTESTED;
+    }
+    return *ever ? SHZ_CHAN_AUTH_REVOKED : SHZ_CHAN_AUTH_LEGACY;
+}
 
 enum shz_status {
     SHZ_OK = 0,
@@ -94,6 +127,10 @@ enum shz_domain_state {
 
 /* shz_bootinfo_t.flags */
 #define SHZ_BIF_UEFI_DIRECT 0x1u        /* started by the UEFI boot manager as the only OS (no Supervisor) */
+/* The fb_* tail is a Supervisor display grant (BOOT.INI k64_display=yes): the Supervisor validated the GOP mode,
+ * identity-mapped exactly [fb_base, fb_base + fb_size rounded to 4 KiB) into this domain's EPT (RW, NX, WC) and
+ * stopped drawing its console there. A supervised Kernel64 accepts fb_* only with this bit. */
+#define SHZ_BIF_FB_SUPERVISOR_GRANT 0x2u
 
 /* shz_bootinfo_t.fb_format: byte order of one 32-bit pixel in memory */
 enum shz_fb_format {
@@ -125,7 +162,8 @@ typedef struct {
      * writer's `size` (176) ends before it.
      * Framebuffer: written only by the UEFI boot manager's direct Kernel64 boot
      * (shizukudos/supervisor/loader, BOOT.INI mode = kernel64) from the firmware's GOP
-     * mode at ExitBootServices; the Supervisor and the Multiboot stubs write zeros.
+     * mode at ExitBootServices, or by the Supervisor ONLY as an explicit display grant (SHZ_BIF_FB_SUPERVISOR_GRANT,
+ * supervisor/src/display_grant.c); otherwise the Supervisor and the Multiboot stubs write zeros.
      * HOOK for the window manager's GOP backend (kernel64/gfx_fb.c, owned by the gfx
      * work): Kernel64 exposes these fields through k64_boot_framebuffer() (kernel64/main.c).
      * The range is NOT in the kernel's direct map (it lies outside [0, ram_size)), so a

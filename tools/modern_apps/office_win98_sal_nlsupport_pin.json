@@ -1,0 +1,38 @@
+{
+  "schema": "shizuku.libreoffice-sal-win98-port.v1",
+  "observed_at_utc": "2026-10-03",
+  "application": "LibreOffice",
+  "upstream_tag": "libreoffice-26.8.0.3",
+  "upstream_commit": "bce0998afefdbc355585ca324285661a2170ba77",
+  "source_path": "sal/osl/w32/nlsupport.cxx",
+  "source_url": "https://raw.githubusercontent.com/LibreOffice/core/bce0998afefdbc355585ca324285661a2170ba77/sal/osl/w32/nlsupport.cxx",
+  "original": {"file": "office_win98_upstream_nlsupport.cxx", "bytes": 3895,
+               "sha256": "8dda77b666e2db30329e1824ff07c64a66cbf883caab8065e5f87c22ecc65dc3",
+               "git_blob_sha1": "010a8f2f971a20d85b6641d0ba296e0c390b79f9"},
+  "patch": {"file": "office_win98_sal_nlsupport.patch",
+            "sha256": "47c789b8fdc9e301760a40c5ef1afe960c2342658918612abcb78d8b0c0bc993",
+            "license": "upstream MPL-2.0 with retained Apache-2.0 notice"},
+  "modified": {"sha256": "7ecabfc23269bca58f3eb64e8a93bcc236d55b781711733928c1f7e4d09f37ac"},
+  "activation": {"define": "LIBO_WIN98=1", "link": "OFFNLS.DLL import library from ntwin32/office_nls/office_nls.def (dlltool -k)",
+                 "ordinary_windows_branch": "unchanged upstream Vista locale-name calls"},
+  "provider": "ntwin32/office_nls (OFFNLS.DLL, Windows 98 SE KERNEL32-only imports)",
+  "sal_osl_w32_win98se_import_gap": {
+    "method": "identifier calls in all 35 sal/osl/w32 files at the pinned commit compared with benchmarks/win98se-ko-oem-native-exports-v1.json KERNEL32/ADVAPI32/USER32/SHELL32/WS2_32/MPR/OLE32 (A or W forms accepted); source-level, not a linked sal3.dll import table; W exports that are stubs on Windows 98 are NOT counted here",
+    "resolved_by_this_port": ["GetUserDefaultLocaleName", "GetLocaleInfoEx", "ResolveLocaleName"],
+    "resolved_by_earlier_port": ["GetSystemTimePreciseAsFileTime"],
+    "remaining": {
+      "salinit.cxx": ["SetProcessDEPPolicy", "SetDllDirectoryW", "SetSearchPathMode"],
+      "process.cxx": ["GetProcessId"],
+      "pipe.cxx": ["GetNamedPipeServerProcessId", "AllowSetForegroundWindow"],
+      "security.cxx": ["SHGetKnownFolderPath", "CheckTokenMembership", "ConvertSidToStringSidW", "LoadUserProfileW", "UnloadUserProfile"],
+      "socket.cxx": ["GetAddrInfoW", "FreeAddrInfoW", "GetNameInfoW", "InetPtonW", "InetNtopW"],
+      "file.cxx": ["GetFileSizeEx", "SetFilePointerEx", "ReplaceFileW"],
+      "file_dirvol.cxx": ["GetVolumeNameForVolumeMountPointW"],
+      "module.cxx": ["GetModuleHandleExW"],
+      "backtrace.cxx": ["CaptureStackBackTrace", "SymFromAddr", "SymRefreshModuleList"],
+      "signal.cxx": ["WerAddExcludedApplication"]
+    }
+  },
+  "native_executed": false,
+  "full_application_compatibility": "unverified"
+}

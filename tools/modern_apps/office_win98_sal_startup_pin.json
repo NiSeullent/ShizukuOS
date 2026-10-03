@@ -1,0 +1,63 @@
+{
+  "schema": "shizuku.libreoffice-sal-win98-startup.v1",
+  "observed_at_utc": "2026-10-03",
+  "application": "LibreOffice",
+  "upstream_tag": "libreoffice-26.8.0.3",
+  "upstream_commit": "bce0998afefdbc355585ca324285661a2170ba77",
+  "source_url_base": "https://raw.githubusercontent.com/LibreOffice/core/bce0998afefdbc355585ca324285661a2170ba77/",
+  "patch": {
+    "file": "office_win98_sal_startup.patch",
+    "sha256": "f071a407650b7ba67093be91ad4798d8e7b5a282835d67e95d7483dfb7708dc8",
+    "license": "upstream MPL-2.0 with retained Apache-2.0 notices; new header MPL-2.0"
+  },
+  "files": {
+    "sal/osl/w32/salinit.cxx": {
+      "original": {
+        "file": "office_win98_upstream_salinit.cxx",
+        "sha256": "3c12e7d89ecb33cfa755f9cf7f1f7cf564e8ef54e1961ec58a0c3b9c75d21f1f"
+      },
+      "modified_sha256": "5e87f0d0518e7f0c8ed47250012796c7c07e71b68e5ad5491807e6c5e579896f"
+    },
+    "sal/osl/w32/process.cxx": {
+      "original": {
+        "file": "office_win98_upstream_process.cxx",
+        "sha256": "e78b169f97c66f3196d97a092959a67e012b15a8a92e192a64f37cd9e4f90b6d"
+      },
+      "modified_sha256": "d8bbcf2844c2742c446a2e41e20c34bec461b08218ce75fbd469d716638ea926"
+    },
+    "sal/osl/w32/module.cxx": {
+      "original": {
+        "file": "office_win98_upstream_module.cxx",
+        "sha256": "f13bc7128fa68e3d6e3c57fc89a2b5c4612ccc20f94ca08afa80274f476b9444"
+      },
+      "modified_sha256": "aef999c701d8a81e7febb02c67d21c24506039d5c38a1c952a0d22557f12cf27"
+    },
+    "sal/osl/w32/file.cxx": {
+      "original": {
+        "file": "office_win98_upstream_file.cxx",
+        "sha256": "5c2e46ee21834101c666c8859bc8f6c006f56dec1165b517a86950df9b0f68b2"
+      },
+      "modified_sha256": "3b13c161e73ff6c1eb2b359e79102e861d9fb5b0c95d334990d5ccb4432d3fc9"
+    }
+  },
+  "new_file": {
+    "path": "sal/osl/w32/win98_offsal.h",
+    "sha256": "2a7486ce3d0540ebbdf478c9716d4aaf67f4c9a595a554906c7c63ca844a434d"
+  },
+  "activation": {
+    "define": "LIBO_WIN98=1",
+    "link": "OFFSAL.DLL import library from ntwin32/office_sal/office_sal.def (dlltool -k)"
+  },
+  "provider": "ntwin32/office_sal (OFFSAL.DLL, Windows 98 SE KERNEL32-only imports)",
+  "semantics": {
+    "SetProcessDEPPolicy": "ERROR_CALL_NOT_IMPLEMENTED (no DEP on Win98)",
+    "SetDllDirectoryW": "ERROR_CALL_NOT_IMPLEMENTED (search order not changeable)",
+    "SetSearchPathMode": "validates flags (87) else ERROR_CALL_NOT_IMPLEMENTED",
+    "GetProcessId": "current-process pseudo handle real; other handles only if registered by osl_getProcess (patched), else ERROR_NOT_SUPPORTED + 0; processes created by osl_executeProcess (other file) are not registered",
+    "GetModuleHandleExW": "GetModuleHandleA/VirtualQuery+Toolhelp32 verified image base; refcount via LoadLibraryA unless UNCHANGED_REFCOUNT; PIN -> ERROR_NOT_SUPPORTED",
+    "GetFileSizeEx/SetFilePointerEx": "GetFileSize/SetFilePointer with 64-bit split and 0xFFFFFFFF last-error disambiguation",
+    "ReplaceFileW": "W->ACP with round-trip refusal (1113), same-volume only (1176), rename-original-to-backup, move replacement, rollback on failure; not crash-atomic across power loss"
+  },
+  "native_executed": false,
+  "full_application_compatibility": "unverified"
+}

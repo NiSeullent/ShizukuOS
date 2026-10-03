@@ -211,7 +211,9 @@ K32API BOOL WINAPI DeleteFileA(LPCSTR name)
     return DeleteFileW(w);
 }
 
-K32API BOOL WINAPI MoveFileExW(LPCWSTR from, LPCWSTR to, DWORD flags)
+/* Same-volume rename (FileRenameInformation). MoveFileExW / MoveFileWithProgressW and their flag handling are in
+ * k32_win10_shellapi.c; a cross-volume target leaves ERROR_NOT_SAME_DEVICE for the MOVEFILE_COPY_ALLOWED fallback. */
+BOOL k32_rename_path(LPCWSTR from, LPCWSTR to, BOOL replace)
 {
     HANDLE h;
     SHZ_IO_STATUS_BLOCK iosb;
@@ -225,7 +227,7 @@ K32API BOOL WINAPI MoveFileExW(LPCWSTR from, LPCWSTR to, DWORD flags)
     if (st) { NtClose(h); k32_nt_error(st); return FALSE; }
     n = k32_wlen(nt);
     memset(&ri, 0, sizeof ri);
-    ri.replace = (flags & MOVEFILE_REPLACE_EXISTING) != 0;
+    ri.replace = replace != 0;
     ri.len = (ULONG)(n * 2);
     memcpy(ri.name, nt, n * sizeof(WCHAR));
     st = NtSetInformationFile(h, &iosb, &ri, (ULONG)(20 + n * 2), 10);

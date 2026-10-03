@@ -161,7 +161,69 @@ if (typeof document !== 'undefined') {
   const start = () => {
     const container = document.querySelector('#preview-viewer');
     if (container) mountPreview(container);
+    mountHome();
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
   else start();
+}
+
+// Progressive enhancement: original captures and links remain usable without JS.
+export function mountHome() {
+  const scenes = document.querySelector('[data-scenes]');
+  if (scenes && !scenes.dataset.mounted) {
+    const controls = scenes.querySelector('.scene-controls');
+    const buttons = [...controls.querySelectorAll('[data-scene-target]')];
+    const panels = [...scenes.querySelectorAll('[data-scene]')];
+    if (buttons.length && buttons.length === panels.length && buttons.every(button => panels.some(panel => panel.dataset.scene === button.dataset.sceneTarget))) {
+      scenes.dataset.mounted = 'true';
+      scenes.querySelector('.scene-inner').dataset.enhanced = 'true';
+      controls.setAttribute('role', 'tablist');
+      buttons.forEach(button => {
+        button.id = `scene-tab-${button.dataset.sceneTarget}`;
+        button.setAttribute('role', 'tab');
+        button.setAttribute('aria-controls', `scene-${button.dataset.sceneTarget}`);
+      });
+      panels.forEach(panel => {
+        panel.setAttribute('role', 'tabpanel');
+        panel.setAttribute('aria-labelledby', `scene-tab-${panel.dataset.scene}`);
+        panel.tabIndex = 0;
+      });
+      const choose = (index, focus = false) => {
+        buttons.forEach((button, n) => {
+          button.setAttribute('aria-selected', String(n === index));
+          button.tabIndex = n === index ? 0 : -1;
+        });
+        panels.forEach(panel => { panel.hidden = panel.dataset.scene !== buttons[index].dataset.sceneTarget; });
+        if (focus) buttons[index].focus();
+      };
+      buttons.forEach((button, index) => {
+        button.addEventListener('click', () => choose(index));
+        button.addEventListener('keydown', event => {
+          let next = index;
+          if (event.key === 'ArrowRight') next = (index + 1) % buttons.length;
+          else if (event.key === 'ArrowLeft') next = (index + buttons.length - 1) % buttons.length;
+          else if (event.key === 'Home') next = 0;
+          else if (event.key === 'End') next = buttons.length - 1;
+          else return;
+          event.preventDefault(); choose(next, true);
+        });
+      });
+      choose(0); controls.hidden = false;
+    }
+  }
+  if ('IntersectionObserver' in window && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        entry.target.classList.remove('reveal-pending');
+        entry.target.classList.add('reveal-visible');
+        observer.unobserve(entry.target);
+      });
+    }, { threshold: 0.06 });
+    document.querySelectorAll('[data-reveal]').forEach(element => {
+      if (element.getBoundingClientRect().top > window.innerHeight) {
+        element.classList.add('reveal-pending'); observer.observe(element);
+      }
+    });
+  }
 }
