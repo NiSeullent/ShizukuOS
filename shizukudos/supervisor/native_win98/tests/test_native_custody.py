@@ -223,7 +223,10 @@ for name in dir(old.MainControls):
         def legacy(self,name=name):
             control=old.MainControls(name)
             try:
-                with patch.object(old.m,'get_custody',return_value=None):getattr(control,name)()
+                if name=='test_real_cli_refuses_missing_guardian_before_launch':
+                    getattr(control,name)()
+                else:
+                    with patch.object(old.m,'get_custody',return_value=None):getattr(control,name)()
             finally:control.doCleanups()
         setattr(LegacyRegression,name,legacy)
 
