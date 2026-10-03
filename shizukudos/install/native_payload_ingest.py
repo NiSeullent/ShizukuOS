@@ -119,7 +119,11 @@ class Union:
         # Every admitted file still gets full checks before/after each phase
         # and final full SHA checks, without unrelated O(N) stats per cluster.
         need(not self.broken,'input read lease broken')
-        for guard in self.guards:guard()
+        for guard in self.guards:
+            checkpoint=getattr(guard,'io_check',None)
+            if checkpoint is None:guard() # Existing callable guards remain immediate.
+            else:checkpoint()
+        need(not self.broken,'input read lease broken')
         p=path(e['pin']['path'])
         need(identity(os.fstat(e['fd']))==e['identity']==identity(p.stat()) and
              fcntl.fcntl(e['fd'],fcntl.F_GETLEASE)==fcntl.F_RDLCK,'active input identity/lease changed')

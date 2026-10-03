@@ -102,3 +102,14 @@ and full SHA checked at admission and final cleanup. A same-byte alias or link
 count change refuses. These tools support corresponding-source reproducibility;
 they never become native source input roles or disk-write authority. All ordinary
 native input rules, including the single-link requirement, remain unchanged.
+
+Git epochs use full HEAD/reference, original directory/metadata identity and
+anchored gitlink repository checks at every Union phase boundary; current
+project/gitlink trees must also remain clean. Actual FD read checkpoints reuse
+only these Git audits for at most one fixed second, measured from scan start.
+Each checkpoint still checks the union SIGIO break latch, actual source FD,
+original pathname/inode and read lease; existing callable guards remain
+immediate. Clock regression, Git failure or a scan exceeding one second latches
+refusal. A heavily loaded host can therefore refuse a valid build rather than
+extend this bound. Final full input SHA, forced Git/source audits and mandatory
+cleanup remain required; this does not grant missing native/Windows authority.

@@ -18,6 +18,7 @@ import stat
 import subprocess
 import sys
 import tarfile
+import time
 
 import native_release_admission as admission
 import native_capacity_profile as capacity
@@ -87,8 +88,72 @@ def _directory(custody,path):
     return path
 
 
-def _git(tree,*args):
-    return subprocess.check_output(['git','-C',str(tree),*args],stderr=subprocess.PIPE)
+def _git(tree,*args,timeout=None):
+    return subprocess.check_output(['git','--no-optional-locks','-C',str(tree),*args],
+                                   stderr=subprocess.PIPE,timeout=timeout)
+
+
+class _GitEpochGuard:
+    """Full phase audits and fixed one-second Git audits during actual FD IO.
+
+    Union.check always invokes the full callable. Only Union.io_check uses the
+    bounded checkpoint; its actual FD, path, lease and SIGIO checks stay live.
+    Failed/slow scans and monotonic-clock regressions permanently refuse.
+    """
+    def __init__(self,tree,revision,*,clean=False,repository=None):
+        self.tree=Path(tree);self.revision=revision;self.clean=clean
+        self.repository=repository;self.failed=False;self.last=None;self.previous=None
+        need(self.tree.is_absolute() and self.tree.resolve()==self.tree,
+             'canonical Git epoch tree required')
+        self.identity=self._identity(self.tree)
+        self.reference=_git(self.tree,'rev-parse','--symbolic-full-name','HEAD',timeout=1).strip()
+        self.gitdir=Path(os.fsdecode(_git(self.tree,'rev-parse','--absolute-git-dir',timeout=1).strip()))
+        need(self.gitdir.resolve()==self.gitdir,'canonical Git epoch metadata required')
+        self.git_identity=self._identity(self.gitdir)
+        self()
+    @staticmethod
+    def _identity(path):
+        state=path.stat()
+        need(stat.S_ISDIR(state.st_mode) and not path.is_symlink(),'original Git epoch directory required')
+        return state.st_dev,state.st_ino
+    def _clock(self):
+        now=time.monotonic()
+        need(self.previous is None or now>=self.previous,'Git epoch clock moved backwards')
+        self.previous=now
+        return now
+    def _audit(self,start):
+        def git(*args):
+            remaining=start+1-self._clock()
+            need(0<remaining<=1,'one-second Git epoch scan expired')
+            return _git(self.tree,*args,timeout=remaining).strip()
+        need(self.tree.resolve()==self.tree and self._identity(self.tree)==self.identity and
+             self.gitdir.resolve()==self.gitdir and self._identity(self.gitdir)==self.git_identity,
+             'original Git epoch namespace changed')
+        need(git('rev-parse','--show-toplevel')==os.fsencode(self.tree) and
+             git('rev-parse','--absolute-git-dir')==os.fsencode(self.gitdir) and
+             git('rev-parse','HEAD').decode()==self.revision and
+             git('rev-parse','--symbolic-full-name','HEAD')==self.reference,
+             'Git source HEAD/reference/metadata epoch changed')
+        if self.repository is not None:
+            need(git('config','--get','remote.origin.url').decode()==self.repository,
+                 'project gitlink repository URL changed')
+        if self.clean:
+            need(not git('status','--porcelain'),'public Git source changed during ISO build')
+        end=self._clock()
+        need(end-start<=1,'one-second Git epoch scan expired')
+        self.last=start # From scan start; never add grace after a slow scan.
+    def __call__(self):
+        need(not self.failed,'Git epoch guard previously failed')
+        try:self._audit(self._clock())
+        except BaseException:
+            self.failed=True;raise
+    def io_check(self):
+        need(not self.failed,'Git epoch guard previously failed')
+        try:
+            now=self._clock()
+            if self.last is None or now-self.last>=1:self._audit(now)
+        except BaseException:
+            self.failed=True;raise
 
 
 def _git_archive(tree,prefix,commit):
@@ -325,9 +390,7 @@ class _SourceOnlyLeases:
 def _project_sources(custody,gitlink_cache=None,empty_metadata=None):
     commit=_git(ROOT,'rev-parse','HEAD').decode().strip()
     need(not _git(ROOT,'status','--porcelain'),'clean current Git source is required')
-    def guard():
-        need(_git(ROOT,'rev-parse','HEAD').decode().strip()==commit and
-             not _git(ROOT,'status','--porcelain'),'public project source changed during ISO build')
+    guard=_GitEpochGuard(ROOT,commit,clean=True)
     custody.guard(guard)
     blobs,links=_tree_entries(ROOT,commit)
     required=len(custody._held.entries)+len(blobs)+512
@@ -366,9 +429,7 @@ def _project_sources(custody,gitlink_cache=None,empty_metadata=None):
         need(not _git(tree,'status','--porcelain'),'clean pinned project gitlink checkout required')
         child_blobs,child_links=_tree_entries(tree,revision)
         need(not child_links,'nested project gitlinks need independently pinned source closure')
-        def child_guard(tree=tree,revision=revision):
-            need(_git(tree,'rev-parse','HEAD').decode().strip()==revision and
-                 not _git(tree,'status','--porcelain'),'project gitlink source changed')
+        child_guard=_GitEpochGuard(tree.resolve(),revision,clean=True,repository=url)
         custody.guard(child_guard)
         child_raw=_git_archive(tree,'project-'+name.replace('/','-'),revision)
         # Preserve every actual checked-out regular source under original-FD
@@ -416,8 +477,7 @@ def _compliance(custody,cache,bios_receipt,gitlink_cache=None,empty_metadata=Non
         spec=manifest['upstreams'][name];tree=Path(cache)/name
         revision=_git(tree,'rev-parse','HEAD').decode().strip()
         need(revision==spec['commit'],'pinned upstream Git revision differs: '+name)
-        def guard(tree=tree,revision=revision):
-            need(_git(tree,'rev-parse','HEAD').decode().strip()==revision,'upstream Git identity changed')
+        guard=_GitEpochGuard(tree.resolve(),revision)
         custody.guard(guard)
         for pattern in spec['license_files']:
             # Expand against committed names, avoiding patched working files.

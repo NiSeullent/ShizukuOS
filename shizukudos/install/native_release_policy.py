@@ -6,7 +6,7 @@ actual build readback; neither a runtime request nor a receipt can extend these.
 """
 from contextlib import contextmanager
 
-INGEST_SHA = '31bdb8bb82e586af6aefc5d496a7c8f8cea36ff3ae35afc9cf628fd39a5e15c4'
+INGEST_SHA = '317355adfcdb875a766197af8b06cbeebe418858602975128f57efe57d80418c'
 DOS_RECEIPT = (17294, '1205ca7575ce30e17a71f2f1c707a0c571cd09c6c60c77f1fd0e924c2fc03104')
 DOS_ARTIFACTS = {
     'KERNEL.SYS': (74009, 'cd8ccf3d4f837fd4d675037468ce10023af37874342c407630a3f56af6c07c6e'),
