@@ -137,6 +137,18 @@ class NonceStaging(unittest.TestCase):
                 attempt.owner=object()
                 with self.assertRaises(ValueError):attempt.reserve_staging()
             finally:attempt.owner=None;attempt.close()
+    def test_legacy_nine_source_receipt_refused_before_nonce_output(self):
+        pins=self.inputs();live,first=self.fixture();obj=json.loads(Path(first['path']).read_bytes())
+        obj['sources_sha256'].pop('shizukudos/boot_profile/storage/provenance.h')
+        first=self.json('first/build-result.json',obj)
+        with r.leased_inputs(pins) as held:
+            attempt=self.attempt(held,pins)
+            try:
+                with self.assertRaisesRegex(ValueError,'firstload source closure'):
+                    stage.stage(attempt,epoch,r,held,live,first,REPO,self.root/'out',lambda:None,1<<20)
+                self.assertFalse((self.root/'out').exists())
+            finally:attempt.close()
+
     def test_captured_firstload_source_drift_refused_before_write(self):
         pins=self.inputs();live,first=self.fixture()
         source=self.root/'first/source/drivers/shizuku_gop/first_load/guard.c'

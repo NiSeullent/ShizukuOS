@@ -18,7 +18,8 @@ BASE = frozenset(('KERNEL.SYS','COMMAND.COM','HIMEMX.EXE','CONFIG.SYS','AUTOEXEC
                   'SHZGOP.DRV','SHZGOP.VXD','SHZGOP.INF','GOPINST.EXE','GPREQ.INI'))
 FIRSTLOAD_SOURCES = frozenset('drivers/shizuku_gop/first_load/'+n for n in
     ('build.py','control.asm','contract.h','guard.c','loader.c','link.ld')) | frozenset((
-    'drivers/shizuku_gop/gop_contract.h','ntwrapper/vxd/le.py','shizukudos/abi/shz_abi.h'))
+    'drivers/shizuku_gop/gop_contract.h','ntwrapper/vxd/le.py','shizukudos/abi/shz_abi.h',
+    'shizukudos/boot_profile/storage/provenance.h'))
 
 
 def need(ok, message):
