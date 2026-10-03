@@ -78,3 +78,12 @@ The original author’s [RBIL release 61](https://www.cs.cmu.edu/~ralf/files.htm
 defines 1611 as shell parameters with executable and counted-command pointers;
 this diagnostic observes its status without manufacturing those pointers.
 The cached original Part C archive is pinned independently by the coordinator.
+
+Path classes are exact words 0, 1 or 2 for every recorded operation, including
+tracked reads, seeks, writes, commits and closes. The logger explicitly clears
+AH before storing a handle-derived class. Earlier artifacts could retain the
+input function AH in that word: such a binary is invalid under this schema and
+must never be accepted by masking its high byte. A separately labeled recovery
+observation may retain its raw values and explain the source defect; it is not
+a successful typed trace or Windows receipt. The exact-word regression control
+covers both USER and SYSTEM through all handle operations, including nonzero AL.

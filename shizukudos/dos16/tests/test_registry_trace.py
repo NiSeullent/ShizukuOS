@@ -79,6 +79,13 @@ class TraceTests(unittest.TestCase):
   m.response={UC_X86_REG_AX:0};m.call(0x6800,bx=6);m.call(0x3e00,bx=6)
   m.call(0x4000,bx=6)
   self.assertEqual([r[1] for r in m.records()],[0x3d01,0x4000,0x6800,0x3e00])
+ def test_exact_class_words_for_read_seek_write_commit_close(self):
+  for path,expected in ((r'C:\WINDOWS\USER.DAT',1),(r'C:\WINDOWS\SYSTEM.DAT',2)):
+   m=self.model();m.response={UC_X86_REG_AX:6};m.call(0x3d01,path=path)
+   for ax in (0x3f05,0x4200,0x4018,0x6800,0x3e18):
+    m.response={UC_X86_REG_AX:24 if ax>>8 in (0x3f,0x40) else 0};m.call(ax,bx=6)
+   self.assertEqual([r[8] for r in m.records()],[expected]*6)
+   self.assertEqual([call[1][0] for call in m.calls],[0x3d01,0x3f05,0x4200,0x4018,0x6800,0x3e18])
  def test_cf_error_and_short_count_are_observed_unchanged(self):
   m=self.model();m.response={UC_X86_REG_AX:6};m.call(0x3d01,path=r'C:\WINDOWS\USER.DAT')
   m.response={UC_X86_REG_AX:12};out,f=m.call(0x4000,bx=6)
@@ -111,7 +118,7 @@ class TraceTests(unittest.TestCase):
  def test_mux1611_no_pointer_dereference_and_exact_unsupported(self):
   m=self.model();m.response={UC_X86_REG_AX:0x1611,UC_X86_REG_BX:0}
   out,f=m.call(0x1611,vec=0x2f,dx=0xffff)
-  self.assertEqual((out[0],out[1]),(0x1611,0));self.assertEqual(m.records()[0][0],0x2f)
+  self.assertEqual((out[0],out[1]),(0x1611,0));self.assertEqual(m.records()[0][0],0x2f);self.assertEqual(m.records()[0][8],0)
  def test_segment_wrap_path_refused_without_overread(self):
   m=self.model();m.u.mem_write(0x20000+0xffff,b'C');m.call(0x4301,dx=0xffff)
   self.assertEqual(m.word('trace_count'),0)
