@@ -49,7 +49,12 @@ static int32_t blk_query(process_t *p, uint64_t index, uint64_t out, uint64_t si
                  (d->flags & BLK_F_READONLY || !d->write || blk_user_write_busy(d) ? SHZ_SETUP_BLK_READONLY : 0) |
                  (d->flags & BLK_F_REMOVABLE ? SHZ_SETUP_BLK_REMOVABLE : 0);
     memcpy(info.name, d->name, sizeof info.name - 1);
-    if (blk_ram_serial(d, info.serial, sizeof info.serial)) info.serial[0] = 0;
+    if (blk_ram_serial(d, info.serial, sizeof info.serial)) {
+        /* Actual driver-observed serial, when present; never fabricate one for
+         * devices whose IDENTIFY path has not supplied a serial. */
+        memcpy(info.serial,d->serial,sizeof d->serial < sizeof info.serial ? sizeof d->serial : sizeof info.serial - 1);
+        info.serial[sizeof info.serial-1]=0;
+    }
     info.sectors = d->sectors;
     info.sector_size = d->sector_size;
     info.parent = parent;

@@ -11,6 +11,7 @@ class NativeABI(unittest.TestCase):
   self.assertIn('NtShzSetupNative',policy);self.assertIn('ZwShzSetupNative',policy)
   self.assertEqual(len(policy.values()),len(set(policy.values())))
   abi=ROOT/'shizukudos/kernel64/setup_native_abi.h';self.assertIn(abi,build.runtime_source_paths())
+  for p in ("sha256.c","sha256.h"):self.assertIn(ROOT/"shizukudos/accounts"/p,build.runtime_source_paths())
   with tempfile.TemporaryDirectory(prefix='native-wire-abi-') as tmp:
    for cc in ('gcc','clang','x86_64-w64-mingw32-gcc','i686-w64-mingw32-gcc'):
     r=subprocess.run([cc,'-std=c11','-ffreestanding','-Wall','-Wextra','-Werror','-x','c','-c','-o',str(Path(tmp)/(cc+'.o')),'-'],input='#include "'+str(abi)+'"\n',capture_output=True,text=True)

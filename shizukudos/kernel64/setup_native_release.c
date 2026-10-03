@@ -7,5 +7,7 @@
  * authenticate BOTH manifest and encoded SIM, and enter source/tool receipts.
  * Until that independent constructor exists, every target claim refuses. */
 int setup_native_release_available(void) { return 0; }
+int setup_native_release_source(const archive_source_info_t *source,unsigned role)
+{ (void)source;(void)role;return -1; }
 int setup_native_release_pair(const archive_source_info_t pair[2])
 { (void)pair; return -1; }

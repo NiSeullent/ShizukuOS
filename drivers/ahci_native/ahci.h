@@ -53,6 +53,7 @@ struct ahci_identity {
     uint32_t sector_bytes;
     uint32_t features;        /* AHCI_FEATURE_* */
     char model[41];
+    char serial[21];         /* actual ATA IDENTIFY words10..19, empty if unavailable */
 };
 /* Zero initialize. No copying, concurrent calls, IRQ reentry or direct field
  * modification while live. Storage/callbacks must outlive retained DMA. */
