@@ -1,0 +1,134 @@
+--- a/kernel/inthndlr.c
++++ b/kernel/inthndlr.c
+@@ -36,6 +36,60 @@
+ 
+ #ifdef WIN31SUPPORT
+ STATIC UWORD winActiveVersion; /* actual DI from 1605; not the record format version */
++
++/* The actual CONFIG/default primary-shell EXEC arguments survive init reclaim
++   and SecPathName reuse.  Nothing is published until its LOADNGO transfer. */
++STATIC BYTE winShellName[NAMEMAX];
++STATIC CommandTail winShellTail;
++STATIC UWORD winShellOwner, winShellPsp;
++STATIC BOOL winShellPending, winShellPublished;
++
++VOID winShellReset(VOID)
++{
++  winShellPublished = FALSE;
++  winShellPending = FALSE;
++  winShellOwner = winShellPsp = 0;
++}
++
++VOID winShellStage(const BYTE FAR *name, const CommandTail FAR *tail, UWORD owner)
++{
++  UWORD length, count, i;
++  winShellReset();
++  if (!owner) return;
++  for (length = 0; length < NAMEMAX; ++length)
++  {
++    if ((ULONG)FP_OFF(name) + length > 0xfffful) return;
++    if (!name[length]) break;
++    if ((UBYTE)name[length] < 0x20) return;
++  }
++  if (!length || length == NAMEMAX) return;
++  count = tail->ctCount;
++  if (count >= CTBUFFERSIZE ||
++      (ULONG)FP_OFF(tail) + count + 2 > 0x10000ul ||
++      tail->ctBuffer[count] != '\r') return;
++  /* Both resident buffers use DGROUP; DS is common to the returned pointers. */
++  fmemcpy(winShellName, name, length + 1);
++  memset(&winShellTail, 0, sizeof(winShellTail));
++  winShellTail.ctCount = count;
++  for (i = 0; i <= count; ++i) winShellTail.ctBuffer[i] = tail->ctBuffer[i];
++  winShellOwner = owner;
++  winShellPending = TRUE;
++}
++
++VOID winShellCommit(UWORD parent, UWORD process)
++{
++  if (winShellPending && parent == winShellOwner && process && process != parent)
++  {
++    winShellPsp = process;
++    winShellPublished = TRUE;
++    winShellPending = FALSE;
++  }
++}
++
++VOID winShellProcessEnd(UWORD process)
++{
++  if (winShellPublished && winShellPsp == process) winShellReset();
++}
+ 
+ /* Source-written MS-DOS7 registry pathname contract; no implicit default.
+    These buffers are resident kernel data, not reclaimed initialization data. */
+@@ -2060,6 +2114,15 @@
+     switch (r.AL)
+     {
+       /* default: unhandled requests pass through unchanged */
++      case 0x11:          /* MS-DOS7: actual primary CONFIG.SYS/default shell */
++        if (winShellPublished)
++        {
++          r.AX = r.BX = 0;
++          r.ds = FP_SEG((BYTE FAR *)winShellName);
++          r.DX = FP_OFF((BYTE FAR *)winShellName);
++          r.SI = FP_OFF((BYTE FAR *)&winShellTail);
++        }
++        break;
+       case 0x13:          /* MS-DOS7: get configured SYSTEM.DAT pathname */
+         r.AX = winRegistryGet(MK_FP(r.es, r.DI), r.CX);
+         break;
+--- a/kernel/task.c
++++ b/kernel/task.c
+@@ -373,6 +373,9 @@
+   if (mode == LOADNGO)
+   {
+     iregs FAR *irp;
++#ifdef WIN31SUPPORT
++    winShellCommit(p->ps_parent, ds);
++#endif
+     
+     /* build the user area on the stack                     */
+     irp = (iregs FAR *)(exp->exec.stack - sizeof(iregs));
+@@ -581,6 +584,9 @@
+ /*  long j;*/
+ 
+   /* restore parent                                       */
++#ifdef WIN31SUPPORT
++  winShellProcessEnd(cu_psp);
++#endif
+   p = MK_FP(cu_psp, 0);
+ 
+   /* When process returns - restore the isv               */
+@@ -911,7 +917,15 @@
+ #ifdef DEBUG
+     DebugPrintf(("Process 0 starting: %s%s\n\n", Shell, tailp + 2));
+ #endif
++#ifdef WIN31SUPPORT
++    winShellStage((const BYTE FAR *)Shell,
++                  (const CommandTail FAR *)(tailp + 1), cu_psp);
++#endif
+     res_DosExec(mode, &exb, Shell);
++#ifdef WIN31SUPPORT
++    /* Failed loading or a returned primary shell cannot retain publication. */
++    winShellReset();
++#endif
+     put_string("Bad or missing Command Interpreter: "); /* failure _or_ exit */
+     put_string(Shell);
+     put_string(tailp + 2);
+--- a/kernel/proto.h
++++ b/kernel/proto.h
+@@ -217,6 +217,14 @@
+ void FcbCloseAll(void);
+ UBYTE FcbFindFirstNext(xfcb FAR * lpXfcb, BOOL First);
+ 
++/* Resident primary-shell publication; no application setter service. */
++#ifdef WIN31SUPPORT
++VOID winShellReset(VOID);
++VOID winShellStage(const BYTE FAR *name, const CommandTail FAR *tail, UWORD owner);
++VOID winShellCommit(UWORD parent, UWORD process);
++VOID winShellProcessEnd(UWORD process);
++#endif
++
+ /* intr.asm */
+ UWORD ASMPASCAL call_intr(WORD nr, iregs FAR * rp);
+ COUNT ASMPASCAL res_DosExec(COUNT mode, exec_blk * ep, BYTE * lp);
