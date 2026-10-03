@@ -107,6 +107,33 @@ def reap(child,pidfd,monitor=None):
             try:child.wait(timeout=timeout);break
             except subprocess.TimeoutExpired:continue
 
+class InputGuard:
+    """Immediate shared SIGIO refusal, fixed one-second namespace sweeps.
+
+    leased_inputs checkpoints share one break latch. Checking the original
+    source entry therefore catches SIGIO on ANY union member on every FAT IO.
+    No caller controls the sweep interval. A full sweep is also forced at each
+    tool/launch/observation/readback boundary; FD leases remain held throughout.
+    """
+    def __init__(self,held,source,deadline,cancel,resource):
+        self.held=held;self.source=source;self.deadline=deadline
+        self.cancel=cancel;self.resource=resource;self.last=None;self.previous=None
+        self.clone_check=lambda:None
+    def __call__(self,force=False):
+        now=time.monotonic()
+        need(not self.cancel[0] and now<self.deadline and
+             (self.previous is None or now>=self.previous),'bounded phase cancelled or clock moved backwards')
+        self.previous=now
+        self.held[self.source]['checkpoint']() # Actual same-union ANY-input SIGIO latch.
+        self.clone_check();self.resource()
+        if force or self.last is None or now-self.last>=1:
+            for entry in self.held.values():entry['checkpoint']()
+            end=time.monotonic()
+            need(end>=now and end<self.deadline and end-now<=1,'bounded phase or one-second namespace sweep expired')
+            self.held[self.source]['checkpoint']()
+            self.last=now # measured from start, not end; no added caller-chosen grace.
+            self.previous=end
+
 def run(request):
     need(type(request) is dict and set(request)=={'schema','source','observer','observer_receipt','qemu','mcopy','lock','output','guest_seconds'},'exact private control request required')
     need(request['schema']=='shizukuos.private-baseline-control.v1' and type(request['guest_seconds']) is int and 1<=request['guest_seconds']<=600,'bounded600s guest request required')
@@ -124,24 +151,24 @@ def run(request):
     previous={s:signal.getsignal(s) for s in (signal.SIGTERM,signal.SIGINT,signal.SIGHUP)}
     for s in previous:signal.signal(s,lambda *_:cancel.__setitem__(0,True))
     lock=os.open(replacement.safe_path(request['lock']),os.O_RDWR|os.O_NOFOLLOW|os.O_CLOEXEC)
-    clone_fd=pidfd=child=monitor=logs=held_context=None;frozen_clone=None
+    clone_fd=pidfd=child=monitor=logs=held_context=None;frozen_clone=None;held=None
     result={'schema':'shizukuos.private-baseline-control-result.v1','observation_only':True,'source_approval':False,'Windows98_on_ShizukuDOS':False,'VM_started':False,'observer_invoked':False}
     try:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         out.mkdir(mode=0o700)
         held_context=replacement.leased_inputs(rows);held=held_context.__enter__()
-        def check():
-            need(not cancel[0] and time.monotonic()<phase_deadline,'bounded phase cancelled')
-            for entry in held.values():entry['checkpoint']()
+        def resource():need(shutil.disk_usage(out).free>=GROWTH_FLOOR,'17GiB reserve breached')
+        check=InputGuard(held,source['path'],phase_deadline,cancel,resource)
+        def clone_check():
             if frozen_clone is not None:
                 need(fcntl.fcntl(clone_fd,fcntl.F_GETLEASE)==fcntl.F_RDLCK and replacement.identity(os.fstat(clone_fd))==frozen_clone and replacement.identity(clone.stat())==frozen_clone,'completed clone read lease/identity differs')
-            need(shutil.disk_usage(out).free>=GROWTH_FLOOR,'17GiB reserve breached')
+        check.clone_check=clone_check;check(True)
         receipt_entry=held[request['observer_receipt']['path']]
         need(receipt_entry['pin']['bytes']<=2<<20,'bounded actual observer producer receipt required')
         receipt=json.loads(os.pread(receipt_entry['fd'],receipt_entry['pin']['bytes'],0),object_pairs_hook=unique)
         need(receipt.get('artifact')==request['observer'] and receipt.get('VM_executed') is False and receipt.get('source_approval') is False,'actual nonexecuted observer producer binding required')
         producer_rows=[p for key in ('source_pins','compiler_header_pins','tool_pins','import_library_pins') for p in receipt[key].values()]
-        held.add_inputs(producer_rows);check()
+        held.add_inputs(producer_rows);check(True)
         need(set(receipt['source_pins'])=={'shizukudos/install/live_baseline/build.py','shizukudos/install/live_baseline/observer.c','shizukudos/win98_boot/prepare_replacement.py'},'exact actual observer source closure required')
         for name,p in receipt['source_pins'].items():need(p['sha256']==replacement.local_pin(REPO/name)['sha256'],'actual observer source binding differs')
         entry=held[source['path']];clone=out/'control.raw'
@@ -158,16 +185,18 @@ def run(request):
         for name,data in (('BASEOBS.EXE',pe),('BASENONC.BIN',nonce)):
             with (stage/name).open('xb') as f:need(f.write(data)==len(data),'complete staged input required')
             env={**os.environ,'MTOOLSRC':'/dev/null'}
+            check(True)
             subprocess.run(['mcopy','-i','/proc/self/fd/%d@@%d'%(clone_fd,g['start_lba']*512),str(stage/name),'::'+name],executable=request['mcopy']['path'],pass_fds=(clone_fd,),env=env,check=True,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,timeout=30)
-            check()
+            check(True)
         after=replacement.inventory(clone_fd,g,check)
         need(set(after)==set(before)|{'BASEOBS.EXE','BASENONC.BIN'} and all(after[k]==v for k,v in before.items()),'only appended payloads may change FAT inventory')
         need(after['BASEOBS.EXE']['sha256']==sha(pe) and after['BASENONC.BIN']['sha256']==sha(nonce),'actual payload FAT readback differs')
         need(boot==(os.pread(clone_fd,512,0),os.pread(clone_fd,512,g['start_lba']*512)),'original boot sectors changed')
-        os.fsync(clone_fd);check();need(shutil.disk_usage(out).free>=FLOOR,'fresh launch resource reserve required')
+        os.fsync(clone_fd);check(True);need(shutil.disk_usage(out).free>=FLOOR,'fresh launch resource reserve required')
         logs=capture.BoundedLogs(out)
         argv=[request['qemu']['path'],'-name','win98-nonce-observation','-machine','pc-i440fx-rhel10.0.0','-accel','tcg','-cpu','qemu64','-m','128M','-smp','1','-nic','none','-display','none','-vga','std','-drive','if=ide,index=0,format=raw,file=/proc/self/fd/%d'%clone_fd,'-boot','order=c','-qmp','unix:%s/qmp.sock,server=on,wait=off'%out,'-serial','none','-monitor','none']
         child=subprocess.Popen(argv,cwd=out,stdout=subprocess.DEVNULL,stderr=logs.writers['native-qemu.stderr'],pass_fds=(clone_fd,));pidfd=os.pidfd_open(child.pid);logs.close_writers()
+        check(True)
         admission=time.monotonic()+.25
         actual=Path('/proc/%d/cmdline'%child.pid).read_bytes()
         while not actual and child.poll() is None and time.monotonic()<admission:
@@ -186,32 +215,37 @@ def run(request):
                 if (out/'STOP').exists():break
                 if (out/'OBSERVE').exists() and not result['observer_invoked']:
                     # Explicit owner action after inspecting actual current desktop; no timer promotion.
+                    check(True)
                     need((out/'OBSERVE').read_bytes()==b'EXECUTE_AFTER_OBSERVED_WIN98_DESKTOP\n','exact explicit desktop-reviewed action required')
                     monitor.call('send-key',{'keys':[{'type':'qcode','data':'meta_l'},{'type':'qcode','data':'r'}],'hold-time':100})
                     time.sleep(.5);pump()
                     for key in ['c',('shift','semicolon'),'backslash',*list('baseobs'),'dot',*list('exe'),'ret']:
                         codes=key if isinstance(key,tuple) else (key,)
                         monitor.call('send-key',{'keys':[{'type':'qcode','data':k} for k in codes],'hold-time':60});time.sleep(.08);pump()
-                    result['observer_invoked']=True
+                    check(True);result['observer_invoked']=True
                 if time.monotonic()>=next_screen:
+                    check(True)
                     image=out/('screen-%03d.png'%index);monitor.call('screendump',{'filename':str(image),'format':'png'})
                     need(image.stat().st_size<=16<<20 and index<91 and sum(p.stat().st_size for p in out.glob('screen-*.png'))<=64<<20,'bounded private capture required')
-                    index+=1;next_screen=time.monotonic()+10
+                    check(True);index+=1;next_screen=time.monotonic()+10
                 capture.atomic_json(out/'status.json',result);logs.pump(timeout=.1)
         finally:
             # Cleanup continues independently of guest deadline/cancellation.
             reap(child,pidfd,monitor)
             monitor.close();monitor=None;logs.pump(check=False);logs.close();logs=None
         need(child.poll() is not None and select.select([pidfd],[],[],0)[0],'actual child reap required')
-        check();os.fsync(clone_fd);os.close(clone_fd);clone_fd=os.open(clone,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
+        check(True);os.fsync(clone_fd);os.close(clone_fd);clone_fd=os.open(clone,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
         fcntl.fcntl(clone_fd,fcntl.F_SETOWN,os.getpid());fcntl.fcntl(clone_fd,fcntl.F_SETLEASE,fcntl.F_RDLCK);frozen_clone=replacement.identity(os.fstat(clone_fd))
+        check(True)
         entries=root_entries(clone_fd,g,check);need(result['observer_invoked'] and 'BASEOBS.JSON' in entries,'actual fresh guest output required')
         member=entries['BASEOBS.JSON'];need(not member['directory'] and 0<member['bytes']<=4<<20,'bounded actual guest report required')
         output=io.BytesIO();replacement.Volume(clone_fd,g,check).file(member['cluster'],member['bytes'],output)
-        observed=report(output.getvalue(),nonce)
+        observed=report(output.getvalue(),nonce);check(True)
         need(replacement.hash_fd(entry['fd'],source['bytes'],check)==source['sha256'],'original final SHA differs')
         for held_entry in held.values():need(replacement.hash_fd(held_entry['fd'],held_entry['pin']['bytes'],check)==held_entry['pin']['sha256'],'retained producer input differs')
+        check(True)
         result.update(status='FRESH_GUEST_OBSERVATION_ONLY',report_sha256=sha(output.getvalue()),observed=observed,source_unchanged=True,actual_child_reaped=True,clone_sha256=replacement.hash_fd(clone_fd,source['bytes'],check))
+        check(True)
         capture.atomic_json(out/'result.json',result)
         return result
     finally:
@@ -221,7 +255,13 @@ def run(request):
         for fd in (clone_fd,pidfd,lock):
             if fd is not None:os.close(fd)
         try:
-            if held_context is not None:held_context.__exit__(*sys.exc_info())
+            if held_context is not None:
+                try:
+                    # Cleanup already reaped the owned child. Always sweep before release,
+                    # even on cancellation; a phase exception cannot waive FD validation.
+                    if held is not None:
+                        for entry in held.values():entry['checkpoint']()
+                finally:held_context.__exit__(*sys.exc_info())
         finally:
             for s,handler in previous.items():signal.signal(s,handler)
 
