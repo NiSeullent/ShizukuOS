@@ -36,7 +36,7 @@ def main():
     out.mkdir(parents=True)
     source = ROOT / "shizukudos/kernel32/ipc.c"
     main_source = ROOT / "shizukudos/kernel32/main.c"
-    fixture = ROOT / "shizukudos/kernel32/tests/test_ipc_host.c"
+    fixture = ROOT / "shizukudos/kernel32/tests/test_ipc_bound_host.c"
     # Snapshot project headers before asking the compiler for its exact closure.
     # A nested include changed during discovery must not acquire a later hash.
     paths = [source, main_source, fixture, Path(__file__).resolve()]
@@ -50,7 +50,7 @@ def main():
     receipt = {"status": "FAIL", "sources_sha256": before, "runs": [], "binaries_sha256": {},
                "compilers": {cc: {"path": str(compilers[cc]), "sha256": digest(b)}
                              for cc, b in compiler_bytes.items()},
-               "guest_executed": False, "production_translation_unit": str(source.relative_to(ROOT))}
+               "guest_executed": False, "host_transport_scope": "GCC actual fixed-GPA binding; ClangASan explicit host transport for actual handler/server, no fixed-GPA admission", "production_translation_unit": str(source.relative_to(ROOT))}
     binaries = {}
     helper_snapshots = {}
     receipt["project_dependencies"] = {}
@@ -97,7 +97,7 @@ def main():
             helper_snapshots[helper] = helper.read_bytes()
             receipt["compiler_helpers_sha256"][str(helper)] = digest(helper_snapshots[helper])
     variants = (("host_gcc", "gcc", ["-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror"], fixture),
-                ("host_clang_asan_ubsan", "clang", ["-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
+                ("host_clang_asan_ubsan", "clang", ["-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror", "-DHOST_TRANSPORT_INJECTION",
                                                   "-fsanitize=address,undefined", "-fno-omit-frame-pointer"], fixture),
                 ("i486", "gcc", K32_FLAGS, source),
                 ("i486_main", "gcc", K32_FLAGS, main_source))
@@ -126,7 +126,7 @@ def main():
                 dependencies.add(str(path.relative_to(ROOT)))
         receipt["project_dependencies"][label] = sorted(dependencies)
         passed = stable() and passed
-    for cc, extra in (("gcc", []), ("clang", ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"])):
+    for cc, extra in (("gcc", []), ("clang", ["-DHOST_TRANSPORT_INJECTION", "-fsanitize=address,undefined", "-fno-omit-frame-pointer"])):
         exe = out / ("ipc-" + cc)
         command = [compilers[cc], "-std=gnu11", "-O1", "-g", "-Wall", "-Wextra", "-Werror", *extra, fixture, "-o", exe]
         built = run(command, "build-" + cc)

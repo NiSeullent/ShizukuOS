@@ -1,0 +1,63 @@
+ShizukuOS native Windows-style themes: Slade, Flute and Jade
+Adapted external theme definition data: GNU GPL version 3.
+This notice applies to theme data; the native ShizukuOS shell/parser retains
+its own separate source license. The operating system is ShizukuOS.
+
+Selected actual upstream snapshots and CSS adaptation sources:
+Slade: B00merang-Project/Windows-7
+  commit 943b5307b349d3526068be0fa32f7549ee37ab45
+  https://github.com/B00merang-Project/Windows-7/tree/943b5307b349d3526068be0fa32f7549ee37ab45
+  gtk-3.0/gtk.css and cinnamon/cinnamon.css
+Flute: B00merang-Project/Windows-10
+  commit 3a4116603b66a9adcb78f3987d7ea6f01de1cbce
+  https://github.com/B00merang-Project/Windows-10/tree/3a4116603b66a9adcb78f3987d7ea6f01de1cbce
+  gtk-3.0/gtk.css, gtk-widgets.css and cinnamon/cinnamon.css
+  Windows 10 theme author: Christian Medel (Elbullazul).
+Jade: B00merang-Project/Windows-Longhorn / Windows Longhorn Jade
+  commit dcfa5e0b79a74da3d04ba49efc41d391552e8026
+  https://github.com/B00merang-Project/Windows-Longhorn/tree/dcfa5e0b79a74da3d04ba49efc41d391552e8026
+  Windows Longhorn Jade/gtk-3.0/gtk.css, gtk-widgets.css and cinnamon/cinnamon.css
+  Original Longhorn 4074 Jade theme: Feren and Elbullazul.
+  Project maintainers: feren, Elbullazul and Cinnamoner.
+
+Exact native token/source correspondence SHA-256:
+efaa8b31252457d95ed328ed9e4f722784a25355640aa34d300965a7f809bca3
+Source package must retain the complete pinned CSS, LICENSE, README and CREDITS
+files together with the adapted native definitions and source correspondence.
+Runtime distribution retains this notice and the full THEME-GPL3.TXT license.
+
+Native adaptation reduces multistop CSS gradients to supported endpoints and
+reuses the Windows-7 author CSS headerbar colors where the original panel
+requires an excluded bitmap. Unsupported alpha/blur/animation is disabled;
+no Microsoft/Dejco imagery, logos, wallpapers, sounds, fonts or icon packages
+were imported. The required Noto Sans KR font provider is kept.
+
+Windows-10 original CREDITS (preserved verbatim):
+[Flat Unity theme]
+Simon Steinbeiß <simon.steinbeiss@univie.ac.at>
+Joern Konopka <cldx3000@googlemail.com>
+Georgi Karavasilev <motorslav@gmail.com>
+David Barr <dpbarr@gmail.com>
+
+[Windows 10 Theme]
+Christian Medel (Elbullazul) <cmedelahumada@gmail.com>
+
+Special thanks to : 
+- bluedxca93 for some helpful theming tricks
+- Trekker for providing a solid Openbox 3 theme basis;
+- The ambiance-theme team from GNOME-Look.org (Ravenfinity);
+- Cinnamoner and Zerophase, long-term supporters of the transfo pack as well as all users who have reported bugs and/or suggested enhancements in the look of the themes;
+- Lohran Rocha for improving the Openbox 3 theme;
+
+Windows-Longhorn original LICENSE.md (preserved verbatim):
+This group project is licensed under the following terms:
+
+- You can freely distribute it and use it
+- You can modify this work as long as you give proper credits to the original authors and make a fair use of the resources
+- The CSS portion of this project is licensed under GPL v3. See [Azurra framework](https://github.com/Elbullazul/Azurra-framework)
+- You MUST include the following disclaimers in your fork:
+
+Most resources from this project were obtained directly from the source material without much modifications.
+
+All resources belong to the Microsoft Corporation.
+All rights are reserved to Microsoft. Windows is a trademark of Microsoft. Windows Longhorn is a trademark of Microsoft. Windows Vista is a trademark of Microsoft.

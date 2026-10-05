@@ -1,0 +1,23 @@
+{
+  "repository": "https://github.com/eythaann/Seelen-UI",
+  "commit": "a1ef246790172f31c0aa2acd524ee0cee9b3155d",
+  "purpose": "source-reference for independently implemented native shell interaction and panel layout",
+  "files": {
+    "LICENSE": {
+      "bytes": 34523,
+      "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef"
+    },
+    "src/ui/svelte/weg/components/Dock.svelte": {
+      "bytes": 5074,
+      "sha256": "81bd93838ec8c558ee2741a335ba9ae59f7e5304576402416ba797ee2ff14a57"
+    },
+    "src/ui/svelte/fancy-toolbar/components/Toolbar.svelte": {
+      "bytes": 8600,
+      "sha256": "e35e8898ba501a82b7450bc7fd8d15a6e3016d6d9c8807a88c73bd8d41c4cd1e"
+    },
+    "src/static/themes/default/styles/weg.scss": {
+      "bytes": 7008,
+      "sha256": "946b28511621854720a8e59f9fb6746ca0b20587ea88f59cfa73e3ea8fa9c642"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "date": "2026-10-05",
+  "scope": "actual installed native ShizukuOS UEFI desktop; older CHAINSAW tuple, new installer/account/expanded desktop pending",
+  "iso_sha256": "70a555f0911903592bc113ea5a42c8b02cec881b3cd8803114c18f9ad4770b55",
+  "actual_images_sha256": {
+    "desktop.png": "e2ff03f6eb2986bd14d76323a4de46393d005ee861f8f5481a97f8b96c9c9017",
+    "start-menu.png": "4d872cb168b38265e42ec8e3a6ee091bb23106502fdc54a04d9751f5bc0c983a",
+    "files.png": "8b6289500fbafe60df33749eed96dd030811f74927fe521193c267cd3a416287",
+    "exit-selected.png": "113eeb965c23f4c56474fb77b3b676c87bc7ca1293fcedc537b155db79a39b5d"
+  },
+  "native_normal_exit": true,
+  "volume_flush": 0,
+  "new_features_guest_complete": false
+}

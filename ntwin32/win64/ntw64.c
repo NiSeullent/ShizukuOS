@@ -21,6 +21,9 @@ static void ntw_zero(void *d, int c, size_t n) { uint8_t *a = d; while (n--) *a+
 #define SHZ_IPC_MEMCPY(d, s, n) ntw_copy((d), (s), (n))
 #define SHZ_IPC_MEMSET(d, c, n) ntw_zero((d), (c), (n))
 #include "../../shizukudos/abi/shz_ipc.h"
+#include "../../shizukudos/abi/shz_w64_owner.h"
+#define NTW64_AUTH_INTERNAL
+#include "ntw64_auth.h"
 
 typedef char info_matches_header[(sizeof(ntw64_info_t) == NTW64_INFO_SIZE) ? 1 : -1];
 
@@ -51,6 +54,18 @@ static struct ntwv_w64_open vxd_info;
 static uint64_t next_request_id = 0x100;
 static int32_t last_status;
 static uint8_t frame[NTWV_W64_SEND_MAX], slot[SHZ_MSG_SLOT_SIZE];
+
+/* Non-elidable wipe: volatile stores, so the compiler cannot drop them as dead. Used for every buffer that held
+ * credentials (see ntw64_auth.c). */
+void ntw64_priv_wipe(void *d, size_t n) { volatile uint8_t *a = (volatile uint8_t *)d; while (n--) *a++ = 0; }
+
+/* Auth-call bookkeeping. call_sent/call_replied describe the most recent call(); uncertain_id is the request id of
+ * a secret-bearing request that was sent but never answered inside the deadline (until a late reply is seen the
+ * outcome is unknown and further secret-bearing calls are refused); known_owner is the endpoint owner id the VxD
+ * stamped on earlier replies (read only, never forged here). */
+static int call_sent, call_replied, auth_busy;
+static uint64_t uncertain_id;
+static uint32_t known_owner;
 
 static BOOL fail(DWORD error) { SetLastError(error); return FALSE; }
 
@@ -253,6 +268,8 @@ static int pump(uint64_t want_id, shz_msg_hdr_t *reply, uint8_t *reply_payload)
                 result = 1;
                 break;
             }
+            if (uncertain_id && h.request_id == uncertain_id)
+                uncertain_id = 0;                   /* the late answer is consumed; its outcome stays unknown */
             continue;                               /* late reply to an abandoned request */
         }
         if (h.flags & SHZ_MSGF_ONEWAY)
@@ -278,13 +295,16 @@ static BOOL call(uint32_t opcode, const void *payload, uint16_t len, const void 
     h.request_id = next_request_id++;
     h.payload_length = len;
     last_status = NTW64_TRANSPORT;
+    call_sent = call_replied = 0;
     if (!vxd_send(&h, payload, extra, extra_bytes, 1))
         return FALSE;
+    call_sent = 1;
     start = GetTickCount();
     for (;;) {
         const int got = pump(h.request_id, reply, reply_payload);
         if (got > 0) {
             last_status = reply->status;
+            call_replied = 1;
             return reply->status == SHZ_OK ? TRUE : fail(win32_of_status(reply->status));
         }
         if (got < 0)
@@ -296,6 +316,51 @@ static BOOL call(uint32_t opcode, const void *payload, uint16_t len, const void 
         Sleep(1);
     }
 }
+
+/* Internal hook for ntw64_auth.c (not exported from NTW32.DLL): one secret-bearing request through the same
+ * ensure_open/call/pump path and static frame as every other W64 call. Returns 1 when a reply frame arrived
+ * (header and payload copied out, its status NOT yet judged), else 0 with SetLastError. *sent is set once the VxD
+ * accepted the frame; sent && !replied means the outcome is unknown: the request id is parked in uncertain_id and
+ * further secret-bearing calls are refused until a late reply for it is drained. The shared send frame is wiped on
+ * every path. The caller owns and wipes `payload`. A re-entered call is refused with ERROR_BUSY. */
+int ntw64_priv_call(uint32_t opcode, const void *payload, uint16_t len, shz_msg_hdr_t *reply, uint8_t *reply_payload,
+                    int *sent)
+{
+    int ok;
+    *sent = 0;
+    if (__sync_lock_test_and_set(&auth_busy, 1)) { SetLastError(ERROR_BUSY); return 0; }
+    if (!ensure_open()) { auth_busy = 0; return 0; }
+    if (uncertain_id) {
+        shz_msg_hdr_t unused;
+        uint8_t unused_payload[SHZ_MSG_MAX_INLINE];
+        if (pump(0, &unused, unused_payload) < 0 || uncertain_id) {
+            auth_busy = 0;
+            SetLastError(ERROR_BUSY);               /* an earlier credential request is still unresolved */
+            return 0;
+        }
+    }
+    ok = call(opcode, payload, len, NULL, 0, reply, reply_payload) || call_replied;
+    ntw64_priv_wipe(frame, sizeof frame);
+    *sent = call_sent;
+    if (!call_replied) {
+        if (call_sent)
+            uncertain_id = next_request_id - 1;
+        ok = 0;
+    }
+    auth_busy = 0;
+    return ok && call_replied;
+}
+
+uint32_t ntw64_priv_owner(void) { return known_owner; }
+/* Learns the owner id from a fully validated reply; a different id later is a mismatch (returns 0). */
+int ntw64_priv_bind_owner(uint32_t id)
+{
+    if (!shz_w64_owner_id_valid(id)) return 0;
+    if (known_owner && known_owner != id) return 0;
+    known_owner = id;
+    return 1;
+}
+uint32_t ntw64_priv_channel_generation(void) { return vxd_info.generation; }
 
 /* Records whose handle was closed while the process ran are released once its EXITED event has arrived. Runs at
  * API entry only, never from inside a pump. */
@@ -531,41 +596,5 @@ BOOL WINAPI NtwCloseProcess64(HANDLE handle)
     if (!call(SHZ_OP_W64_RELEASE, &k, sizeof k, NULL, 0, &reply, reply_payload) && last_status != SHZ_E_NOENT)
         return FALSE;
     r->used = 0;
-    return TRUE;
-}
-
-/* ---------------------------------------------------------------- NTW32-internal GUI transport (not exported)
- * ntw64_gui.c reuses this file's single serialized call()/pump() and record table: the HANDLE must be a live,
- * not-closed record of this generation; its pid is written into the request selector (offset 8). The reply must
- * echo the opcode, carry no pool buffer and have exactly `want_len` bytes. */
-BOOL ntw64_gui_transact(HANDLE handle, uint32_t opcode, uint8_t *payload, uint16_t len, uint8_t *reply_payload,
-                        uint16_t want_len, int32_t *status)
-{
-    struct record *r = record_of(handle);
-    shz_msg_hdr_t reply;
-    *status = NTW64_TRANSPORT;
-    if (!r || r->closed) return fail(NTW64_ERROR_INVALID_HANDLE);
-    if (len < 12u || len > SHZ_MSG_MAX_INLINE || !payload || !reply_payload) return fail(ERROR_INVALID_PARAMETER);
-    if (!ensure_open()) return FALSE;
-    ntw_copy(payload + 8, &r->pid, 4);
-    if (!call(opcode, payload, len, NULL, 0, &reply, reply_payload)) { *status = last_status; return FALSE; }
-    *status = last_status;
-    if (reply.opcode != opcode || (reply.flags & SHZ_MSGF_BUFFER) || reply.buffer_length || reply.payload_length != want_len) {
-        *status = SHZ_E_PROTO;
-        return fail(ERROR_INVALID_DATA);
-    }
-    return TRUE;
-}
-
-/* Drains pending frames once and reports whether the process behind `handle` has exited. */
-BOOL ntw64_gui_poll_exit(HANDLE handle, int *exited, DWORD *exit_code)
-{
-    struct record *r = record_of(handle);
-    shz_msg_hdr_t unused;
-    uint8_t unused_payload[SHZ_MSG_MAX_INLINE];
-    if (!r) return fail(NTW64_ERROR_INVALID_HANDLE);
-    if (!r->exited && pump(0, &unused, unused_payload) < 0) return FALSE;
-    *exited = r->exited;
-    if (r->exited && exit_code) *exit_code = (DWORD)r->exit_code;
     return TRUE;
 }

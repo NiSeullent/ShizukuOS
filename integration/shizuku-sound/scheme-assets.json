@@ -1,0 +1,12 @@
+{
+  "files": [
+    {
+      "path": "SHZSOUND.INI",
+      "media_target": "\\SHZ\\SHZSOUND.INI",
+      "bytes": 502,
+      "sha256": "c53a57d0c322ec8482134f16a24ac121709f0f03e27a03785d0a2a15fbb6bb03"
+    }
+  ],
+  "provider": "Existing WINMM PlaySound alias resolver",
+  "guest_execution": false
+}

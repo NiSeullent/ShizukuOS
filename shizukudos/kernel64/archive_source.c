@@ -77,6 +77,28 @@ int archive_source_origin(shz_storage_provenance_t *out)
  int rc=-1;if(!out)return -1;acquire();if(origin.magic==SHZ_STORAGE_MAGIC){*out=origin;rc=0;}
  mutex_unlock(&lock);return rc;
 }
+/* Return only the actual immutable namespace node backed by a unique extent
+ * in the accepted loader archive. No caller-provided trust or guessed path
+ * grants custody. The origin constructor is immutable for this boot. */
+static fsnode_t *bound_node_locked(const char *path)
+{
+ fsnode_t *node;uint32_t count,i;unsigned selected=0;
+ if(!path||!origin_bytes||!origin_table)return 0;
+ node=fs_lookup(path);
+ if(!node||node->is_dir||node->backing!=FSB_RAM||!node->readonly||!node->data||!node->size||node->size>ARCHIVE_SOURCE_MAX_BYTES)return 0;
+ count=read32(origin_table+8);
+ for(i=0;i<count;i++){
+  const uint8_t *e=origin_table+16+(uint64_t)i*136;
+  uint64_t off=read64(e+120),len=read64(e+128);
+  if(off<=origin_size&&len<=origin_size-off&&fs_lookup((const char *)e)==node&&
+     node->data==origin_bytes+off&&node->size==len)selected++;
+ }
+ return selected==1?node:0;
+}
+fsnode_t *archive_source_bound_node(const char *path)
+{
+ fsnode_t *node;acquire();node=bound_node_locked(path);mutex_unlock(&lock);return node;
+}
 int archive_source_open(void *owner,const char *path,archive_source_t **out,archive_source_info_t *out_info)
 {
  struct archive_source *s=0;fsnode_t *node;uint64_t off=0,length=0;uint32_t count,i;unsigned selected=0,j,any;

@@ -94,7 +94,8 @@
     X(NtReadVirtualMemory, 0xc8) X(NtWriteVirtualMemory, 0xc9) X(NtShzQueryKernelStats, 0xca) \
     X(NtQueryIoCompletion, 0xcb) X(NtOpenEvent, 0xcc) X(NtOpenMutant, 0xcd) X(NtOpenSemaphore, 0xce) \
     X(NtOpenTimer, 0xcf) X(NtOpenIoCompletion, 0x100) /* 0x101: NtDeviceIoControlFile is the NT driver host's 0xe1 */ \
-    X(NtNotifyChangeDirectoryFile, 0x102) X(NtQueryTimer, 0x103) X(NtCreateSection, 0x104)
+    X(NtNotifyChangeDirectoryFile, 0x102) X(NtQueryTimer, 0x103) X(NtCreateSection, 0x104) \
+    X(NtShzSaw, 0x105) /* native identity-bound process cleanup; abi/shz_saw.h */
 
 /* Display/GPU (kernel64/gpu_sys.c; structures in win64/include/shzgpu.h) */
 #define SYSCALL_LIST_GPU(X) \
@@ -102,11 +103,15 @@
     X(NtShzGpuCtxCreate, 0xd4) X(NtShzGpuCtxDestroy, 0xd5) X(NtShzGpuResourceCreate, 0xd6) \
     X(NtShzGpuResourceDestroy, 0xd7) X(NtShzGpuSubmit, 0xd8) X(NtShzGpuTransfer, 0xd9)
 
+/* Audio service (kernel64/audio.c, ABI abi/shz_audio.h): one multiplexed call, 0xdb-0xdf reserved */
+#define SYSCALL_LIST_AUDIO(X) \
+    X(NtShzSound, 0xda)
+
 /* Installer 0xb0-0xbf (kernel64/setup_sys.c): block-device enumeration and raw sector I/O for SHZSETUP.EXE until the
  * storage track's raw-sector syscalls (0xf0-0xff) are merged, plus the post-setup power request. See setup_abi.h. */
 #define SYSCALL_LIST_SETUP(X) \
     X(NtShzSetupBlkQuery, 0xb0) X(NtShzSetupBlkRead, 0xb1) X(NtShzSetupBlkWrite, 0xb2) X(NtShzSetupBlkFlush, 0xb3) \
-    X(NtShzSetupPower, 0xb4) X(NtShzSetupNative, 0xb5)
+    X(NtShzSetupPower, 0xb4) X(NtShzSetupNative, 0xb5) X(NtShzSetupTarget, 0xb6)
 
 /* Raw block devices 0xf0-0xff (kernel64/sysblk.c) */
 #define SYSCALL_LIST_BLK(X) \
@@ -145,6 +150,7 @@ enum {
     SYSCALL_LIST_K32(X)
     SYSCALL_LIST_MISC(X)
     SYSCALL_LIST_GPU(X)
+    SYSCALL_LIST_AUDIO(X)
     SYSCALL_LIST_SETUP(X)
     SYSCALL_LIST_BLK(X)
     SYSCALL_LIST_NTDRV(X)

@@ -13,8 +13,8 @@
  *    translate (GM_ADVANCED; scaling, rotation and shear are refused with ERROR_NOT_SUPPORTED, see gdi_path.c).
  *  - Paths (BeginPath..EndPath) are recorded in device coordinates, as on Windows (gdi_path.c). Enhanced metafiles are
  *    recorded as raster pictures plus comments (gdi_emf.c).
- *  - The only font is the built-in 16-pixel bitmap font: ASCII 8 wide, Unifont Hangul 16 wide (gdi_font.c, gdi_text.c).
- *    One coarse lock protects all GDI state.
+ *  - The system font is Noto Sans / Noto Sans KR 400 from the shared NotoProvider (gdi_text.c, gdi_noto.c); there is no
+ *    built-in bitmap font and no fallback when the pinned assets are missing. One coarse lock protects all GDI state.
  */
 #ifndef SHZ_GDI_INTERNAL_H
 #define SHZ_GDI_INTERNAL_H
@@ -45,7 +45,12 @@ typedef struct bitmap {
 
 typedef struct { LOGPEN lp; int ext; DWORD ext_style; } pen_t;
 typedef struct { LOGBRUSH lb; HBITMAP pattern; } brush_t;
-typedef struct { LOGFONTW lf; int scale; } font_t;
+typedef struct {
+    LOGFONTW lf;
+    int scale;                                              /* legacy 8x16-era integer scale 1..4 (16 * scale), kept for gdi_font_scale */
+    int px;                                                 /* resolved Noto pixel size 1..128, valid when px_state == 1 */
+    int px_state;                                           /* 0 unresolved (lazy, needs the provider), 1 resolved, 2 out of range */
+} font_t;
 typedef struct { rlist_t rl; } rgn_t;
 
 typedef struct dc {

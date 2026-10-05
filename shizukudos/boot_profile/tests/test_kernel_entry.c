@@ -109,10 +109,11 @@ void thread_sleep_ms(uint32_t milliseconds)
 }
 volatile uint32_t ipc_session_end = 1; /* Legacy session signal must not end the owned native service. */
 static thread_t server_thread;
-void ipc_init(const shz_bootinfo_t *bi)
+int ipc_init(const shz_bootinfo_t *bi)
 {
     CHECK(bi->channel_count == 1);
     ++ipc_calls; ipc_sequence = ++fixture_sequence;
+    return 1; /* The actual binder is covered separately; this models success. */
 }
 void ipc_server_thread(void *unused) { (void)unused; }
 thread_t *thread_create(const char *name, void (*worker)(void *), void *arg)
@@ -126,6 +127,16 @@ uint32_t ipc_requests_served(void) { return 0; }
 #else
 uint64_t phys_base_va;
 static uint8_t archive[64];
+/* These profiles never request the optional laptop firmware probe. A call
+ * here is a fixture failure, not successful hardware discovery. */
+int k64_laptop_firmware_init(const shz_bootinfo_t *bi)
+{
+    (void)bi; CHECK(0); return SHZ_E_UNSUPPORTED;
+}
+const struct shz_laptop_firmware *k64_laptop_firmware_snapshot(void)
+{
+    CHECK(0); return NULL;
+}
 void ds_native_init(void) { ++ds_calls; ++fixture_sequence; }
 void ds_native_control(void) { ++control_calls; ++fixture_sequence; }
 void ds_native_timer_ready(void) { }

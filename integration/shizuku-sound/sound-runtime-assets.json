@@ -1,0 +1,143 @@
+{
+  "schema": "shizuku.sound-assets.v1",
+  "source": "original score and oscillator in synthesize.py; no external samples",
+  "scope": "public redistribution candidate; no live integration or guest execution",
+  "license": "CC0-1.0",
+  "guest_playback": false,
+  "generator": {
+    "path": "synthesize.py",
+    "sha256": "d8d307855f8011d6606420f101315b24df117177ff72f71ef3dc52cf046b3f83"
+  },
+  "files": [
+    {
+      "event": "startup",
+      "path": "assets/ShizukuStartup.wav",
+      "media_target": "\\SHZ\\MEDIA\\SHIZUKUSTARTUP.WAV",
+      "bytes": 105002,
+      "sha256": "4948d40a95db8317de64b0ece032906c126c12104fcfeb920f888d5d173dd166",
+      "format": {
+        "channels": 1,
+        "bits": 16,
+        "rate": 22050,
+        "frames": 52479
+      }
+    },
+    {
+      "event": "shutdown",
+      "path": "assets/ShizukuShutdown.wav",
+      "media_target": "\\SHZ\\MEDIA\\SHIZUKUSHUTDOWN.WAV",
+      "bytes": 72810,
+      "sha256": "92e615a9ecd9e6b141b587f6a1e4f1d8939c9a8321cd1f8a16d86575162519b3",
+      "format": {
+        "channels": 1,
+        "bits": 16,
+        "rate": 22050,
+        "frames": 36383
+      }
+    },
+    {
+      "event": "login",
+      "path": "assets/ShizukuLogin.wav",
+      "media_target": "\\SHZ\\MEDIA\\SHIZUKULOGIN.WAV",
+      "bytes": 43704,
+      "sha256": "b6adef7d0f63b69e5f3625a3674b34e1b72584ea0435ba03d55c5e0ab774f4be",
+      "format": {
+        "channels": 1,
+        "bits": 16,
+        "rate": 22050,
+        "frames": 21830
+      }
+    },
+    {
+      "event": "logout",
+      "path": "assets/ShizukuLogout.wav",
+      "media_target": "\\SHZ\\MEDIA\\SHIZUKULOGOUT.WAV",
+      "bytes": 41058,
+      "sha256": "1ffa3a8ce4abbceb9a841c8671c15b2a65f3c60a284da8dde3ab91ee461cd8e4",
+      "format": {
+        "channels": 1,
+        "bits": 16,
+        "rate": 22050,
+        "frames": 20507
+      }
+    },
+    {
+      "event": "error",
+      "path": "assets/ShizukuError.wav",
+      "media_target": "\\SHZ\\MEDIA\\SHIZUKUERROR.WAV",
+      "bytes": 30914,
+      "sha256": "3ce609ddccb942a41ff0b597514029f2a62966c9e69e371e0f3ef18f9c093322",
+      "format": {
+        "channels": 1,
+        "bits": 16,
+        "rate": 22050,
+        "frames": 15435
+      }
+    },
+    {
+      "event": "warning",
+      "path": "assets/ShizukuWarning.wav",
+      "media_target": "\\SHZ\\MEDIA\\SHIZUKUWARNING.WAV",
+      "bytes": 33120,
+      "sha256": "0c157b37335dd1312fc57712cf39273cae702986a391b8101c61bf7f8fdd0287",
+      "format": {
+        "channels": 1,
+        "bits": 16,
+        "rate": 22050,
+        "frames": 16538
+      }
+    },
+    {
+      "event": "notification",
+      "path": "assets/ShizukuNotification.wav",
+      "media_target": "\\SHZ\\MEDIA\\SHIZUKUNOTIFICATION.WAV",
+      "bytes": 28268,
+      "sha256": "079446e0cfd551f28dcf0fa4662024e4d1030bd1830ceea53d9208c1d9849735",
+      "format": {
+        "channels": 1,
+        "bits": 16,
+        "rate": 22050,
+        "frames": 14112
+      }
+    },
+    {
+      "event": "device_connect",
+      "path": "assets/ShizukuConnect.wav",
+      "media_target": "\\SHZ\\MEDIA\\SHIZUKUCONNECT.WAV",
+      "bytes": 27386,
+      "sha256": "b16ac9162eb666cd1f547cbb032875156610a146b3c190ca2b5ca8dea5eeefc7",
+      "format": {
+        "channels": 1,
+        "bits": 16,
+        "rate": 22050,
+        "frames": 13671
+      }
+    },
+    {
+      "event": "device_disconnect",
+      "path": "assets/ShizukuDisconnect.wav",
+      "media_target": "\\SHZ\\MEDIA\\SHIZUKUDISCONNECT.WAV",
+      "bytes": 27386,
+      "sha256": "7fe5ba21049c7a5ee1e37372825e7500b18131f070901f9b7374404741b655e5",
+      "format": {
+        "channels": 1,
+        "bits": 16,
+        "rate": 22050,
+        "frames": 13671
+      }
+    },
+    {
+      "event": "navigation",
+      "path": "assets/ShizukuNavigation.wav",
+      "media_target": "\\SHZ\\MEDIA\\SHIZUKUNAVIGATION.WAV",
+      "bytes": 7100,
+      "sha256": "353ae9768b4d1dd11955a4efd650726a27f92f37402db3634976828f6e3b3ac7",
+      "format": {
+        "channels": 1,
+        "bits": 16,
+        "rate": 22050,
+        "frames": 3528
+      }
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+const input=document.getElementById('doc-search'),results=document.getElementById('results');let pages=[];
+fetch('./search.json').then(r=>{if(!r.ok)throw Error();return r.json()}).then(p=>pages=p).catch(()=>{input.placeholder='아래 문서 목록을 이용하세요';input.disabled=true});
+input.addEventListener('input',()=>{results.replaceChildren();const q=input.value.trim().toLocaleLowerCase();if(!q)return;const found=pages.filter(p=>(p.title+' '+p.text).toLocaleLowerCase().includes(q)).slice(0,7);for(const p of found){const a=document.createElement('a');a.href=p.href;a.textContent=p.title;results.append(a)}if(!found.length){const p=document.createElement('p');p.textContent='일치하는 문서가 없습니다.';results.append(p)}});

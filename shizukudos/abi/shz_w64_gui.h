@@ -1,204 +1,420 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * WIN64 subsystem native GUI frame-pull protocol, version 1 (DRAFT ABI, clone-local claim).
- * Source: PROPOSAL-1A36-ROOT-1A40-74B0-NATIVE-GUI-WIRE-20261003. Opcodes 0x240..0x245 and QUERY capability bit
- * 0x20 are claimed here only for this isolated clone; root/1a40/74b0 must ACK before canonical assignment.
+ * ShizukuDOS WIN64 subsystem: native GUI view protocol v1 -- ISOLATED SOURCE CANDIDATE.
  *
- * Pointer-free little-endian inline packets on the existing W64 channel (shz_msg_hdr_t, SHZ_MSGF_REPLY replies,
- * buffer_length/offset 0). Every request and reply has an exact fixed size, version 1 and zero reserved fields.
- * The pid is a slot SELECTOR only; authority comes from the server's own slot/process/channel binding.
+ * Draft opcodes 0x240..0x245 and capability bit 0x20 per
+ * build/claude-shizuku-dispatch-20261003/native-gui-v1-proposal.md. NOT a declared feature:
+ * Kernel64 MUST NOT set SHZ_W64_CAP_GUI_CANDIDATE in shz_w64_info_t.capabilities, and the
+ * VxD/Core allowlists (shz_w64_owner.h, gui_enabled=0) refuse these opcodes, until the
+ * production hooks exist (derived owner route, admitted slot binding, WM capture/input,
+ * NTW32 entry points, native presenter). Until then the server answers SHZ_E_UNSUPPORTED.
  *
- *   QUERY_VIEW    req 24  -> reply 64 view info
- *   FRAME_ACQUIRE req 64  -> reply 80 snapshot
- *   FRAME_READ    req 64  -> reply 192 (prefix + offset/length + data[128])
- *   FRAME_RELEASE req 48  -> reply 48
- *   INPUT         req 80  -> reply 48 (sequence confirmed)
- *   CLOSE_VIEW    req 48  -> reply 48
- * Pixels: top-down tightly packed B,G,R,X (dword 0x00RRGGBB), stride = width*4, CRC-32 (IEEE) over all bytes. */
+ * Transport: the existing W64 channel and CRC'd shz_msg_hdr_t only. Requests: flags 0,
+ * buffer_length/offset 0, exact payload_length. Replies: flags == SHZ_MSGF_REPLY, same
+ * opcode/request_id/capability_id; status SHZ_OK carries the exact reply payload, any other
+ * status carries payload_length 0. capability_id is the VxD-derived owner (shz_w64_owner.h);
+ * the payload pid is an advisory selector, never an identity. All fields little-endian,
+ * pointer-free; window_id is the opaque 64-bit WM generational id (not an HWND/pointer).
+ */
 #ifndef SHZ_W64_GUI_H
 #define SHZ_W64_GUI_H
+#include <stddef.h>
 #include <stdint.h>
+#include "shz_ipc.h"
+#include "shz_w64_owner.h"
 
-#define SHZ_OP_W64_GUI_QUERY_VIEW    0x240u
-#define SHZ_OP_W64_GUI_FRAME_ACQUIRE 0x241u
-#define SHZ_OP_W64_GUI_FRAME_READ    0x242u
-#define SHZ_OP_W64_GUI_FRAME_RELEASE 0x243u
-#define SHZ_OP_W64_GUI_INPUT         0x244u
-#define SHZ_OP_W64_GUI_CLOSE_VIEW    0x245u
-#define SHZ_OP_W64_GUI_FIRST SHZ_OP_W64_GUI_QUERY_VIEW
-#define SHZ_OP_W64_GUI_LAST  SHZ_OP_W64_GUI_CLOSE_VIEW
+/* ------------------------------------------------------------------ ids / limits */
+#define SHZ_W64_CAP_GUI_CANDIDATE 0x20u     /* distinct from existing caps 1|2|4|8|16 */
+_Static_assert((SHZ_W64_CAP_GUI_CANDIDATE & (SHZ_W64_CAP_CREATE | SHZ_W64_CAP_CONSOLE_OUTPUT | SHZ_W64_CAP_CONSOLE_INPUT |
+                                             SHZ_W64_CAP_KILL | SHZ_W64_CAP_POOL_ARGS)) == 0, "gui cap bit is new");
 
-#define SHZ_W64_CAP_GUI 0x20u                       /* distinct from the five existing W64 capability bits */
+enum shz_w64_gui_opcode {
+    SHZ_OP_W64_GUI_QUERY_VIEW = 0x240,
+    SHZ_OP_W64_GUI_FRAME_ACQUIRE = 0x241,
+    SHZ_OP_W64_GUI_FRAME_READ = 0x242,
+    SHZ_OP_W64_GUI_FRAME_RELEASE = 0x243,
+    SHZ_OP_W64_GUI_INPUT = 0x244,
+    SHZ_OP_W64_GUI_CLOSE_VIEW = 0x245
+};
+_Static_assert(SHZ_OP_W64_GUI_QUERY_VIEW == SHZ_W64_GUI_OP_FIRST && SHZ_OP_W64_GUI_CLOSE_VIEW == SHZ_W64_GUI_OP_LAST,
+               "gui op range agrees with owner allowlist");
+
 #define SHZ_W64_GUI_VERSION 1u
 #define SHZ_W64_GUI_MAX_WIDTH 1024u
 #define SHZ_W64_GUI_MAX_HEIGHT 768u
-#define SHZ_W64_GUI_MAX_FRAME_BYTES (SHZ_W64_GUI_MAX_WIDTH * SHZ_W64_GUI_MAX_HEIGHT * 4u)
-#define SHZ_W64_GUI_CHUNK 128u
-#define SHZ_W64_GUI_LEASE_MS 10000u
-#define SHZ_W64_GUI_FMT_BGRX32 1u
-#define SHZ_W64_GUI_ACQ_CLIENT_ONLY 1u
+#define SHZ_W64_GUI_MAX_FRAME_BYTES 3145728u        /* 1024 * 768 * 4 */
+#define SHZ_W64_GUI_CHUNK 128u                      /* FRAME_READ data bytes per reply */
+#define SHZ_W64_GUI_SNAPSHOT_LEASE_MS 10000u
+#define SHZ_W64_GUI_TRANSFER_DEADLINE_MS 5000u      /* client aggregate, < lease */
+#define SHZ_W64_GUI_VIEWS_PER_PROCESS 1u
+#define SHZ_W64_GUI_SNAPSHOTS_PER_VIEW 1u
+#define SHZ_W64_GUI_COORD_LIMIT 32767               /* |x|,|y| bound for client coordinates */
+#define SHZ_W64_GUI_BPP_BYTES 4u
+_Static_assert(SHZ_W64_GUI_MAX_FRAME_BYTES == SHZ_W64_GUI_MAX_WIDTH * SHZ_W64_GUI_MAX_HEIGHT * 4u, "frame limit");
+_Static_assert(SHZ_W64_GUI_TRANSFER_DEADLINE_MS < SHZ_W64_GUI_SNAPSHOT_LEASE_MS, "transfer within lease");
 
-/* shz_w64_gui_view_t.display_backend: a view exists only over a real K64 display. Neither value claims GOP
- * ownership or acceleration; HOSTED_PRIVATE is the w64-hosted software back buffer with no scanout. */
-#define SHZ_W64_GUI_DISPLAY_SCANOUT 1u              /* gfx_fb backend driving a real framebuffer (virtio/BGA/GOP) */
-#define SHZ_W64_GUI_DISPLAY_HOSTED_PRIVATE 2u       /* private back buffer, frame pull only, no scanout */
-
-/* Derived owner identity. With NTWV_W64_DERIVED_OWNER the NTWRAP9X VxD overwrites capability_id of EVERY W64 SEND
- * with DERIVED|token, token issued per (VWIN32 DIOC tagProcess, system VM, channel generation) and never reused;
- * trusted in-VxD endpoint sends have the DERIVED bit cleared. The application value is never forwarded. */
-#define SHZ_W64_OWNER_CAP_DERIVED 0x80000000u
-#define SHZ_W64_OWNER_CAP_TOKEN 0x7fffffffu
+enum shz_w64_gui_pixel_format { SHZ_W64_GUI_PF_BGRX32 = 1 };   /* top-down, B,G,R,X bytes, X ignored */
+enum shz_w64_gui_view_caps { SHZ_W64_GUI_VCAP_FRAME = 1, SHZ_W64_GUI_VCAP_INPUT = 2 };
+#define SHZ_W64_GUI_VCAP_ALL 3u
+enum shz_w64_gui_acquire_flags { SHZ_W64_GUI_AF_CLIENT_ONLY = 1 };
+#define SHZ_W64_GUI_AF_ALL 1u
 
 enum shz_w64_gui_input_kind {
-    SHZ_W64_GUI_IN_MOVE = 1, SHZ_W64_GUI_IN_LDOWN = 2, SHZ_W64_GUI_IN_LUP = 3, SHZ_W64_GUI_IN_RDOWN = 4,
-    SHZ_W64_GUI_IN_RUP = 5, SHZ_W64_GUI_IN_KEYDOWN = 6, SHZ_W64_GUI_IN_KEYUP = 7, SHZ_W64_GUI_IN_CLOSE = 8
+    SHZ_W64_GUI_IN_POINTER_MOVE = 1,
+    SHZ_W64_GUI_IN_LBUTTON_DOWN = 2,
+    SHZ_W64_GUI_IN_LBUTTON_UP = 3,
+    SHZ_W64_GUI_IN_RBUTTON_DOWN = 4,
+    SHZ_W64_GUI_IN_RBUTTON_UP = 5,
+    SHZ_W64_GUI_IN_KEY_DOWN = 6,
+    SHZ_W64_GUI_IN_KEY_UP = 7,
+    SHZ_W64_GUI_IN_CLOSE = 8          /* posts actual WM_CLOSE to that owned window */
 };
-#define SHZ_W64_GUI_INF_SHIFT 1u
-#define SHZ_W64_GUI_INF_CTRL 2u
-#define SHZ_W64_GUI_INF_ALT 4u
-#define SHZ_W64_GUI_INF_KNOWN 7u
+#define SHZ_W64_GUI_IN_KIND_MAX 8u
+enum shz_w64_gui_input_flags { SHZ_W64_GUI_INF_EXTENDED = 1 };   /* key kinds only: extended scancode */
 
-typedef struct { uint32_t size, version, pid, expected_channel_generation, reserved[2]; } shz_w64_gui_query_t;
+/* ------------------------------------------------------------------ packets */
 typedef struct {
-    uint32_t size, version, pid, process_generation;
-    uint64_t view_id;
-    uint32_t channel_generation, capabilities, max_width, max_height, max_frame_bytes, max_chunk_bytes,
-             snapshot_lease_ms, display_backend;   /* SHZ_W64_GUI_DISPLAY_* (never 0 in a reply) */
-    uint64_t default_window_id;                     /* 0: the process has no visible owned top-level window yet */
-} shz_w64_gui_view_t;
+    uint32_t size;                          /* 0x00 24 */
+    uint32_t version;                       /* 0x04 SHZ_W64_GUI_VERSION */
+    uint32_t pid;                           /* 0x08 advisory selector (nonzero) */
+    uint32_t expected_channel_generation;   /* 0x0c */
+    uint32_t reserved[2];                   /* 0x10 zero */
+} shz_w64_gui_query_req_t;
+
 typedef struct {
-    uint32_t size, version, pid, process_generation;
-    uint64_t window_id, view_id, snapshot_id;
-    uint32_t expected_channel_generation, sequence;
+    uint32_t size;                          /* 0x00 64 */
+    uint32_t version;                       /* 0x04 */
+    uint32_t pid;                           /* 0x08 echo */
+    uint32_t process_generation;            /* 0x0c admitted slot generation, nonzero */
+    uint64_t view_id;                       /* 0x10 monotonic nonzero, never wraps */
+    uint32_t channel_generation;            /* 0x18 */
+    uint32_t capabilities;                  /* 0x1c shz_w64_gui_view_caps */
+    uint32_t max_width, max_height;         /* 0x20 */
+    uint32_t max_frame_bytes;               /* 0x28 */
+    uint32_t max_chunk_bytes;               /* 0x2c == SHZ_W64_GUI_CHUNK */
+    uint32_t snapshot_lease_ms;             /* 0x30 */
+    uint32_t reserved;                      /* 0x34 zero */
+    uint64_t default_window_id;             /* 0x38 0 = process has no window yet */
+} shz_w64_gui_view_info_t;
+
+typedef struct {
+    uint32_t size;                          /* 0x00 whole packet size of this op/direction */
+    uint32_t version;                       /* 0x04 */
+    uint32_t pid;                           /* 0x08 */
+    uint32_t process_generation;            /* 0x0c */
+    uint64_t window_id;                     /* 0x10 */
+    uint64_t view_id;                       /* 0x18 */
+    uint64_t snapshot_id;                   /* 0x20 */
+    uint32_t expected_channel_generation;   /* 0x28 */
+    uint32_t sequence;                      /* 0x2c per-view, nonzero; strictly increasing for INPUT */
 } shz_w64_gui_prefix_t;
-typedef struct { shz_w64_gui_prefix_t p; uint64_t previous_snapshot_id; uint32_t flags, reserved; } shz_w64_gui_acquire_t;
-typedef struct {
-    shz_w64_gui_prefix_t p;
-    uint32_t width, height, stride, byte_length, pixel_format, pixels_crc32, lease_ms, flags;
-} shz_w64_gui_snapshot_t;
-typedef struct { shz_w64_gui_prefix_t p; uint32_t offset, length, reserved[2]; } shz_w64_gui_read_t;
-typedef struct { shz_w64_gui_read_t r; uint8_t data[SHZ_W64_GUI_CHUNK]; } shz_w64_gui_chunk_t;
-typedef struct {
-    shz_w64_gui_prefix_t p;
-    uint32_t kind, flags;
-    int32_t x, y;
-    uint32_t key, scancode, clock_ms, reserved;
-} shz_w64_gui_input_t;
 
-_Static_assert(sizeof(shz_w64_gui_query_t) == 24, "gui query");
-_Static_assert(sizeof(shz_w64_gui_view_t) == 64, "gui view");
+typedef struct {
+    shz_w64_gui_prefix_t p;                 /* window 0 allowed (first owned visible top-level); snapshot 0 */
+    uint64_t previous_snapshot_id;          /* 0x30 advisory */
+    uint32_t flags;                         /* 0x38 SHZ_W64_GUI_AF_* */
+    uint32_t reserved;                      /* 0x3c zero */
+} shz_w64_gui_acquire_req_t;
+
+typedef struct {
+    shz_w64_gui_prefix_t p;                 /* full window id; new nonzero snapshot id */
+    uint32_t width, height;                 /* 0x30 */
+    uint32_t stride;                        /* 0x38 width * 4 */
+    uint32_t byte_length;                   /* 0x3c stride * height */
+    uint32_t pixel_format;                  /* 0x40 SHZ_W64_GUI_PF_BGRX32 */
+    uint32_t pixels_crc32;                  /* 0x44 shz_crc32 over all byte_length bytes */
+    uint32_t lease_ms;                      /* 0x48 */
+    uint32_t flags;                         /* 0x4c echo of request flags */
+} shz_w64_gui_acquire_reply_t;
+
+typedef struct {
+    shz_w64_gui_prefix_t p;
+    uint32_t offset, length;                /* 0x30 */
+    uint32_t reserved[2];                   /* 0x38 zero */
+} shz_w64_gui_read_req_t;
+
+typedef struct {
+    shz_w64_gui_prefix_t p;
+    uint32_t offset, length;                /* 0x30 echo */
+    uint32_t reserved[2];                   /* 0x38 zero */
+    uint8_t data[SHZ_W64_GUI_CHUNK];        /* 0x40 length bytes, zero tail */
+} shz_w64_gui_read_reply_t;
+
+typedef struct {
+    shz_w64_gui_prefix_t p;
+    uint32_t kind;                          /* 0x30 shz_w64_gui_input_kind */
+    uint32_t flags;                         /* 0x34 shz_w64_gui_input_flags */
+    int32_t x, y;                           /* 0x38 client coordinates */
+    uint32_t key;                           /* 0x40 VK 1..254 for key kinds, else 0 */
+    uint32_t scancode;                      /* 0x44 0..0xff for key kinds, else 0 */
+    uint32_t clock_ms;                      /* 0x48 client timestamp, informational */
+    uint32_t reserved;                      /* 0x4c zero */
+} shz_w64_gui_input_req_t;
+
+/* RELEASE request/reply, CLOSE_VIEW request/reply and INPUT reply are a bare prefix (48). */
+
+_Static_assert(sizeof(shz_w64_gui_query_req_t) == 24, "gui query req");
+_Static_assert(sizeof(shz_w64_gui_view_info_t) == 64, "gui view info");
+_Static_assert(__builtin_offsetof(shz_w64_gui_view_info_t, default_window_id) == 0x38, "gui view info tail");
 _Static_assert(sizeof(shz_w64_gui_prefix_t) == 48, "gui prefix");
-_Static_assert(sizeof(shz_w64_gui_acquire_t) == 64, "gui acquire");
-_Static_assert(sizeof(shz_w64_gui_snapshot_t) == 80, "gui snapshot");
-_Static_assert(sizeof(shz_w64_gui_read_t) == 64, "gui read");
-_Static_assert(sizeof(shz_w64_gui_chunk_t) == 192, "gui chunk = SHZ_MSG_MAX_INLINE");
-_Static_assert(sizeof(shz_w64_gui_input_t) == 80, "gui input");
+_Static_assert(sizeof(shz_w64_gui_acquire_req_t) == 64, "gui acquire req");
+_Static_assert(sizeof(shz_w64_gui_acquire_reply_t) == 80, "gui acquire reply");
+_Static_assert(sizeof(shz_w64_gui_read_req_t) == 64, "gui read req");
+_Static_assert(sizeof(shz_w64_gui_read_reply_t) == 192, "gui read reply");
+_Static_assert(sizeof(shz_w64_gui_read_reply_t) <= SHZ_MSG_MAX_INLINE, "gui read reply inline");
+_Static_assert(sizeof(shz_w64_gui_input_req_t) == 80, "gui input req");
 
-static inline void shz_w64_gui_copy(void *dst, const void *src, uint32_t n)
+/* Exact payload sizes per opcode/direction; 0 = not a GUI op. */
+SHZ_IPC_INLINE uint32_t shz_w64_gui_req_size(uint32_t op)
 {
-    uint8_t *d = (uint8_t *)dst;
-    const uint8_t *s = (const uint8_t *)src;
-    while (n--) *d++ = *s++;
-}
-
-static inline void shz_w64_gui_zero(void *dst, uint32_t n)
-{
-    uint8_t *d = (uint8_t *)dst;
-    while (n--) *d++ = 0;
-}
-
-/* Request size the receiver must see for `opcode`, 0 for a non-GUI opcode. */
-static inline uint32_t shz_w64_gui_request_size(uint32_t opcode)
-{
-    switch (opcode) {
-    case SHZ_OP_W64_GUI_QUERY_VIEW: return sizeof(shz_w64_gui_query_t);
-    case SHZ_OP_W64_GUI_FRAME_ACQUIRE: return sizeof(shz_w64_gui_acquire_t);
-    case SHZ_OP_W64_GUI_FRAME_READ: return sizeof(shz_w64_gui_read_t);
+    switch (op) {
+    case SHZ_OP_W64_GUI_QUERY_VIEW: return sizeof(shz_w64_gui_query_req_t);
+    case SHZ_OP_W64_GUI_FRAME_ACQUIRE: return sizeof(shz_w64_gui_acquire_req_t);
+    case SHZ_OP_W64_GUI_FRAME_READ: return sizeof(shz_w64_gui_read_req_t);
     case SHZ_OP_W64_GUI_FRAME_RELEASE: case SHZ_OP_W64_GUI_CLOSE_VIEW: return sizeof(shz_w64_gui_prefix_t);
-    case SHZ_OP_W64_GUI_INPUT: return sizeof(shz_w64_gui_input_t);
+    case SHZ_OP_W64_GUI_INPUT: return sizeof(shz_w64_gui_input_req_t);
     default: return 0;
     }
 }
-
-static inline uint32_t shz_w64_gui_reply_size(uint32_t opcode)
+SHZ_IPC_INLINE uint32_t shz_w64_gui_reply_size(uint32_t op)
 {
-    switch (opcode) {
-    case SHZ_OP_W64_GUI_QUERY_VIEW: return sizeof(shz_w64_gui_view_t);
-    case SHZ_OP_W64_GUI_FRAME_ACQUIRE: return sizeof(shz_w64_gui_snapshot_t);
-    case SHZ_OP_W64_GUI_FRAME_READ: return sizeof(shz_w64_gui_chunk_t);
+    switch (op) {
+    case SHZ_OP_W64_GUI_QUERY_VIEW: return sizeof(shz_w64_gui_view_info_t);
+    case SHZ_OP_W64_GUI_FRAME_ACQUIRE: return sizeof(shz_w64_gui_acquire_reply_t);
+    case SHZ_OP_W64_GUI_FRAME_READ: return sizeof(shz_w64_gui_read_reply_t);
     case SHZ_OP_W64_GUI_FRAME_RELEASE: case SHZ_OP_W64_GUI_CLOSE_VIEW: case SHZ_OP_W64_GUI_INPUT:
         return sizeof(shz_w64_gui_prefix_t);
     default: return 0;
     }
 }
 
-/* Selector pid of any well-sized GUI request (offset 8 in every request), 0 if the payload is short. */
-static inline uint32_t shz_w64_gui_selector_pid(const void *payload, uint32_t length)
+/* ------------------------------------------------------------------ header checks */
+/* Core: request header. Owner/authority/allowlist is checked separately (shz_w64_owner.h). */
+SHZ_IPC_INLINE int shz_w64_gui_req_hdr_check(const shz_msg_hdr_t *m, uint32_t channel_generation)
 {
-    uint32_t pid = 0;
-    if (payload && length >= 12u) shz_w64_gui_copy(&pid, (const uint8_t *)payload + 8, 4);
-    return pid;
+    const uint32_t need = m ? shz_w64_gui_req_size(m->opcode) : 0;
+    if (!need)
+        return SHZ_E_PROTO;
+    if (m->flags != 0 || m->buffer_length || m->buffer_offset || m->payload_length != need)
+        return SHZ_E_INVALID;
+    if (!shz_w64_owner_id_valid(m->capability_id))
+        return SHZ_E_DENIED;
+    if (m->generation != channel_generation)
+        return SHZ_E_STALE;
+    return SHZ_OK;
 }
 
-/* FRAME_READ bounds: 1..128 bytes, 4-aligned offset and length, inside the image. 0 = valid. */
-static inline int shz_w64_gui_read_bounds(uint32_t byte_length, uint32_t offset, uint32_t length)
+/* Client: reply header for request (op, request_id, owner). Returns SHZ_OK when a full payload
+ * follows, the server's negative status for a well-formed empty error reply, else SHZ_E_PROTO. */
+SHZ_IPC_INLINE int shz_w64_gui_reply_hdr_check(const shz_msg_hdr_t *m, uint32_t op, uint64_t request_id, uint32_t owner_id)
 {
-    if (!length || length > SHZ_W64_GUI_CHUNK || (offset & 3u) || (length & 3u) || (byte_length & 3u)) return -1;
-    if (offset > byte_length || length > byte_length - offset) return -1;
-    return 0;
+    const uint32_t need = shz_w64_gui_reply_size(op);
+    if (!m || !need || m->opcode != op || m->flags != SHZ_MSGF_REPLY || m->request_id != request_id ||
+        m->capability_id != owner_id || m->buffer_length || m->buffer_offset)
+        return SHZ_E_PROTO;
+    if (m->status != SHZ_OK)
+        return (m->payload_length == 0 && m->status < 0) ? m->status : SHZ_E_PROTO;
+    return m->payload_length == need ? SHZ_OK : SHZ_E_PROTO;
 }
 
-/* Checked stride*height for a snapshot; 0 when the geometry is invalid or over the advertised limits. */
-static inline uint32_t shz_w64_gui_frame_bytes(uint32_t width, uint32_t height)
+/* ------------------------------------------------------------------ request validators (Core) */
+SHZ_IPC_INLINE int shz_w64_gui_query_check(const void *payload, uint32_t channel_generation, shz_w64_gui_query_req_t *out)
 {
-    if (!width || !height || width > SHZ_W64_GUI_MAX_WIDTH || height > SHZ_W64_GUI_MAX_HEIGHT) return 0;
-    return width * 4u * height;                     /* <= 3145728: no overflow */
+    shz_w64_gui_query_req_t q;
+    if (!payload || !out)
+        return SHZ_E_PROTO;
+    SHZ_IPC_MEMCPY(&q, payload, sizeof q);
+    if (q.size != sizeof q || q.version != SHZ_W64_GUI_VERSION || q.pid == 0 || q.reserved[0] || q.reserved[1])
+        return SHZ_E_INVALID;
+    if (q.expected_channel_generation != channel_generation)
+        return SHZ_E_STALE;
+    *out = q;
+    return SHZ_OK;
 }
 
-/* IEEE 802.3 CRC-32 (reflected 0xEDB88320), table-free so it compiles in every profile. Start with crc = 0. */
-static inline uint32_t shz_w64_gui_crc32(uint32_t crc, const void *data, uint32_t n)
+/* Common prefix rules for a request of `op` (not QUERY_VIEW). */
+SHZ_IPC_INLINE int shz_w64_gui_prefix_req_check(const shz_w64_gui_prefix_t *p, uint32_t op, uint32_t channel_generation)
 {
-    const uint8_t *p = (const uint8_t *)data;
-    crc = ~crc;
-    while (n--) {
-        unsigned k;
-        crc ^= *p++;
-        for (k = 0; k < 8; ++k) crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+    const uint32_t need = shz_w64_gui_req_size(op);
+    if (!need || op == SHZ_OP_W64_GUI_QUERY_VIEW)
+        return SHZ_E_PROTO;
+    if (p->size != need || p->version != SHZ_W64_GUI_VERSION || p->pid == 0 || p->process_generation == 0 ||
+        p->view_id == 0 || p->sequence == 0)
+        return SHZ_E_INVALID;
+    if (op != SHZ_OP_W64_GUI_FRAME_ACQUIRE && p->window_id == 0)
+        return SHZ_E_INVALID;                       /* window 0 only selects for ACQUIRE */
+    if ((op == SHZ_OP_W64_GUI_FRAME_READ || op == SHZ_OP_W64_GUI_FRAME_RELEASE) ? p->snapshot_id == 0
+                                                                                : p->snapshot_id != 0)
+        return SHZ_E_INVALID;
+    if (p->expected_channel_generation != channel_generation)
+        return SHZ_E_STALE;
+    return SHZ_OK;
+}
+
+SHZ_IPC_INLINE int shz_w64_gui_acquire_check(const void *payload, uint32_t channel_generation, shz_w64_gui_acquire_req_t *out)
+{
+    shz_w64_gui_acquire_req_t a;
+    int rc;
+    if (!payload || !out)
+        return SHZ_E_PROTO;
+    SHZ_IPC_MEMCPY(&a, payload, sizeof a);
+    if ((rc = shz_w64_gui_prefix_req_check(&a.p, SHZ_OP_W64_GUI_FRAME_ACQUIRE, channel_generation)) != SHZ_OK)
+        return rc;
+    if ((a.flags & ~SHZ_W64_GUI_AF_ALL) || a.reserved)
+        return SHZ_E_INVALID;
+    *out = a;
+    return SHZ_OK;
+}
+
+SHZ_IPC_INLINE int shz_w64_gui_read_check(const void *payload, uint32_t channel_generation, shz_w64_gui_read_req_t *out)
+{
+    shz_w64_gui_read_req_t r;
+    int rc;
+    if (!payload || !out)
+        return SHZ_E_PROTO;
+    SHZ_IPC_MEMCPY(&r, payload, sizeof r);
+    if ((rc = shz_w64_gui_prefix_req_check(&r.p, SHZ_OP_W64_GUI_FRAME_READ, channel_generation)) != SHZ_OK)
+        return rc;
+    if (r.reserved[0] || r.reserved[1] || r.length == 0 || r.length > SHZ_W64_GUI_CHUNK ||
+        (r.offset & 3u) || (r.length & 3u))
+        return SHZ_E_INVALID;
+    *out = r;
+    return SHZ_OK;
+}
+
+/* Core, after locating the held snapshot: overflow-safe range check against its byte_length. */
+SHZ_IPC_INLINE int shz_w64_gui_read_range_check(uint32_t offset, uint32_t length, uint32_t byte_length)
+{
+    return (offset <= byte_length && length <= byte_length - offset) ? SHZ_OK : SHZ_E_RANGE;
+}
+
+/* RELEASE and CLOSE_VIEW: bare prefix. */
+SHZ_IPC_INLINE int shz_w64_gui_prefix_only_check(const void *payload, uint32_t op, uint32_t channel_generation,
+                                                 shz_w64_gui_prefix_t *out)
+{
+    shz_w64_gui_prefix_t p;
+    int rc;
+    if (!payload || !out || (op != SHZ_OP_W64_GUI_FRAME_RELEASE && op != SHZ_OP_W64_GUI_CLOSE_VIEW))
+        return SHZ_E_PROTO;
+    SHZ_IPC_MEMCPY(&p, payload, sizeof p);
+    if ((rc = shz_w64_gui_prefix_req_check(&p, op, channel_generation)) != SHZ_OK)
+        return rc;
+    *out = p;
+    return SHZ_OK;
+}
+
+SHZ_IPC_INLINE int shz_w64_gui_input_check(const void *payload, uint32_t channel_generation, shz_w64_gui_input_req_t *out)
+{
+    shz_w64_gui_input_req_t in;
+    int rc;
+    if (!payload || !out)
+        return SHZ_E_PROTO;
+    SHZ_IPC_MEMCPY(&in, payload, sizeof in);
+    if ((rc = shz_w64_gui_prefix_req_check(&in.p, SHZ_OP_W64_GUI_INPUT, channel_generation)) != SHZ_OK)
+        return rc;
+    if (in.reserved || in.kind == 0 || in.kind > SHZ_W64_GUI_IN_KIND_MAX)
+        return SHZ_E_INVALID;
+    switch (in.kind) {
+    case SHZ_W64_GUI_IN_KEY_DOWN: case SHZ_W64_GUI_IN_KEY_UP:
+        if ((in.flags & ~(uint32_t)SHZ_W64_GUI_INF_EXTENDED) || in.key == 0 || in.key > 254u || in.scancode > 0xffu ||
+            in.x || in.y)
+            return SHZ_E_INVALID;
+        break;
+    case SHZ_W64_GUI_IN_CLOSE:
+        if (in.flags || in.key || in.scancode || in.x || in.y)
+            return SHZ_E_INVALID;
+        break;
+    default: /* pointer kinds */
+        if (in.flags || in.key || in.scancode || in.x > SHZ_W64_GUI_COORD_LIMIT || in.x < -SHZ_W64_GUI_COORD_LIMIT ||
+            in.y > SHZ_W64_GUI_COORD_LIMIT || in.y < -SHZ_W64_GUI_COORD_LIMIT)
+            return SHZ_E_INVALID;
     }
-    return ~crc;
+    *out = in;
+    return SHZ_OK;
 }
-static inline int shz_w64_owner_cap_derived(uint32_t cap)
+
+/* ------------------------------------------------------------------ reply validators (client) */
+/* Reply prefix must repeat the request tuple. ACQUIRE may resolve window 0 and must return a
+ * new nonzero snapshot; READ/RELEASE echo the snapshot; INPUT/CLOSE echo snapshot 0. */
+SHZ_IPC_INLINE int shz_w64_gui_prefix_reply_check(const shz_w64_gui_prefix_t *rep, const shz_w64_gui_prefix_t *req, uint32_t op)
 {
-    return (cap & SHZ_W64_OWNER_CAP_DERIVED) != 0 && (cap & SHZ_W64_OWNER_CAP_TOKEN) != 0;
+    const uint32_t need = shz_w64_gui_reply_size(op);
+    if (!need || op == SHZ_OP_W64_GUI_QUERY_VIEW || rep->size != need || rep->version != SHZ_W64_GUI_VERSION ||
+        rep->pid != req->pid || rep->process_generation != req->process_generation || rep->view_id != req->view_id ||
+        rep->expected_channel_generation != req->expected_channel_generation || rep->sequence != req->sequence)
+        return SHZ_E_PROTO;
+    if (op == SHZ_OP_W64_GUI_FRAME_ACQUIRE) {
+        if (rep->window_id == 0 || (req->window_id && rep->window_id != req->window_id) || rep->snapshot_id == 0)
+            return SHZ_E_PROTO;
+    } else if (rep->window_id != req->window_id || rep->snapshot_id != req->snapshot_id) {
+        return SHZ_E_PROTO;
+    }
+    return SHZ_OK;
 }
-/* The one authority predicate for every GUI op: the request's endpoint identity must equal the identity that
- * created the slot (the pid in the payload only SELECTS the slot). When derived_required, both identities must be
- * VxD-derived; an application cannot forge a different Win98 process's derived token through the VxD. */
-static inline int shz_w64_gui_subject_authorized(uint32_t owner_cap, uint32_t request_cap, int derived_required)
+
+SHZ_IPC_INLINE int shz_w64_gui_view_info_check(const void *payload, const shz_w64_gui_query_req_t *req,
+                                               shz_w64_gui_view_info_t *out)
 {
-    if (owner_cap != request_cap) return 0;
-    return !derived_required || shz_w64_owner_cap_derived(request_cap);
+    shz_w64_gui_view_info_t v;
+    if (!payload || !req || !out)
+        return SHZ_E_PROTO;
+    SHZ_IPC_MEMCPY(&v, payload, sizeof v);
+    if (v.size != sizeof v || v.version != SHZ_W64_GUI_VERSION || v.pid != req->pid || v.process_generation == 0 ||
+        v.view_id == 0 || v.channel_generation != req->expected_channel_generation || v.reserved ||
+        !(v.capabilities & SHZ_W64_GUI_VCAP_FRAME) || (v.capabilities & ~SHZ_W64_GUI_VCAP_ALL) ||
+        v.max_width == 0 || v.max_width > SHZ_W64_GUI_MAX_WIDTH || v.max_height == 0 ||
+        v.max_height > SHZ_W64_GUI_MAX_HEIGHT || v.max_frame_bytes == 0 ||
+        (uint64_t)v.max_frame_bytes > (uint64_t)v.max_width * v.max_height * 4u ||
+        v.max_chunk_bytes != SHZ_W64_GUI_CHUNK || v.snapshot_lease_ms == 0 ||
+        v.snapshot_lease_ms > SHZ_W64_GUI_SNAPSHOT_LEASE_MS || v.snapshot_lease_ms <= SHZ_W64_GUI_TRANSFER_DEADLINE_MS)
+        return SHZ_E_PROTO;
+    *out = v;
+    return SHZ_OK;
 }
-/* wire b5 s2: on an attested channel a DERIVED (VxD-stamped user) sender acts only on the slot it created; a
- * non-DERIVED capability there is the VxD's own in-ring-0 endpoint. Unattested channel: legacy (no isolation). */
-static inline int shz_w64_console_owner_ok(int attested, uint32_t owner_cap, uint32_t request_cap)
+
+SHZ_IPC_INLINE int shz_w64_gui_acquire_reply_check(const void *payload, const shz_w64_gui_acquire_req_t *req,
+                                                   const shz_w64_gui_view_info_t *view, shz_w64_gui_acquire_reply_t *out)
 {
-    if (!attested || !shz_w64_owner_cap_derived(request_cap)) return 1;
-    return owner_cap == request_cap;
+    shz_w64_gui_acquire_reply_t a;
+    uint64_t bytes;
+    if (!payload || !req || !view || !out)
+        return SHZ_E_PROTO;
+    SHZ_IPC_MEMCPY(&a, payload, sizeof a);
+    if (shz_w64_gui_prefix_reply_check(&a.p, &req->p, SHZ_OP_W64_GUI_FRAME_ACQUIRE) != SHZ_OK)
+        return SHZ_E_PROTO;
+    bytes = (uint64_t)a.width * 4u * a.height;
+    if (a.width == 0 || a.width > view->max_width || a.height == 0 || a.height > view->max_height ||
+        a.stride != a.width * 4u || bytes != a.byte_length || bytes > view->max_frame_bytes ||
+        a.pixel_format != SHZ_W64_GUI_PF_BGRX32 || a.lease_ms == 0 || a.lease_ms > view->snapshot_lease_ms ||
+        a.flags != req->flags)
+        return SHZ_E_PROTO;
+    *out = a;
+    return SHZ_OK;
 }
-/* Per-authorization console rule over shz_chan_auth_state(): revoked (attester gone after a positive attestation)
- * refuses every sender, including the former in-VxD endpoint; legacy rules apply only to a never-attested channel. */
-static inline int shz_w64_console_owner_auth(int attested, int revoked, uint32_t owner_cap, uint32_t request_cap)
+
+SHZ_IPC_INLINE int shz_w64_gui_read_reply_check(const void *payload, const shz_w64_gui_read_req_t *req,
+                                                shz_w64_gui_read_reply_t *out)
 {
-    if (revoked) return 0;
-    return shz_w64_console_owner_ok(attested, owner_cap, request_cap);
+    unsigned i;
+    if (!payload || !req || !out)
+        return SHZ_E_PROTO;
+    SHZ_IPC_MEMCPY(out, payload, sizeof *out);
+    if (shz_w64_gui_prefix_reply_check(&out->p, &req->p, SHZ_OP_W64_GUI_FRAME_READ) != SHZ_OK ||
+        out->offset != req->offset || out->length != req->length || out->reserved[0] || out->reserved[1])
+        return SHZ_E_PROTO;
+    for (i = out->length; i < SHZ_W64_GUI_CHUNK; ++i)
+        if (out->data[i])
+            return SHZ_E_PROTO;
+    return SHZ_OK;
 }
-/* Supervised GUI rule: derived creator identity AND the VxD stamping attested by the Supervisor for this generation. */
-static inline int shz_w64_gui_subject_ok(uint32_t owner_cap, uint32_t request_cap, int derived_required, int attested)
+
+/* RELEASE, CLOSE_VIEW and INPUT replies: bare prefix echo. */
+SHZ_IPC_INLINE int shz_w64_gui_ack_reply_check(const void *payload, const shz_w64_gui_prefix_t *req, uint32_t op)
 {
-    return shz_w64_gui_subject_authorized(owner_cap, request_cap, derived_required) && (!derived_required || attested);
-}
-static inline int shz_w64_gui_display_valid(uint32_t display_backend)
-{
-    return display_backend == SHZ_W64_GUI_DISPLAY_SCANOUT || display_backend == SHZ_W64_GUI_DISPLAY_HOSTED_PRIVATE;
+    shz_w64_gui_prefix_t p;
+    if (!payload || !req || (op != SHZ_OP_W64_GUI_FRAME_RELEASE && op != SHZ_OP_W64_GUI_CLOSE_VIEW &&
+                             op != SHZ_OP_W64_GUI_INPUT))
+        return SHZ_E_PROTO;
+    SHZ_IPC_MEMCPY(&p, payload, sizeof p);
+    return shz_w64_gui_prefix_reply_check(&p, req, op);
 }
 #endif

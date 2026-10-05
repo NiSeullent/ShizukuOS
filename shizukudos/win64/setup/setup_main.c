@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * SHZSETUP.EXE: the ShizukuDOS installer as a Win64 console program on Kernel64.
+ * SHZSETUP.EXE: the ShizukuOS native installer executable.
  *
  *   SHZSETUP.EXE [/unattend <answer.ini>] [/payload <dir>]
  *     defaults: C:\SHZ\SETUP\SHZSETUP.INI and C:\SHZ\SETUP\PAYLOAD (manifest.json, ESP.SIM, SYSTEM.ARC, GPTMBR.BIN)
@@ -105,16 +105,11 @@ static int native_cli(const plat_t *p, int argc, char **argv)
 {
     native_setup_request_v1_t q;
     native_setup_result_v1_t r;
-    native_setup_szou_request_v1_t sq;
-    native_setup_szou_ops_v1_t so;
-    native_setup_szou_result_v1_t sr;
-    int szou_resume = 0;
     shz_native_runtime runtime;
     int provider_rc;
     unsigned seen = 0;
     int i;
-    memset(&q, 0, sizeof q); memset(&sq, 0, sizeof sq); memset(&so, 0, sizeof so);
-    sq.version = NATIVE_SETUP_SZOU_VERSION; sq.bytes = sizeof sq;
+    memset(&q, 0, sizeof q);
     q.version = NATIVE_SETUP_VERSION; q.bytes = sizeof q;
     q.reviewed_target.disk.sector_size = 512;
     if (argc < 3 || strlen(argv[2]) > NATIVE_SETUP_PATH_MAX) goto bad;
@@ -172,13 +167,6 @@ static int native_cli(const plat_t *p, int argc, char **argv)
             }
             if (!n || n > UINT64_MAX/512) goto bad;
             q.reviewed_target.disk.sectors = n;
-        } else if (!strcmp(argv[i], "/szou")) {
-            /* Retained-source name only; bytes/SHA come from the kernel phase record. */
-            bit = 512; if (!*s || strlen(s) > NATIVE_SETUP_PATH_MAX) goto bad; sq.szou_path = s;
-        } else if (!strcmp(argv[i], "/szou-root")) {
-            bit = 1024; if (!*s || strlen(s) > NATIVE_SETUP_SZOU_ROOT_MAX) goto bad; sq.target_root = s;
-        } else if (!strcmp(argv[i], "/szou-resume")) {
-            bit = 2048; if (strcmp(s, "PENDING")) goto bad; szou_resume = 1;
         } else if (!strcmp(argv[i], "/confirm")) {
             bit = 32; if (strcmp(s, "ERASE")) goto bad; q.confirmation = s;
         } else goto bad;
@@ -186,11 +174,10 @@ static int native_cli(const plat_t *p, int argc, char **argv)
         seen |= bit;
     }
     if ((seen & 63) != 63 || ((seen & 192) && (seen & 192) != 192)) goto bad;
-    if (((seen & 1536) && (seen & 1536) != 1536) || ((seen & 2048) && (seen & 1536))) goto bad;
     memset(&runtime, 0, sizeof runtime);
     provider_rc=shz_native_runtime_init(&runtime,p);
     if (!provider_rc) {
-        if ((seen & 511) != 511) {
+        if (seen != 511) {
             shz_puts("NATIVE-SETUP-RESULT: FAIL actual reviewed index, whole ID and generation required (no disk writes)\n");
             return 1;
         }
@@ -198,19 +185,8 @@ static int native_cli(const plat_t *p, int argc, char **argv)
             shz_puts("NATIVE-SETUP-RESULT: FAIL actual disk enumeration failed (no disk writes)\n");
             return 1;
         }
-        if (seen & 3584) {
-            so.version = NATIVE_SETUP_SZOU_VERSION; so.bytes = sizeof so; so.ctx = &runtime;
-            so.phase_pin = shz_native_runtime_phase_pin;
-            shz_native_provider_run_original_userland(&runtime.provider, &so, &q, szou_resume ? 0 : &sq, &r, &sr);
-            return r.ok && sr.ok ? 0 : 1;
-        }
         shz_native_provider_run(&runtime.provider,&q,&r);
     } else {
-        if (seen & 3584) {
-            /* No process-owned provider: no phase record or claim can exist. */
-            shz_puts("NATIVE-SZOU-RESULT: FAIL independent kernel admission provider absent (no disk writes)\n");
-            return 1;
-        }
         shz_puts(provider_rc == -2 ? "NATIVE-PROVIDER: independent producer admission absent\n" :
                  "NATIVE-PROVIDER: process-owned backend unavailable\n");
         setup_run_native(p, 0, &q, &r);
@@ -270,6 +246,18 @@ int main(int argc, char **argv)
                 return 1;
             }
         }
+    }
+    if (interactive && !native_mode) {
+        setup_ui_backend_t backend;
+        int ui_rc;
+        memset(&r,0,sizeof r);
+        if(blkio_public_backend(&backend))ui_rc=-1;
+        else ui_rc=setup_ui_run(&P,&backend,interactive_answer,sizeof interactive_answer,
+                               ui_answer_path,payload,&r);
+        BCryptCloseAlgorithmProvider(sha_alg,0);
+        if(ui_rc){printf(ui_rc>0?"SETUP-RESULT: CANCELLED (no disk writes)\n":
+                                      "SETUP-RESULT: FAIL public installer authority/UI\n");return ui_rc>0?0:1;}
+        blkio_power(r.power);return r.ok?0:1;
     }
     if (interactive) {
         int chosen = native_mode ? setup_ui_choose_native(&P,&native) :

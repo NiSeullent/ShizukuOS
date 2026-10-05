@@ -218,7 +218,10 @@ static int systrace_on = -1;
  * operations that preceded a CHECK failure are visible, with their arguments and the tick they happened at. */
 #define SYSALL_RING 4096
 #define SYSALL_SHOW 70
-static struct { uint32_t num, st; uint64_t tid, a1, a2, a3, tick; } sysall[SYSALL_RING];
+struct sysall_rec { uint32_t num, st; uint64_t tid, a1, a2, a3, tick; };
+/* Opt-in debug ring: 192 KiB, so it is allocated from the heap only when shz.systrace.all is on instead of sitting in the
+ * image's bss (which must end below the 3 MiB heap start). */
+static struct sysall_rec *sysall;
 static unsigned sysall_head;
 static int sysall_on = -1;
 
@@ -227,7 +230,7 @@ static const char *syscall_name(uint32_t num)
     static const struct { const char *name; uint32_t num; } tbl[] = {
 #define X(n, v) { #n, v },
         SYSCALL_LIST(X) SYSCALL_LIST_REGISTRY(X) SYSCALL_LIST_GRAPHICS(X) SYSCALL_LIST_NET(X) SYSCALL_LIST_K32(X) SYSCALL_LIST_MISC(X)
-        SYSCALL_LIST_GPU(X) SYSCALL_LIST_SETUP(X) SYSCALL_LIST_BLK(X) SYSCALL_LIST_NTDRV(X) SYSCALL_LIST_IPC_MISC(X) SYSCALL_LIST_IPC(X)
+        SYSCALL_LIST_GPU(X) SYSCALL_LIST_AUDIO(X) SYSCALL_LIST_SETUP(X) SYSCALL_LIST_BLK(X) SYSCALL_LIST_NTDRV(X) SYSCALL_LIST_IPC_MISC(X) SYSCALL_LIST_IPC(X)
 #undef X
     };
     unsigned i;
@@ -351,6 +354,10 @@ done:
     r->rax = (uint64_t)(int64_t)st;
     if (systrace_on < 0) {
         sysall_on = k64_cmdline_has("shz.systrace.all");
+        if (sysall_on > 0) {
+            sysall = kmalloc(sizeof(struct sysall_rec) * SYSALL_RING);
+            if (!sysall) { kprintf("K64 systrace: no heap for the all-syscall ring; shz.systrace.all ignored\n"); sysall_on = 0; }
+        }
         systrace_on = sysall_on || k64_cmdline_has("shz.systrace");
     }
     if (sysall_on > 0) {

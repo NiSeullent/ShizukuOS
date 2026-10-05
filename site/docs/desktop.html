@@ -1,0 +1,36 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>데스크톱과 파일 · ShizukuOS 문서</title><meta name="description" content="ShizukuOS 설치·계정·데스크톱·파일·개발 문서와 실제 검증 상태"><link rel="stylesheet" href="./docs.css"><link rel="icon" href="../favicon.svg"><script src="./search.js" defer></script></head><body><a class="skip" href="#main">본문으로</a><header><a href="../index.html">ShizukuOS</a><nav aria-label="공식 사이트"><a href="../downloads.html">다운로드</a><a href="./index.html">문서</a><a href="https://github.com/NiSeullent/ShizukuOS">GitHub</a></nav></header><div class="layout"><aside><strong>SHIZUKUOS 안내</strong><label for="doc-search">문서 검색</label><input id="doc-search" type="search" placeholder="설치, 계정, 파일…" autocomplete="off"><div id="results" aria-live="polite"></div><nav aria-label="문서 목록"><a href="index.html">문서 안내</a><a href="installation.html">설치와 첫 부팅</a><a href="desktop.html" aria-current="page">데스크톱과 파일</a><a href="security.html">계정과 보안</a><a href="development.html">개발과 빌드</a><a href="status.html">구현·검증 상태</a><a href="interfaces.html">커널 인터페이스</a></nav></aside><main id="main"><h1>데스크톱·설정·파일 작업</h1>
+<p>ShizukuOS Shell은 <code>integration/shizuku-shell</code>에서 빌드하는 자체 PE64 실행 파일입니다. 설치된 기본 실행 이름은 <code>SHZDESK.EXE</code>입니다. 기존 데스크톱·작업 표시줄·시작·파일 창을 확장하며 별도의 테마 대체 셸을 만들지 않습니다.</p>
+<h2>테마와 글꼴</h2>
+<p>테마 선택은 <strong>설정</strong>에서만 제공합니다. Slade는 기본 테마, Flute는 간결한 테마, Jade는 실험적인 복고풍 테마입니다. 외부 정의 파일을 읽어 창·메뉴·작업 표시줄 등에 전달합니다. 지원하지 않는 효과를 활성화했다고 표시하지 않습니다.</p>
+<p>시스템 UI 글꼴은 Noto Sans 계열 또는 Pretendard를 사용합니다. 현재 네이티브 경로는 고정된 Noto Sans·Noto Sans KR 파일과 실제 글꼴 렌더러를 사용합니다. 필수 글꼴을 읽지 못하면 성공한 데스크톱으로 처리하지 않습니다. 한국어 입력기·복잡한 문자 조형의 전체 지원은 별도 과제입니다.</p>
+<h2>시작·검색·텍스트 편집</h2>
+<p>시작·실행·검색은 공통 명령 목록을 사용합니다. 텍스트 편집기는 새 문서, 열기, 저장, 다른 이름으로 저장, 되돌리기, 찾기·바꾸기를 실제 파일 작업과 연결합니다. 기본 저장 형식은 UTF-8이며 닫기 전에 저장되지 않은 변경을 확인합니다.</p>
+<p>현재 후보의 단축키:</p>
+<table>
+<thead>
+<tr>
+<th>동작</th>
+<th>키</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>검색</td>
+<td>Ctrl+Shift+P</td>
+</tr>
+<tr>
+<td>텍스트 편집기 열기</td>
+<td>Ctrl+Alt+N</td>
+</tr>
+<tr>
+<td>문서 저장</td>
+<td>Ctrl+S</td>
+</tr>
+</tbody>
+</table>
+<p>검색은 실제 명령·창·사용자 문서를 읽고 파일 연결로 엽니다. 현재 탐색 범위와 결과 수에 상한이 있습니다. 전체 디스크 인덱서나 실시간 모든 파일 변경 감지는 아직 제공하지 않습니다.</p>
+<h2>파일 탐색기</h2>
+<p>복사·이동·이름 변경·휴지통·복원은 실제 파일 경로와 작업자 스레드를 사용합니다. 저장·복사는 임시 파일 쓰기, 동기화, 내용 비교, 이름 전환으로 검증합니다. 충돌과 부분 실패를 성공으로 숨기지 않습니다. 휴지통은 원래 위치와 검증 정보를 보관하며 복원 대상이 충돌하면 원본을 유지합니다.</p>
+<p>현재 후보는 경로 이동·목록·필터·기본 파일 작업을 확장하고 있습니다. 보기·정렬·다중 선택·미리보기와 설정 검색·분류는 별도 하위 기능별로 구현·검증합니다. 폴더 재귀 복사, 태그 데이터베이스, 전체 썸네일 및 모든 네트워크 공유를 완료했다고 표시하지 않습니다.</p>
+<p>계정별 문서는 실제 인증 UID와 프로필 경로를 대조합니다. 작업이 진행 중이거나 저장되지 않은 문서가 있으면 셸 종료를 보류합니다. 기존 전역 클립보드는 등록된 계정 환경에서 제한되며 계정 격리 구현이 필요합니다.</p>
+<p>이 페이지의 새 편집·파일·검색 경로는 네이티브 빌드와 호스트 검사를 통과한 후보입니다. 설치된 새 ShizukuOS의 연결 작업과 두 번째 부팅 검증은 아직 진행 중입니다.</p></main></div><footer>ShizukuOS · Pre-Beta 01 통합 중 · 2026-10-05 기준<br><a href="https://github.com/NiSeullent/ShizukuOS/tree/main/docs/shizukuos">문서 원본과 수정 이력</a></footer></body></html>

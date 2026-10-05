@@ -93,54 +93,10 @@ static void set_bits(uint8_t *map, uint32_t from, uint32_t n)
     while (n--) sfs_set_bit(map, from++);
 }
 
-/* Portable SWAR count: no POPCNT ISA requirement or compiler runtime helper.
- * Counting bits is byte-order independent, so unaligned memcpy loads are safe.
- */
-static uint32_t bitmap_popcount64(uint64_t w)
-{
-    w -= (w >> 1) & 0x5555555555555555ull;
-    w = (w & 0x3333333333333333ull) + ((w >> 2) & 0x3333333333333333ull);
-    w = (w + (w >> 4)) & 0x0F0F0F0F0F0F0F0Full;
-    return (uint32_t)((w * 0x0101010101010101ull) >> 56);
-}
-
-/* Clears n bits; returns how many were already clear (double frees).
- * Keep partial-byte edges bitwise; count and clear full words/bytes once.
- */
+/* Clears n bits; returns how many were already clear (double frees). */
 static uint32_t clear_bits(uint8_t *map, uint32_t from, uint32_t n)
 {
-    /* Return before word setup for single blocks and other small frees. */
-    if (n < 16) {
-        uint32_t bad = 0;
-        while (n--) {
-            if (!sfs_test_bit(map, from)) bad++;
-            sfs_clear_bit(map, from);
-            from++;
-        }
-        return bad;
-    }
     uint32_t bad = 0;
-    while (n && (from & 7)) {
-        if (!sfs_test_bit(map, from)) bad++;
-        sfs_clear_bit(map, from++);
-        n--;
-    }
-    while (n >= 64) {
-        uint64_t w;
-        uint8_t *p = map + (from >> 3);
-        memcpy(&w, p, sizeof w);
-        bad += 64u - bitmap_popcount64(w);
-        memset(p, 0, sizeof w);
-        from += 64;
-        n -= 64;
-    }
-    while (n >= 8) {
-        uint8_t *p = map + (from >> 3);
-        bad += 8u - bitmap_popcount64(*p);
-        *p = 0;
-        from += 8;
-        n -= 8;
-    }
     while (n--) {
         if (!sfs_test_bit(map, from)) bad++;
         sfs_clear_bit(map, from);
@@ -232,9 +188,21 @@ uint64_t sfs_goal_for(sfs_fs *fs, sfs_inode *in, uint32_t lblk)
 }
 
 /* ---- block allocation ---- */
+static int run_hits_meta(sfs_fs *fs, uint64_t start, uint32_t count);
+
+/* Checked allocation: a run is taken only when it lies inside the group and the volume, the group and volume free
+ * counters cover it, and it does not overlap the file system's own metadata (superblock/GDT copies, bitmaps, inode
+ * tables). A bitmap that claims such a block is free is corrupt: the run is refused (SFS_ECORRUPT, nothing modified)
+ * and the caller skips the group instead of handing metadata blocks to a file. */
 static int take_run(sfs_fs *fs, uint32_t g, sfs_gd *gd, sfs_buf *bb, uint32_t bit, uint32_t n)
 {
     int rc;
+    const uint64_t s = sfs_group_first_block(fs, g) + bit;
+    if (!n || (uint64_t)bit + n > sfs_group_block_count(fs, g) || n > gd->free_blocks || n > fs->free_blocks ||
+        !sfs_range_valid(fs, s, n) || run_hits_meta(fs, s, n)) {
+        sfs_logu(fs, "sfs: checked allocation refused a run (bitmap/counter inconsistency) at block ", s);
+        return SFS_ECORRUPT;
+    }
     set_bits(bb->data, bit, n);
     gd->free_blocks -= n;
     gd->flags &= (uint16_t)~BG_BLOCK_UNINIT;
@@ -279,6 +247,7 @@ static int search_group(sfs_fs *fs, uint32_t ino, uint32_t g, uint32_t from, uin
         if (!strict) pa_drop_overlap(fs, first + s, e - s);
         rc = take_run(fs, g, &gd, bb, s, e - s);
         sfs_bput(fs, bb);
+        if (rc == SFS_ECORRUPT) return SFS_ENOSPC;      /* inconsistent group: skip it (nothing was modified) */
         if (rc) return rc;
         *start = first + s;
         *got = e - s;
@@ -339,6 +308,7 @@ int sfs_alloc_blocks(sfs_fs *fs, sfs_inode *in, uint32_t lblk, uint64_t goal, ui
                 if (e > bit) {
                     rc = take_run(fs, g, &gd, bb, bit, e - bit);
                     sfs_bput(fs, bb);
+                    if (rc == SFS_ECORRUPT) { w->len = 0; goto search; }   /* window unusable: plain search */
                     if (rc) return rc;
                     *start = w->pblk;
                     *got = e - bit;
@@ -357,6 +327,7 @@ int sfs_alloc_blocks(sfs_fs *fs, sfs_inode *in, uint32_t lblk, uint64_t goal, ui
             w->len = 0;                                  /* not sequential any more */
         }
     }
+search:
     rc = alloc_search(fs, ino, goal, want, start, got);
     if (rc) return rc;
 done:

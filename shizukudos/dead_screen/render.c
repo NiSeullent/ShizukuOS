@@ -1,9 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "dead_screen.h"
-#include "sprites.h"
 #include "../supervisor/src/font8x8_basic.h"
 
-typedef struct { const ds_surface *fb; int scale, ox, oy; } canvas;
+typedef struct { const ds_surface *fb; int scale, ox, oy, width, height; } canvas;
 static const uint32_t color[6]={0xffffff,0x253bb6,0x1764a9,0x0075b8,0x146cd4,0x146cd4};
 static const char *const short_label[6]={"","2K","XP","8.1","10","11"};
 static const int radius[6]={10,15,21,28,36,45};
@@ -29,18 +28,18 @@ static uint32_t native_color(const ds_surface *f,uint32_t rgb)
 { return f->rgbx?((rgb&0xff)<<16)|(rgb&0xff00)|((rgb>>16)&0xff):rgb; }
 static void pixel(canvas *c,int x,int y,uint32_t rgb)
 {
-    if(x<0 || y<0 || x>=640 || y>=480) return;
+    if(x<0 || y<0 || x>=c->width || y>=c->height) return;
     const unsigned xx=(unsigned)(c->ox+x*c->scale), yy=(unsigned)(c->oy+y*c->scale);
     const uint32_t v=native_color(c->fb,rgb);
     for(int i=0;i<c->scale;++i) for(int j=0;j<c->scale;++j)
-        c->fb->pixels[(size_t)(yy+(unsigned)i)*c->fb->pitch_words+xx+(unsigned)j]=v;
+        if(yy+(unsigned)i<c->fb->height && xx+(unsigned)j<c->fb->width)c->fb->pixels[(size_t)(yy+(unsigned)i)*c->fb->pitch_words+xx+(unsigned)j]=v;
 }
 static void rect(canvas *c,int x,int y,int w,int h,uint32_t rgb)
 {
     if(w<=0 || h<=0) return;
     /* All private primitives accept bounded internal coordinates. Clipping here
      * makes even the large Suika circles harmless at canvas edges. */
-    int x0=x<0?0:x, y0=y<0?0:y, x1=x+w>640?640:x+w, y1=y+h>480?480:y+h;
+    int x0=x<0?0:x, y0=y<0?0:y, x1=x+w>c->width?c->width:x+w, y1=y+h>c->height?c->height:y+h;
     for(int yy=y0;yy<y1;++yy) for(int xx=x0;xx<x1;++xx) pixel(c,xx,yy,rgb);
 }
 static void line(canvas *c,int x0,int y0,int x1,int y1,uint32_t rgb)
@@ -158,17 +157,10 @@ static void bsod_art(canvas *c,int x,int y,int size,unsigned level)
     else if(size>=18 && level<3)ascii(c,x+2,y+size-9,short_label[level],2,0xffffff,1);
     else {char tag[2]={(char)('0'+level),0};ascii(c,x+size-8,y+size-8,tag,1,0xffffff,1);}
 }
-static void sprite_art(canvas *c,int x,int y,int size,unsigned level)
-{
-    /* Nearest-neighbour scale of the static rodata sprite; fixed loops. */
-    for(int py=0;py<size;++py) for(int px=0;px<size;++px)
-        if(ds_sprite_bit(level,(unsigned)(px*16/size),(unsigned)(py*16/size)))pixel(c,x+px,y+py,0xffffff);
-}
 static void item(canvas *c,int x,int y,int size,unsigned level)
 {
-    if(!level) {if(size>=12)sprite_art(c,x,y,size,0);else sadmac(c,x,y,size);return;}
+    if(!level) {sadmac(c,x,y,size);return;}
     rect(c,x,y,size,size,color[level]);box(c,x,y,size,size,0xffffff);
-    if(size>=12){sprite_art(c,x,y,size,level);return;}
     bsod_art(c,x,y,size,level);
 }
 static void hex(char out[17],uint64_t n)
@@ -196,17 +188,14 @@ static void trace(canvas *c,const ds_state *s)
     ascii(c,304,378,"Frames: captured addresses only",32,0xaaaaaa,1);
     for(unsigned i=0;i<f->frame_count && i<3;++i) field(c,304,390+(int)i*11,"FRAME",f->frames[i]);
     ascii(c,304,426,"No unsafe stack walk; no OS recovery",37,0xaaaaaa,1);
+    if(f->context_valid) {
+        field(c,304,438,"CPU",f->cpu);
+        field(c,304,366,"PID/TID",((uint64_t)f->pid<<32)|f->tid);
+    }
 }
 static void game(canvas *c,const ds_state *s)
 {
-    if(s->mode==DS_MENU && !s->games_allowed) {
-        char bits[17];hex(bits,s->unsafe);
-        ascii(c,24,96,"GAMES UNAVAILABLE: unsafe fatal context",40,0xffffff,1);
-        ascii(c,24,112,"UNSAFE=0x",9,0xaaaaaa,1);ascii(c,96,112,bits+8,8,0xaaaaaa,1);
-        ascii(c,24,128,"Kernel halted; traceback retained.",36,0xaaaaaa,1);
-        for(unsigned row=0;row<5;++row) for(unsigned j=0;j<=row;++j)
-            sadmac(c,138-(int)row*22+(int)j*44,198+(int)row*39,38);
-    } else if(s->mode==DS_MENU) {
+    if(s->mode==DS_MENU) {
         const uint16_t menu1[]={0xd14c,0xd2b8,0xb9ac,0xc2a4,' ',0xac8c,0xc784,0xc744,' ',0xd560,0xb798,'?'};
         const uint16_t menu2[]={0xc218,0xbc15,' ',0xac8c,0xc784,0xc744,' ',0xd560,0xb798,'?'};
         ascii(c,24,92,"1",1,0xffffff,2);ascii(c,24,126,"2",1,0xffffff,2);
@@ -251,8 +240,6 @@ static void game(canvas *c,const ds_state *s)
 int ds_render(ds_state *s,const ds_surface *f)
 {
     if(!s || !s->latched || s->graphics_failed) return -1;
-    if(s->guard_head!=DS_GUARD_HEAD || s->guard_tail!=DS_GUARD_TAIL ||
-       (s->mode!=DS_MENU && !s->games_allowed)) {s->graphics_failed=1;return -1;}
     if(s->mode>DS_SUIKA || (s->mode==DS_TETRIS &&
        (s->tetris.piece>=7 || s->tetris.rotation>=4 || s->tetris.x < -4 ||
         s->tetris.x>10 || s->tetris.y < -4 || s->tetris.y>20)) ||
@@ -260,14 +247,15 @@ int ds_render(ds_state *s,const ds_surface *f)
         s->graphics_failed=1;return -1;
     }
     if(!ds_surface_valid(f)) {s->graphics_failed=1;return -1;}
-    canvas c={f,1,0,0};
+    canvas c={f,1,0,0,640,480};
     c.scale=(int)(f->width/640); if(c.scale>(int)(f->height/480)) c.scale=(int)(f->height/480);
     c.ox=((int)f->width-640*c.scale)/2;c.oy=((int)f->height-480*c.scale)/2;
     for(unsigned y=0;y<f->height;++y) for(unsigned x=0;x<f->width;++x) f->pixels[(size_t)y*f->pitch_words+x]=0;
     if(s->korean) {
         const uint16_t title[]={0xc624,0xb958,'!','!','!','!'};korean(&c,24,20,title,6,0xffffff);
     } else ascii(&c,24,18,"Halted!!!!",10,0xffffff,2);
-    ascii(&c,220,24,"SHIZUKU KERNEL - DEAD SCREEN",30,0xffffff,1);
+    ascii(&c,220,24,"K64 PANIC / DEAD SCREEN CONTROL",31,0xffffff,1);
+    ascii(&c,220,35,"Kernel64 built " __DATE__ " " __TIME__,40,0xaaaaaa,1);
     for(unsigned row=0;row<3;++row) {
         char fragment[75];unsigned n=0;
         const unsigned offset=row*74;
@@ -285,8 +273,7 @@ int ds_render(ds_state *s,const ds_surface *f)
         for(unsigned i=0;i<6;++i) {item(&c,304,116+(int)i*43,32,i);ascii(&c,350,128+(int)i*43,full[i],22,0xffffff,1);}
         ascii(&c,304,396,"T shows actual traceback",25,0xaaaaaa,1);
     }
-    if(s->games_allowed) ascii(&c,24,450,"1 Tetris  2 Suika | A/D move W rotate S down Space drop",56,0xffffff,1);
-    else ascii(&c,24,450,"Games refused by panic-time safety gate",40,0xffffff,1);
+    ascii(&c,24,450,"1 Tetris  2 Suika | A/D move W rotate S down Space drop",56,0xffffff,1);
     ascii(&c,24,466,"Esc menu  R restart  L KO/EN  T trace/items | kernel halted",60,0xaaaaaa,1);
     return 0;
 }
@@ -300,19 +287,58 @@ static int write_field(ds_write_fn w,void *p,const char *name,uint64_t v)
 int ds_fallback(const ds_state *s,ds_write_fn w,void *p)
 {
     if(!s || !s->latched || !w) return -1;
-    if(write(w,p,"You session got wasted\n",23) || write(w,p,"English traceback: Shizuku Kernel halted\n",41)) return -1;
+    const char title[]="Your computer was trashed.\n";
+    if(write(w,p,title,sizeof title-1) || write(w,p,"English traceback: Shizuku Kernel halted\n",41)) return -1;
     size_t n=0;while(n<DS_REASON-1 && s->fault.reason[n])++n;
     if(write(w,p,"Reason: ",8)||write(w,p,s->fault.reason,n)||write(w,p,"\n",1))return -1;
     const ds_fault *f=&s->fault;
+    const char build[]="Build: Kernel64 " __DATE__ " " __TIME__ "\n";
+    if(write(w,p,build,sizeof build-1))return -1;
     if(write_field(w,p,"IP",f->ip)||write_field(w,p,"SP",f->sp)||write_field(w,p,"BP",f->bp)||
        write_field(w,p,"FLAGS",f->flags)||
        write_field(w,p,"CR2",f->cr2)||write_field(w,p,"CR3",f->cr3)) return -1;
     if(f->registers_valid && (write_field(w,p,"VECTOR",f->vector)||write_field(w,p,"ERROR",f->error))) return -1;
+    if(f->context_valid && (write_field(w,p,"CPU",f->cpu)||write_field(w,p,"PID",f->pid)||write_field(w,p,"TID",f->tid)))return -1;
     if(f->registers_valid) { for(unsigned i=0;i<DS_REGS;++i) if(write_field(w,p,regname[i],f->reg[i]))return -1; }
     else if(write(w,p,"Full interrupt registers unavailable\n",37)) return -1;
     for(unsigned i=0;i<f->frame_count;++i) if(write_field(w,p,"FRAME",f->frames[i]))return -1;
     const char tail[]="Further unwind unavailable; no arbitrary stack memory was read.\n";
     return write(w,p,tail,sizeof tail-1);
+}
+
+/* Minimal fatal renderer shares only retained pixel storage and the ASCII font.
+ * No windows, heap, filesystem, game-state parsing, GUI calls or stack walking. */
+enum ds_fatal_audio ds_nyan_audio_select(unsigned pcm,unsigned pitched,unsigned fixed)
+{ return pcm ? DS_AUDIO_PCM : pitched ? DS_AUDIO_PITCHED : fixed ? DS_AUDIO_FIXED : DS_AUDIO_SILENT; }
+const char *ds_nyan_audio_name(enum ds_fatal_audio a)
+{
+    return a==DS_AUDIO_PCM ? "PCM DMA progressing" : a==DS_AUDIO_PITCHED ? "PIT pitched beep" :
+           a==DS_AUDIO_FIXED ? "Fixed tone gate only" : "No verified audio output";
+}
+int ds_nyan_framebuffer(const ds_state *s,const ds_surface *f,enum ds_fatal_audio audio)
+{
+    if(!s || !s->latched || !ds_surface_storage_valid(f))return -1;
+    canvas c={f,1,0,0,(int)f->width,(int)f->height};
+    for(unsigned y=0;y<f->height;++y)for(unsigned x=0;x<f->width;++x)
+        f->pixels[(size_t)y*f->pitch_words+x]=native_color(f,0x10203b);
+    const uint32_t rainbow[6]={0xff5555,0xffaa44,0xffee55,0x55cc66,0x5599ee,0xaa77ee};
+    const int x=(int)f->width/2-36,y=(int)f->height/2-18;
+    for(unsigned i=0;i<6;i++)rect(&c,x-92,y+(int)i*6,94,6,rainbow[i]);
+    rect(&c,x,y,64,40,0xe6ba81);rect(&c,x+5,y+5,54,30,0xf4a5c2);
+    rect(&c,x+48,y+5,40,28,0xbfc4ce);rect(&c,x+49,y-2,9,12,0xbfc4ce);
+    rect(&c,x+76,y-2,9,12,0xbfc4ce);rect(&c,x+56,y+13,4,4,0x101010);
+    rect(&c,x+77,y+13,4,4,0x101010);rect(&c,x+64,y+23,10,2,0x101010);
+    rect(&c,x+8,y+38,12,7,0xbfc4ce);rect(&c,x+51,y+38,12,7,0xbfc4ce);
+    ascii(&c,8,8,"Your computer was trashed.",26,0xffffff,1);
+    ascii(&c,8,24,"NYAN CAT SCREEN | kernel halted",31,0xffffff,1);
+    ascii(&c,8,40,ds_nyan_audio_name(audio),40,0xffffff,1);
+    if(f->height>=200) {
+        field(&c,8,(int)f->height-52,"IP",s->fault.ip);
+        field(&c,8,(int)f->height-40,"CR3",s->fault.cr3);
+        ascii(&c,8,(int)f->height-24,"Output level is evidence, not a hardware diagnosis.",51,0xffffff,1);
+        ascii(&c,8,(int)f->height-12,"No output cannot establish a specific CPU failure.",50,0xffffff,1);
+    }
+    return 0;
 }
 
 typedef struct {const ds_surface *fb;unsigned col,row,truncated;} text_canvas;

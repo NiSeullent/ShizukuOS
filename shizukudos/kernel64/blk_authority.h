@@ -30,6 +30,7 @@ void blk_authority_leave(blk_dev_t *, int result, int changed_epoch);
  * independently observed recovery protocol, not rebinding an approval. */
 int blk_authority_bind_boot_roles(blk_dev_t *boot, blk_dev_t *current_system);
 int blk_authority_pin_source(blk_dev_t *, blk_authority_source_t *);
+int blk_authority_roles_ready(void);
 int blk_authority_bind_archive_origin(void); /* reads only accepted kernel origin constructor */
 int blk_authority_pin_archive(void *,archive_source_t *,const archive_source_info_t *,blk_authority_source_t *);
 int blk_authority_review(blk_dev_t *, const blk_authority_source_t[2], blk_authority_identity_t *);

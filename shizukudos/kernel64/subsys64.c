@@ -22,9 +22,10 @@
  */
 #include "proc_internal.h"
 #include "fs.h"
+#include "auth_policy.h"
 #include "../abi/shz_ipc.h"
 #include "../pma_bridge/service.h"
-#include "w64_gui_service.h"
+#include "w64_owner_service.h"
 
 #define W64_MAX_PROCS 4
 #define W64_OUT_FIFO 2048u
@@ -32,14 +33,17 @@
 #define W64_WRITE_WAIT_MS 10000u
 #define W64_SHUTDOWN_WAIT_MS 5000u
 
+/* C6 broker (auth_policy.h): owner keys are w64_owner_broker_key() (high 32 bits = channel generation, never
+ * reused); the broker's current channel epoch follows chan->generation through shz_auth_endpoint_epoch_reset(),
+ * called at bind and on every epoch change, so logins of owners that never created a slot are dropped too. */
 extern int32_t ldr_create_process(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
                                   process_t **out_proc, thread_t **out_thread);
 
 typedef struct { uint8_t buf[W64_OUT_FIFO]; uint32_t head, tail; } w64_fifo_t;   /* head - tail = bytes queued */
 
-typedef struct {
+typedef struct w64_slot_s {
     int used;
-    uint32_t gen;                       /* bumped on every allocation: stale process.console_sink pointers are ignored */
+    uint32_t gen;                      /* bumped on every allocation: stale process.console_sink pointers are ignored */
     int pid;
     process_t *proc;                    /* valid until reaped */
     uint32_t state;                     /* shz_w64_proc_state */
@@ -48,10 +52,10 @@ typedef struct {
     uint32_t in_head, in_tail;
     int in_eof;
     uint32_t seq_sent, seq_acked, dropped;
-    int reaped, exited_sent;
+    int reaped, exited_sent, rejected;  /* private cleanup: never advertised to the client */
     int64_t exit_code;
     uint32_t fault_status;
-    uint32_t owner_cap;                 /* capability_id of the creating request (GUI view binding) */
+    w64_owner_binding_t own;            /* CREATE-time owner/epoch/process binding; consumed by every lookup and frame */
 } w64_slot_t;
 
 static w64_slot_t slots[W64_MAX_PROCS];
@@ -69,6 +73,19 @@ static volatile int shutdown_requested;
 static uint64_t shutdown_deadline;
 static uint32_t served, proto_errors, refused, stale_msgs, out_frames, in_frames;
 static uint64_t start_tick;
+/* Endpoint owner authority (abi/shz_w64_owner.h). privileged_enabled is Core-local configuration only; the
+ * Supervisor profile enables no privileged peer, so no native endpoint can stop the service. */
+static int privileged_enabled;
+static uint32_t svc_epoch;
+static w64_owner_revocations_t revocations;
+static uint32_t owner_denied, owner_revoked;
+/* C6 typed broker requests. The service thread is the only user of these buffers: auth_frame is the private copy
+ * of the consumed ring slot, auth_req the one bounded validated copy. Both are wiped on every path. */
+static _Alignas(8) uint8_t auth_frame[SHZ_MSG_SLOT_SIZE];
+static shz_w64_auth_req_t auth_req;
+static uint32_t auth_outstanding;                       /* one bit per owner slot: one request in flight per owner */
+static uint32_t auth_requests, auth_refused;            /* counts only; never credentials or their lengths */
+_Static_assert(SHZ_W64_OWNER_MAX <= 32, "auth_outstanding holds one bit per owner slot");
 /* One service thread owns the PMA bridge state. Windows identities describe
  * the caller; they never become native scheduler threads. Accepted WAITs keep
  * a completion reservation until their reply reaches the existing channel. */
@@ -131,13 +148,59 @@ static void pma_retry_inbound(void)
 
 void subsys64_doorbell(void) { sem_post(&doorbell_sem); }
 
+/* Non-elidable scrub for credential copies and shared ring slots. */
+static void w64_wipe(volatile void *p, size_t n)
+{
+    volatile uint8_t *b = p;
+    while (n--) *b++ = 0;
+    __asm__ __volatile__("" : : "r"(p) : "memory");
+}
+
 /* ---------------------------------------------------------------- slots */
-static w64_slot_t *slot_by_pid(uint32_t pid)
+/* Enrolled-realm admission binding (C6). Development-admitted slots (broker_owner 0) keep the 0832322 path
+ * unchanged. A broker-admitted slot needs the owner's live login epoch and, while the child is alive, the broker's
+ * published child binding. Once the child is exiting or reaped its broker binding leaves with the process object;
+ * then the owner's login must still be the very one that admitted it (same broker epoch). Fails closed. */
+static int slot_broker_current(const w64_slot_t *s)
+{
+    uint64_t e = 0;
+    if (!s->own.broker_owner)
+        return 1;
+    if (!s->own.broker_epoch)
+        return 0;
+    /* Live child: the broker must still name this exact process as owned by (owner, login epoch) AND that login
+     * must be the owner's current one in the current channel epoch. A relogin (same owner, any account) starts a
+     * new broker epoch, so every child of the previous login fails here at the common lookup and in the pump. */
+    if (s->proc && !s->reaped && !s->proc->terminated && !s->proc->teardown)
+        return shz_auth_endpoint_child_owned(s->own.broker_owner, s->own.broker_epoch, s->proc) == 1 &&
+               shz_auth_endpoint_binding_current(s->own.broker_owner, s->own.broker_epoch, s->proc) == 1;
+    return shz_auth_endpoint_query(s->own.broker_owner, 0, &e) == STATUS_SUCCESS && e == s->own.broker_epoch;
+}
+
+static void revoke_slot(struct w64_slot_s *s);
+
+/* Revoke (terminate + private reap, no further frames) every live slot of broker key `key` whose admitting login
+ * is no longer current. Used right after a successful relogin so no frame of the old account's children is
+ * emitted, and by the pump for every other cause. Never departs the owner's (new) login. */
+static void broker_revoke_stale(uint64_t key)
 {
     unsigned i;
-    for (i = 0; i < W64_MAX_PROCS; ++i)
-        if (slots[i].used && (uint32_t)slots[i].pid == pid)
-            return &slots[i];
+    for (i = 0; key && i < W64_MAX_PROCS; ++i)
+        if (slots[i].used && !slots[i].rejected && slots[i].own.broker_owner == key && !slot_broker_current(&slots[i]))
+            revoke_slot(&slots[i]);
+}
+
+/* Owner-bound lookup: no PID-only path exists. Another owner's pid, an older epoch, a recycled slot or a
+ * privately reaped (rejected/revoked) slot all look like NOENT. */
+static w64_slot_t *slot_lookup(const shz_msg_hdr_t *m, uint32_t pid)
+{
+    unsigned i;
+    for (i = 0; i < W64_MAX_PROCS; ++i) {
+        w64_slot_t *s = &slots[i];
+        if (s->used && !s->rejected && pid && (uint32_t)s->pid == pid &&
+            w64_owner_binding_match(&s->own, m->capability_id, chan->generation, s->gen, s->proc, s->pid))
+            return slot_broker_current(s) ? s : 0;
+    }
     return 0;
 }
 
@@ -265,18 +328,17 @@ static void reply(const shz_msg_hdr_t *req, int32_t status, const void *payload,
         ++refused;
 }
 
-/* Events carry the creating slot's owner capability so the VxD routes them by owner token (wire b5 s2). */
-static int event(uint32_t opcode, const void *payload, uint16_t len, uint32_t owner_cap)
+static int event(uint32_t opcode, uint32_t owner_id, const void *payload, uint16_t len)
 {
     shz_msg_hdr_t h;
     memset(&h, 0, sizeof h);
+    h.capability_id = owner_id;                         /* the VxD routes it to that owner's mailbox only */
     h.flags = SHZ_MSGF_ONEWAY;
     h.opcode = opcode;
     h.src_domain = SHZ_DOM_KERNEL64;
     h.dst_domain = (uint16_t)peer;
     h.generation = chan->generation;
     h.payload_length = len;
-    h.capability_id = owner_cap;
     return push(&h, payload);
 }
 
@@ -292,42 +354,41 @@ static void fill_event(shz_w64_event_t *ev, const w64_slot_t *s, uint32_t state,
     ev->console_dropped = s->dropped;
 }
 
-/* ---------------------------------------------------------------- channel attestation (wire b5)
- * The Supervisor records, in its own memory, that the Win98 domain's ring-0 VxD stamps a derived owner on every user
- * W64 send for one channel generation (SHZ_HC_CHANNEL_ATTEST). The Supervisor revokes that record when the attester
- * domain exits, fails or is restarted, WITHOUT changing the channel header, so every authorization re-asks
- * SHZ_HC_CHANNEL_ATTESTED (a positive answer is never cached). attest_ever is a fail-closed latch only: after a
- * positive answer, any refusal is REVOKED (nothing served), never the legacy unattested rules. */
-static volatile uint32_t attest_ever;
-#ifndef SHZ_STANDALONE
-static int chan_auth(void)
+/* Owner departure / epoch fence: refuse further input, discard undelivered output, terminate with the
+ * contract exit code and reap privately (no PROCESS_EXITED owed to a departed owner). */
+static void revoke_slot(struct w64_slot_s *s)
 {
-    hcreg_t st = SHZ_HC_CHANNEL_ATTESTED, bits, gen = 0;
-    uint32_t live, ever = attest_ever;
-    int a;
-    if (!chan) return ever ? SHZ_CHAN_AUTH_REVOKED : SHZ_CHAN_AUTH_LEGACY;
-    live = chan->generation;
-    bits = chan->channel_id;
-    __asm__ volatile("vmcall" : "+a"(st), "+b"(bits), "+c"(gen) : : "memory", "cc");
-    a = shz_chan_auth_state((long)st, bits, gen, live, SHZ_CHAN_ATTEST_W64_DERIVED_OWNER, &ever);
-    if (ever) attest_ever = 1;
-    return a;
+    uint64_t fl = irq_save();
+    s->in_eof = 1;
+    s->out[0].tail = s->out[0].head;
+    s->out[1].tail = s->out[1].head;
+    irq_restore(fl);
+    s->own.owner_id = SHZ_W64_OWNER_NONE;
+    ++owner_revoked;
+    if (s->reaped) { s->used = 0; return; }
+    if (s->proc && !s->proc->terminated) {
+        process_terminate(s->proc, (int64_t)SHZ_W64_OWNER_REVOKE_EXIT_CODE, 0);
+        s->state = SHZ_W64_PS_KILLED;
+    }
+    s->rejected = 1;                                    /* existing private reaper in pump_slot frees it */
 }
-#else
-static int chan_auth(void) { return SHZ_CHAN_AUTH_LEGACY; }  /* in-kernel loopback client: no VxD, no attestation */
-#endif
-static int chan_attested(void) { return chan_auth() == SHZ_CHAN_AUTH_ATTESTED; }
-int subsys64_channel_attested(void) { return chan_attested(); }
 
-/* Authorization state of the message being dispatched: one fresh Supervisor query per received message (handle()),
- * REVOKED outside a dispatch so no stray use can succeed. */
-static int msg_auth = SHZ_CHAN_AUTH_REVOKED;
-
-/* A DERIVED (user) sender acts only on the slot it created once the channel is attested; non-DERIVED = in-VxD. */
-static int owner_ok(const shz_msg_hdr_t *m, const w64_slot_t *s)
+/* Channel epoch change: every binding of an older epoch is implicitly revoked, matching the VxD. */
+static void owner_epoch_cleanup(void)
 {
-    return shz_w64_console_owner_auth(msg_auth == SHZ_CHAN_AUTH_ATTESTED, msg_auth == SHZ_CHAN_AUTH_REVOKED,
-                                      s->owner_cap, m->capability_id);
+    unsigned i;
+    for (i = 0; i < W64_MAX_PROCS; ++i) {
+        w64_slot_t *s = &slots[i];
+        if (!s->used || s->rejected || s->own.chan_gen == chan->generation)
+            continue;
+        if (s->own.broker_owner) shz_auth_endpoint_depart(s->own.broker_owner);
+        revoke_slot(s);
+    }
+    /* Logins of owners that never created a slot (and pending elevations) must not survive the epoch either. */
+    shz_auth_endpoint_epoch_reset((uint64_t)chan->generation);
+    auth_outstanding = 0;
+    w64_owner_revocations_epoch(&revocations, chan->generation);
+    svc_epoch = chan->generation;
 }
 
 /* ---------------------------------------------------------------- request handlers */
@@ -338,8 +399,11 @@ static void handle_query(const shz_msg_hdr_t *m)
     info.abi_major = SHZ_ABI_MAJOR;
     info.abi_minor = SHZ_ABI_MINOR;
     info.subsystem_version = SHZ_W64_SUBSYS_VERSION;
-    info.capabilities = SHZ_W64_CAP_CREATE | SHZ_W64_CAP_CONSOLE_OUTPUT | SHZ_W64_CAP_CONSOLE_INPUT | SHZ_W64_CAP_KILL |
-                        SHZ_W64_CAP_POOL_ARGS | (w64_gui_enabled() ? SHZ_W64_CAP_GUI : 0u);
+    info.capabilities = SHZ_W64_CAP_CONSOLE_OUTPUT | SHZ_W64_CAP_CONSOLE_INPUT | SHZ_W64_CAP_KILL |
+                        SHZ_W64_CAP_POOL_ARGS;
+    if(shz_auth_bridge_development_allowed() ||
+       !shz_auth_endpoint_query(w64_owner_broker_key(m->capability_id, chan->generation), 0, 0))
+        info.capabilities|=SHZ_W64_CAP_CREATE;          /* enrolled realm: only an authenticated broker owner */
     info.max_processes = W64_MAX_PROCS;
     info.max_args_bytes = SHZ_W64_MAX_ARGS_BYTES;
     info.console_window = SHZ_W64_CONSOLE_WINDOW;
@@ -358,7 +422,11 @@ static void handle_create(const shz_msg_hdr_t *m, const uint8_t *payload)
     process_t *np = 0;
     thread_t *nt = 0;
     int32_t st;
+    ldr_create_ex_t ex;
     shz_w64_event_t ev;
+    shz_auth_endpoint_grant grant;
+    const uint64_t key = w64_owner_broker_key(m->capability_id, chan->generation);
+    int dev;
     int rc = shz_w64_create_check(m, payload, chan, chan_base, &hdr, &block);
     if (rc != SHZ_OK) {
         ++refused;
@@ -372,25 +440,62 @@ static void handle_create(const shz_msg_hdr_t *m, const uint8_t *payload)
         reply(m, SHZ_E_RANGE, 0, 0);
         return;
     }
+    memset(&grant, 0, sizeof grant);
+    if (!key || w64_owner_is_revoked(&revocations, m->capability_id, chan->generation)) {
+        ++refused;++owner_denied;reply(m,SHZ_E_DENIED,0,0);return;
+    }
+    /* Anonymous development realm keeps the 0832322 admission. An enrolled realm admits only through the
+     * authenticated endpoint broker bound to this owner; absent a broker login it fails closed. */
+    dev = shz_auth_bridge_development_allowed();
+    if (!dev && shz_auth_endpoint_prepare(key, SHZ_AUTH_EP_STANDARD, &grant) != STATUS_SUCCESS) {
+        memset(&grant, 0, sizeof grant);
+        ++refused;reply(m,SHZ_E_DENIED,0,0);return;
+    }
     s = slot_alloc();
-    if (s) s->owner_cap = m->capability_id;
     if (!s) {
+        memset(&grant, 0, sizeof grant);
         reply(m, SHZ_E_NOMEM, 0, 0);
         return;
     }
+    /* Bind to the epoch the request was validated under (handle() proved m->generation == chan->generation); a
+     * Supervisor epoch change during the load then leaves an old-epoch binding that the cleanup revokes. */
+    w64_owner_bind(&s->own, m->capability_id, m->generation, s->gen);
     bridge_parent.console_sink = s;
     bridge_parent.console_sink_gen = s->gen;
-    st = ldr_create_process(&bridge_parent, path, cmd, cwd, &np, &nt);
+    memset(&ex,0,sizeof ex);ex.suspended=1;ex.hold_pending=1;
+    if (!dev) { ex.prepare = shz_auth_endpoint_bind_child; ex.prepare_ctx = &grant; }
+    st = ldr_create_process_ex(&bridge_parent, path, cmd, cwd, &ex, &np, &nt);
     bridge_parent.console_sink = 0;
     if (st) {
         kprintf("K64 subsys64: create %s failed (%x)\n", path, (uint32_t)st);
         fill_event(&ev, s, SHZ_W64_PS_FAILED, st);
         s->used = 0;
+        memset(&grant, 0, sizeof grant);
         reply(m, SHZ_OK, &ev, sizeof ev);
         return;
     }
     s->proc = np;
     s->pid = np->pid;
+    w64_owner_attach_process(&s->own, np, np->pid);
+    /* Stale owner publication: never publish a child for an owner whose channel epoch changed or which was revoked
+     * while the image loaded (the broker additionally rechecks login epoch, subject and the held-child barrier). */
+    if (chan->generation != m->generation || w64_owner_is_revoked(&revocations, m->capability_id, m->generation))
+        st = STATUS_ACCESS_DENIED;
+    else
+        st = dev ? shz_auth_bridge_development_publish(np,nt) : shz_auth_endpoint_publish(&grant,np,nt);
+    if (!dev && !st) { s->own.broker_owner = key; s->own.broker_epoch = grant.epoch; }
+    memset(&grant, 0, sizeof grant);
+    if(st) {
+        /* The fully built child exits through its existing pre-user-entry kill
+         * check. Reap privately when teardown completes; do not require a
+         * RELEASE for a process whose PID was never admitted to the client. */
+        s->rejected=1;s->state=SHZ_W64_PS_FAILED;
+        process_terminate(np,st,0);
+        thread_creator_release(nt);
+        ++refused;reply(m,st==STATUS_ACCESS_DENIED?SHZ_E_DENIED:SHZ_E_BUSY,0,0);
+        return;
+    }
+    thread_creator_release(nt);
     s->state = SHZ_W64_PS_STARTED;
     kprintf("K64 subsys64: started %s as pid %d for domain %u\n", np->name, np->pid, (unsigned)m->src_domain);
     fill_event(&ev, s, SHZ_W64_PS_STARTED, STATUS_SUCCESS);
@@ -402,9 +507,8 @@ static void handle_console_ack(const shz_msg_hdr_t *m, const uint8_t *payload)
     shz_w64_console_t c;
     w64_slot_t *s;
     if (shz_w64_console_check(m, payload, &c) != SHZ_OK || c.length) { ++refused; return; }
-    s = slot_by_pid(c.pid);
+    s = slot_lookup(m, c.pid);
     if (!s || c.seq > s->seq_sent) { ++refused; return; }  /* acknowledging what was never sent: hostile, ignored */
-    if (!owner_ok(m, s)) { ++refused; return; }           /* another process's console window */
     if (c.seq > s->seq_acked)
         s->seq_acked = c.seq;
 }
@@ -417,9 +521,8 @@ static void handle_console_input(const shz_msg_hdr_t *m, const uint8_t *payload)
     uint32_t space, k;
     int rc = shz_w64_console_check(m, payload, &c);
     if (rc != SHZ_OK || c.stream != 0) { ++refused; reply(m, rc == SHZ_OK ? SHZ_E_INVALID : rc, 0, 0); return; }
-    s = slot_by_pid(c.pid);
-    if (!s || s->reaped) { reply(m, SHZ_E_NOENT, 0, 0); return; }
-    if (!owner_ok(m, s)) { ++refused; reply(m, SHZ_E_DENIED, 0, 0); return; }
+    s = slot_lookup(m, c.pid);                          /* common lookup: owner/epoch/slot/proc + broker child_owned */
+    if (!s || s->reaped || !s->proc) { reply(m, SHZ_E_NOENT, 0, 0); return; }
     fl = irq_save();
     space = W64_IN_FIFO - (s->in_head - s->in_tail);
     if (s->in_eof) { irq_restore(fl); reply(m, SHZ_E_INVALID, 0, 0); return; }     /* stdin already closed */
@@ -440,9 +543,8 @@ static void handle_kill(const shz_msg_hdr_t *m, const uint8_t *payload)
     w64_slot_t *s;
     if (m->payload_length != sizeof k) { ++refused; reply(m, SHZ_E_INVALID, 0, 0); return; }
     memcpy(&k, payload, sizeof k);
-    s = slot_by_pid(k.pid);
+    s = slot_lookup(m, k.pid);
     if (!s) { reply(m, SHZ_E_NOENT, 0, 0); return; }
-    if (!owner_ok(m, s)) { ++refused; reply(m, SHZ_E_DENIED, 0, 0); return; }
     if (!s->reaped && s->proc && !s->proc->terminated) {
         process_terminate(s->proc, (int64_t)k.exit_code, 0);
         s->state = SHZ_W64_PS_KILLED;
@@ -457,42 +559,103 @@ static void handle_release(const shz_msg_hdr_t *m, const uint8_t *payload)
     w64_slot_t *s;
     if (m->payload_length != sizeof k) { ++refused; reply(m, SHZ_E_INVALID, 0, 0); return; }
     memcpy(&k, payload, sizeof k);
-    s = slot_by_pid(k.pid);
+    s = slot_lookup(m, k.pid);
     if (!s) { reply(m, SHZ_E_NOENT, 0, 0); return; }
-    if (!owner_ok(m, s)) { ++refused; reply(m, SHZ_E_DENIED, 0, 0); return; }
     if (!s->reaped || !s->exited_sent) { reply(m, SHZ_E_BUSY, 0, 0); return; }
-    w64_gui_revoke((uint32_t)s->pid, s->gen);
     s->used = 0;
     reply(m, SHZ_OK, 0, 0);
 }
 
-/* Native GUI frame pull (abi/shz_w64_gui.h): the request pid only selects this service's own slot. */
-static void handle_gui(const shz_msg_hdr_t *m, const uint8_t *payload)
+static void handle_owner_control(const shz_msg_hdr_t *m, const uint8_t *payload)
 {
-    uint8_t out[SHZ_MSG_MAX_INLINE];
-    uint16_t len = 0;
-    w64_gui_subject_t sub;
-    w64_slot_t *s;
-    int32_t st;
-    if (m->flags & SHZ_MSGF_ONEWAY) { ++refused; return; }
-    if ((m->flags & SHZ_MSGF_BUFFER) || m->buffer_length) { ++refused; reply(m, SHZ_E_INVALID, 0, 0); return; }
-    s = slot_by_pid(shz_w64_gui_selector_pid(payload, m->payload_length));
-    memset(&sub, 0, sizeof sub);
-    if (s) {
-        sub.pid = (uint32_t)s->pid;
-        sub.slot_gen = s->gen;
-        sub.proc = s->reaped ? 0 : s->proc;
-        sub.owner_cap = s->owner_cap;
+    shz_w64_owner_ctl_t c;
+    shz_w64_owner_ctl_reply_t r;
+    unsigned i;
+    int rc = shz_w64_owner_ctl_check(m, payload, chan->generation, &c);
+    if (rc != SHZ_OK) { ++refused; reply(m, rc, 0, 0); return; }
+    memset(&r, 0, sizeof r);
+    r.size = sizeof r;
+    r.version = SHZ_W64_OWNER_CTL_VERSION;
+    r.owner_id = c.owner_id;
+    r.reason = c.reason;
+    for (i = 0; i < W64_MAX_PROCS; ++i) {
+        w64_slot_t *s = &slots[i];
+        if (s->used && !s->rejected && s->own.owner_id == c.owner_id && s->own.chan_gen == chan->generation) {
+            revoke_slot(s);
+            ++r.revoked_processes;
+        }
     }
-    sub.channel_gen = chan->generation;
-    sub.request_cap = m->capability_id;
-    sub.channel_attested = msg_auth == SHZ_CHAN_AUTH_ATTESTED;
-    st = w64_gui_handle(m->opcode, payload, m->payload_length, s ? &sub : 0, out, &len);
-    reply(m, st, st == SHZ_OK ? out : 0, st == SHZ_OK ? len : 0);
+    /* GUI views/snapshots: no GUI service is advertised in this build, so none exist (counts stay 0). */
+    w64_owner_mark_revoked(&revocations, c.owner_id, chan->generation);
+    shz_auth_endpoint_depart(w64_owner_broker_key(c.owner_id, chan->generation));
+    kprintf("K64 subsys64: owner %x revoked (reason %u): %u process(es)\n", c.owner_id, c.reason, r.revoked_processes);
+    reply(m, SHZ_OK, &r, sizeof r);                     /* idempotent: a repeat finds nothing and replies zero counts */
+}
+
+/* C6: LOGIN / REGISTER / CONFIRM_ELEVATION for the header owner (handle() already required a live, unrevoked
+ * endpoint owner under the current epoch). The payload is copied once into auth_req, validated, handed to the
+ * broker and scrubbed on every path; the reply carries status, broker login epoch and subject flags only. */
+static void handle_auth(const shz_msg_hdr_t *m, const uint8_t *payload)
+{
+    shz_w64_auth_reply_t r;
+    shz_subject subj;
+    uint64_t ep = 0;
+    const uint64_t key = w64_owner_broker_key(m->capability_id, chan->generation);
+    uint32_t bit = 0;
+    int32_t st = STATUS_ACCESS_DENIED;
+    int rc;
+    ++auth_requests;
+    memset(&r, 0, sizeof r);
+    memset(&subj, 0, sizeof subj);
+    rc = shz_w64_auth_req_check(m, payload, &auth_req);
+    if (rc == SHZ_OK && !key)
+        rc = SHZ_E_DENIED;
+    if (rc == SHZ_OK) {
+        bit = 1u << shz_w64_owner_slot(m->capability_id);
+        if (auth_outstanding & bit)
+            rc = SHZ_E_BUSY;
+    }
+    if (rc == SHZ_OK) {
+        auth_outstanding |= bit;
+        if (m->opcode == SHZ_OP_W64_AUTH_LOGIN)
+            st = shz_auth_endpoint_login(key, auth_req.user, auth_req.secret, auth_req.secret_len);
+        else if (m->opcode == SHZ_OP_W64_AUTH_REGISTER)
+            st = shz_auth_endpoint_register(key, auth_req.user, auth_req.secret, auth_req.secret_len, auth_req.roles);
+        else
+            st = shz_auth_endpoint_confirm_elevation(key, auth_req.user, auth_req.secret, auth_req.secret_len);
+        auth_outstanding &= ~bit;
+        /* Uniform refusal: unknown user, wrong secret, no login, sealed or unenrolled realm all read DENIED. */
+        rc = st == STATUS_SUCCESS ? SHZ_OK : st == STATUS_NO_MEMORY ? SHZ_E_NOMEM :
+             st == STATUS_INVALID_PARAMETER ? SHZ_E_INVALID : SHZ_E_DENIED;
+    }
+    w64_wipe(&auth_req, sizeof auth_req);
+    if (rc == SHZ_OK && shz_auth_endpoint_query(key, &subj, &ep) == STATUS_SUCCESS) {
+        r.auth_epoch = ep;
+        r.subject_flags = subj.flags;
+    }
+    w64_wipe(&subj, sizeof subj);
+    /* A successful LOGIN is a new broker generation for this owner (possibly another account): children admitted
+     * under the previous login lose ownership now and are terminated and reaped privately. */
+    if (rc == SHZ_OK && m->opcode == SHZ_OP_W64_AUTH_LOGIN)
+        broker_revoke_stale(key);
+    if (rc != SHZ_OK)
+        ++auth_refused;
+    if (m->flags & SHZ_MSGF_ONEWAY)
+        return;                                         /* malformed (flags != 0): never answered, already scrubbed */
+    r.size = sizeof r;
+    r.status = rc;
+    reply(m, rc, &r, sizeof r);
+}
+
+static int w64_known_opcode(uint32_t op)
+{
+    return (op >= SHZ_OP_W64_QUERY && op <= SHZ_OP_W64_SHUTDOWN && op != SHZ_OP_W64_PROCESS_EXITED &&
+            op != SHZ_OP_W64_CONSOLE_OUTPUT) || op == SHZ_OP_W64_OWNER_CONTROL || shz_w64_auth_op(op);
 }
 
 static void handle(const shz_msg_hdr_t *m, const uint8_t *payload)
 {
+    int auth;
     if (m->src_domain != peer) { ++refused; return; }
     if (m->generation != chan->generation || m->dst_domain != SHZ_DOM_KERNEL64) {
         ++stale_msgs;
@@ -500,16 +663,20 @@ static void handle(const shz_msg_hdr_t *m, const uint8_t *payload)
             reply(m, SHZ_E_STALE, 0, 0);
         return;
     }
-    msg_auth = chan_auth();
-    if (msg_auth == SHZ_CHAN_AUTH_REVOKED) {
-        /* The attesting Win98 instance is gone: refuse everything on this channel and drop GUI views/snapshots. */
-        ++refused;
-        w64_gui_revoke_all();
-        if (!(m->flags & SHZ_MSGF_ONEWAY)) reply(m, SHZ_E_DENIED, 0, 0);
-        msg_auth = SHZ_CHAN_AUTH_REVOKED;
-        return;
-    }
     ++served;
+    if (w64_known_opcode(m->opcode)) {
+        /* Owner authority gate. GUI is not advertised (gui_enabled 0). SHUTDOWN needs the distinct privileged
+         * authority; a departed owner may only repeat its own idempotent OWNER_CONTROL. */
+        auth = shz_w64_authority_of(m->capability_id, privileged_enabled);
+        if (!(shz_w64_auth_op(m->opcode) ? auth == SHZ_W64_AUTH_ENDPOINT : shz_w64_core_op_allowed(m->opcode, auth, 0)) ||
+            (auth == SHZ_W64_AUTH_ENDPOINT && m->opcode != SHZ_OP_W64_OWNER_CONTROL &&
+             w64_owner_is_revoked(&revocations, m->capability_id, chan->generation))) {
+            ++refused; ++owner_denied;
+            if (!(m->flags & SHZ_MSGF_ONEWAY))
+                reply(m, SHZ_E_DENIED, 0, 0);
+            return;
+        }
+    }
     switch (m->opcode) {
     case SHZ_OP_W64_QUERY: handle_query(m); break;
     case SHZ_OP_W64_CREATE_PROCESS: handle_create(m, payload); break;
@@ -517,15 +684,11 @@ static void handle(const shz_msg_hdr_t *m, const uint8_t *payload)
     case SHZ_OP_W64_CONSOLE_INPUT: handle_console_input(m, payload); break;
     case SHZ_OP_W64_KILL_PROCESS: handle_kill(m, payload); break;
     case SHZ_OP_W64_RELEASE: handle_release(m, payload); break;
-    case SHZ_OP_W64_GUI_QUERY_VIEW: case SHZ_OP_W64_GUI_FRAME_ACQUIRE: case SHZ_OP_W64_GUI_FRAME_READ:
-    case SHZ_OP_W64_GUI_FRAME_RELEASE: case SHZ_OP_W64_GUI_INPUT: case SHZ_OP_W64_GUI_CLOSE_VIEW:
-        handle_gui(m, payload); break;
+    case SHZ_OP_W64_OWNER_CONTROL: handle_owner_control(m, payload); break;
+    case SHZ_OP_W64_AUTH_LOGIN:
+    case SHZ_OP_W64_AUTH_REGISTER:
+    case SHZ_OP_W64_AUTH_CONFIRM_ELEVATION: handle_auth(m, payload); break;
     case SHZ_OP_W64_SHUTDOWN:
-        if (msg_auth == SHZ_CHAN_AUTH_ATTESTED && shz_w64_owner_cap_derived(m->capability_id)) {
-            ++refused;                                      /* only the VxD itself ends the subsystem */
-            if (!(m->flags & SHZ_MSGF_ONEWAY)) reply(m, SHZ_E_DENIED, 0, 0);
-            break;
-        }
         shutdown_requested = 1;
         shutdown_deadline = ticks_now() + W64_SHUTDOWN_WAIT_MS;
         KASSERT(shz_pma_service_shutdown(&pma_service) == SHZ_OK);
@@ -544,6 +707,13 @@ static int pump_slot(w64_slot_t *s)
 {
     unsigned stream;
     int progressed = 0;
+    /* Never emit a frame for an unbound, old-epoch, relogged-in or logged-out owner. The owner's login itself is
+     * not departed here: after a relogin it is the owner's new, valid login (old children only lose ownership);
+     * explicit departure is OWNER_CONTROL and the channel-epoch reset. */
+    if (!s->rejected && (!w64_owner_binding_live(&s->own, chan->generation) || !slot_broker_current(s)))
+        revoke_slot(s);
+    if (!s->used)
+        return 1;
     /* The last thread drops threads_alive before releasing process resources.
      * proc_wait can block while teardown is still running, defeating the outer
      * shutdown deadline. Keep pumping until teardown makes reaping ready. */
@@ -557,10 +727,11 @@ static int pump_slot(w64_slot_t *s)
             if (s->state != SHZ_W64_PS_KILLED) s->state = SHZ_W64_PS_EXITED;
             s->reaped = 1;
             s->proc = 0;
-            w64_gui_revoke((uint32_t)s->pid, s->gen);
             progressed = 1;
+            if(s->rejected) {s->used=0;return 1;}
         }
     }
+    if(s->rejected)return progressed;
     for (stream = 0; stream < 2; ++stream) {
         w64_fifo_t *f = &s->out[stream];
         while (f->head != f->tail && s->seq_sent - s->seq_acked < SHZ_W64_CONSOLE_WINDOW) {
@@ -578,7 +749,7 @@ static int pump_slot(w64_slot_t *s)
             c.length = (uint16_t)n;
             c.stream = (uint8_t)(stream + 1);
             memcpy(pl, &c, sizeof c);
-            if (event(SHZ_OP_W64_CONSOLE_OUTPUT, pl, (uint16_t)(sizeof c + n), s->owner_cap) != SHZ_OK)
+            if (event(SHZ_OP_W64_CONSOLE_OUTPUT, s->own.owner_id, pl, (uint16_t)(sizeof c + n)) != SHZ_OK)
                 return progressed;                          /* ring full: retry on the next pass */
             fl = irq_save();
             f->tail += n;                                   /* consume only once the frame is on the wire */
@@ -591,7 +762,7 @@ static int pump_slot(w64_slot_t *s)
     if (s->reaped && !s->exited_sent && s->out[0].head == s->out[0].tail && s->out[1].head == s->out[1].tail) {
         shz_w64_event_t ev;
         fill_event(&ev, s, s->state, STATUS_SUCCESS);
-        if (event(SHZ_OP_W64_PROCESS_EXITED, &ev, sizeof ev, s->owner_cap) == SHZ_OK) {
+        if (event(SHZ_OP_W64_PROCESS_EXITED, s->own.owner_id, &ev, sizeof ev) == SHZ_OK) {
             s->exited_sent = 1;
             progressed = 1;
             kprintf("K64 subsys64: pid %d %s, exit %d fault %x, %u console frame(s), %u dropped byte(s)\n", s->pid,
@@ -600,6 +771,41 @@ static int pump_slot(w64_slot_t *s)
         }
     }
     return progressed;
+}
+
+/* C6 receive path for credential frames. The consumer still owns the slot at `tail` until it advances tail (the
+ * SPSC producer reuses a slot only after that), and Kernel64 maps the channel writable, so the slot is copied once
+ * into auth_frame and scrubbed BEFORE it is released. Header/CRC validation equals shz_ring_pop's on the private
+ * copy. Returns 0 (untouched) when the next slot is absent, corrupt-indexed or not a credential opcode; a producer
+ * that rewrites its own published slot after this peek only affects its own data (then the normal pop path wipes
+ * the service-loop copy after dispatch). The application's own DIOC buffer is outside Core's reach. */
+static int rx_auth_frame(void)
+{
+    shz_msg_hdr_t m;
+    const uint32_t tail = rx->tail, head = __atomic_load_n(&rx->head, __ATOMIC_ACQUIRE);
+    uint32_t op, zero = 0;
+    uint8_t *slot;
+    if (head == tail || head - tail > rx->slot_count)
+        return 0;
+    slot = shz_ring_slot(rx, tail);
+    memcpy(&op, slot + __builtin_offsetof(shz_msg_hdr_t, opcode), sizeof op);
+    if (!shz_w64_auth_op(op))
+        return 0;
+    memcpy(auth_frame, slot, SHZ_MSG_SLOT_SIZE);
+    w64_wipe(slot, SHZ_MSG_SLOT_SIZE);
+    __atomic_store_n(&rx->tail, tail + 1, __ATOMIC_RELEASE);
+    memcpy(&m, auth_frame, sizeof m);
+    memcpy(auth_frame + __builtin_offsetof(shz_msg_hdr_t, checksum), &zero, sizeof zero);
+    if (m.magic != SHZ_MSG_MAGIC || m.abi_major != SHZ_ABI_MAJOR || m.header_size != sizeof m ||
+        m.payload_length > SHZ_MSG_MAX_INLINE || m.message_size != (uint32_t)sizeof m + m.payload_length ||
+        (m.payload_length && m.payload_offset != sizeof m) || shz_crc32(auth_frame, m.message_size) != m.checksum)
+        ++proto_errors;                                 /* consumed and dropped, never answered (as shz_ring_pop) */
+    else if (m.src_domain != peer)
+        ++refused;
+    else
+        handle(&m, auth_frame + sizeof m);
+    w64_wipe(auth_frame, sizeof auth_frame);
+    return 1;
 }
 
 static void service_loop(void)
@@ -632,20 +838,28 @@ static void service_loop(void)
             channel_rx_faulted = 0;
             KASSERT(shz_pma_service_restart(&pma_service, chan->generation) == SHZ_OK);
         }
+        if (svc_epoch != chan->generation)
+            owner_epoch_cleanup();
         busy = pma_pump();
         pma_retry_inbound();
-        while (receive_budget-- && !shutdown_requested && !channel_rx_faulted && !pma_inbound_pending && !pma_rejection_pending &&
-               (rc = shz_ring_pop(rx, &m, payload, sizeof payload, &reason)) != SHZ_E_NOENT) {
+        while (receive_budget-- && !shutdown_requested && !channel_rx_faulted && !pma_inbound_pending && !pma_rejection_pending) {
+            if (rx_auth_frame()) { busy = 1; continue; }
+            if ((rc = shz_ring_pop(rx, &m, payload, sizeof payload, &reason)) == SHZ_E_NOENT)
+                break;
             busy = 1;
-            if (rc == SHZ_OK && m.src_domain != peer) ++refused;
+            if (rc == SHZ_OK && shz_w64_auth_op(m.opcode) && m.src_domain != peer) {
+                ++refused; w64_wipe(payload, sizeof payload);   /* producer raced the peek: scrub on every path */
+            } else if (rc == SHZ_OK && m.src_domain != peer) ++refused;
             else if (rc == SHZ_OK && shz_pma_is_opcode(m.opcode)) {
                 pma_inbound = m;
                 memset(pma_inbound_payload, 0, sizeof pma_inbound_payload);
                 memcpy(pma_inbound_payload, payload, m.payload_length);
                 pma_inbound_pending = 1;
                 pma_retry_inbound();
-            } else if (rc == SHZ_OK) handle(&m, payload);
-            else {
+            } else if (rc == SHZ_OK) {
+                handle(&m, payload);
+                if (shz_w64_auth_op(m.opcode)) w64_wipe(payload, sizeof payload);   /* producer raced the peek */
+            } else {
                 ++proto_errors;                            /* malformed slot consumed and dropped, never answered */
                 if (reason == SHZ_PR_HEAD_CORRUPT || rc == SHZ_E_INVALID) {
                     /* The slot was not consumed. Quarantine this receive ring
@@ -702,9 +916,17 @@ static void bind_channel(void *base, size_t bytes, uint32_t peer_domain)
     start_tick = ticks_now();
     pma_inbound_pending = pma_rejection_pending = 0;
     channel_rx_faulted = 0;
+    svc_epoch = chan->generation;
+    memset(&revocations, 0, sizeof revocations);
+    revocations.chan_gen = chan->generation;
+    auth_outstanding = 0;
+    shz_auth_endpoint_epoch_reset((uint64_t)chan->generation);   /* no login survives from another channel epoch */
     KASSERT(shz_pma_service_init(&pma_service, SHZ_DOM_KERNEL64, peer, chan->generation) == SHZ_OK);
 #ifdef SHZ_STANDALONE
     notify_supported = 0;                                   /* no Supervisor: no doorbells, the peer polls */
+    privileged_enabled = 1;                                 /* the in-kernel loopback client is Core-local */
+#else
+    privileged_enabled = 0;                                 /* no privileged native peer is configured */
 #endif
 }
 
@@ -764,6 +986,7 @@ static unsigned passed, failed;
 
 static shz_ring_hdr_t *cl_tx, *cl_rx;
 static uint64_t cl_next_id = 0x4000;
+static uint32_t cl_owner = (1u << SHZ_W64_OWNER_GEN_SHIFT) | 0u; /* what NTWRAP9X.VXD stamps for one endpoint */
 static struct { shz_msg_hdr_t h; uint8_t pl[SHZ_MSG_MAX_INLINE]; } evq[64];
 static unsigned evq_head, evq_tail;
 
@@ -802,6 +1025,7 @@ static int cl_call(uint32_t op, const void *pl, uint16_t len, uint64_t boff, uin
     h.src_domain = SHZ_DOM_WIN98;
     h.dst_domain = SHZ_DOM_KERNEL64;
     h.generation = generation;
+    h.capability_id = cl_owner;
     h.payload_length = len;
     h.buffer_offset = boff;
     h.buffer_length = blen;
@@ -823,6 +1047,7 @@ static void cl_oneway(uint32_t op, const void *pl, uint16_t len)
     h.src_domain = SHZ_DOM_WIN98;
     h.dst_domain = SHZ_DOM_KERNEL64;
     h.generation = 1;
+    h.capability_id = cl_owner;
     h.payload_length = len;
     KASSERT(shz_ring_push(cl_tx, &h, pl) == SHZ_OK);
 }
@@ -1246,6 +1471,7 @@ static void pma_selftest(void)
         memset(&request, 0, sizeof request);
         request.opcode = SHZ_OP_W64_QUERY; request.request_id = legacy = cl_next_id++;
         request.src_domain = SHZ_DOM_WIN98; request.dst_domain = SHZ_DOM_KERNEL64; request.generation = 1;
+        request.capability_id = cl_owner;
         ok &= shz_ring_push(cl_tx, &request, 0) == SHZ_OK;
         thread_sleep_ms(60);
         for (i = 0; i < 32; ++i) ok &= pma_take(ids[i], &h, pl, 2000) && h.status == SHZ_OK;
@@ -1381,6 +1607,7 @@ static int pma_shutdown_selftest(thread_t *svc)
     memset(&shutdown, 0, sizeof shutdown);
     shutdown.opcode = SHZ_OP_W64_SHUTDOWN; shutdown.request_id = stop = cl_next_id++;
     shutdown.src_domain = SHZ_DOM_WIN98; shutdown.dst_domain = SHZ_DOM_KERNEL64; shutdown.generation = epoch;
+    shutdown.capability_id = SHZ_W64_OWNER_PRIVILEGED_ID;  /* Core-local privileged authority */
     r.object = c.object; r.deadline_ns = UINT64_MAX;
     {
         const uint64_t f = irq_save();
@@ -1600,6 +1827,15 @@ static void selftest(void)
         KASSERT(shz_ring_push(cl_tx, &hostile, 0) == SHZ_OK);
         rc = cl_call(SHZ_OP_W64_QUERY, 0, 0, 0, 0, chan->generation, &rh, rpl, 2000);
         CHECK("hostile source cannot SHUTDOWN the service; the real peer still receives QUERY", rc == SHZ_OK && !shutdown_requested);
+        rc = cl_call(SHZ_OP_W64_SHUTDOWN, 0, 0, 0, 0, chan->generation, &rh, rpl, 2000);
+        CHECK("an endpoint owner cannot SHUTDOWN the service", rc == SHZ_E_DENIED && !shutdown_requested);
+        cl_owner = SHZ_W64_OWNER_NONE;
+        rc = cl_call(SHZ_OP_W64_QUERY, 0, 0, 0, 0, chan->generation, &rh, rpl, 2000);
+        CHECK("a request without an endpoint owner is DENIED", rc == SHZ_E_DENIED);
+        cl_owner = (2u << SHZ_W64_OWNER_GEN_SHIFT) | 0u;
+        rc = cl_simple(SHZ_OP_W64_KILL_PROCESS, 1, 0);
+        CHECK("another owner cannot reach a pid it did not create", rc == SHZ_E_NOENT);
+        cl_owner = (1u << SHZ_W64_OWNER_GEN_SHIFT) | 0u;
     }
 
     /* 9. PMA requests share the same live channel and service thread. */

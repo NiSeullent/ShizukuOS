@@ -1,0 +1,20 @@
+/* Template; tools/gen_rc.py appends the STRINGTABLE generated from src/strings_ko.h.
+ * Explicit Korean locale: LANG_KOREAN (0x12) / SUBLANG_DEFAULT (1). */
+#pragma code_page(65001)
+#include <winres.h>
+LANGUAGE 0x12, 0x01
+
+1 VERSIONINFO
+FILEVERSION 0,1,0,0
+PRODUCTVERSION 0,1,0,0
+FILEOS 0x4L
+FILETYPE 0x1L
+{
+  BLOCK "StringFileInfo" { BLOCK "041204B0" {
+    VALUE "ProductName", "ShizukuOS development candidate shell\0"
+    VALUE "FileDescription", "ShizukuOS native shell candidate (source-only, not Windows 10)\0"
+    VALUE "FileVersion", "0.1.0.0\0"
+    VALUE "LegalCopyright", "LGPL-2.1-or-later; adapted from ReactOS Explorer\0"
+  } }
+  BLOCK "VarFileInfo" { VALUE "Translation", 0x0412, 1200 }
+}

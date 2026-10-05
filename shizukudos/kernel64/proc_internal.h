@@ -141,6 +141,9 @@ struct process {
      * parent at creation; 0 = the Supervisor/serial console. `console_sink_gen` guards against a recycled slot. */
     void *console_sink;
     uint32_t console_sink_gen;
+    /* Kernel-owned cleanup identity and spawn fence, never reused by a slot. */
+    uint64_t saw_generation, parent_generation;
+    uint32_t saw_protection, saw_fenced, saw_constructing;
 };
 
 /* vad.c */
@@ -207,8 +210,10 @@ typedef struct {
     const uint16_t *env; uint32_t env_chars;        /* whole block including its terminating empty string */
     uint64_t std_handles[3]; int use_std_handles;   /* STARTF_USESTDHANDLES values for StandardInput/Output/Error */
     int suspended;                                  /* CREATE_SUSPENDED: the initial thread waits for NtResumeThread */
+    int hold_pending;                               /* kernel-only: suspended child stays private until explicit admission */
     int32_t (*prepare)(process_t *child, void *ctx);  /* runs before the loader's own handles exist (handle inheritance) */
     void *prepare_ctx;
+    const void *trusted_image;  /* kernel-only readonly RAM fsnode custody; checked before prepare */
 } ldr_create_ex_t;
 int32_t ldr_create_process_ex(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
                               const ldr_create_ex_t *ex, process_t **out_proc, thread_t **out_thread);

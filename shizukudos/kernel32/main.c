@@ -5,6 +5,7 @@
 #include "k32.h"
 #include "smp_native.h"
 #include "service_policy.h"
+#include "ipc_endpoint.h"
 #include "../boot_profile/win98_foundation.h"
 
 extern volatile uint32_t ipc_session_end;
@@ -16,7 +17,7 @@ void kmain(const shz_bootinfo_t *bi)
     thread_t *server = 0;
     uint64_t waited_ms = 0;
     int service_mode;
-    if (bi->magic != SHZ_BOOTINFO_MAGIC || bi->abi_major != SHZ_ABI_MAJOR || bi->domain_id != SHZ_DOM_KERNEL32)
+    if (!bi || bi->magic != SHZ_BOOTINFO_MAGIC || bi->abi_major != SHZ_ABI_MAJOR || bi->domain_id != SHZ_DOM_KERNEL32)
         shz_exit(97);
     unsigned native_count=0;
     const int native_policy=k32_ap_policy(bi,&native_count);
@@ -24,6 +25,11 @@ void kmain(const shz_bootinfo_t *bi)
     service_mode = native_policy ? 0 : k32_boot_runtime_service_mode(bi);
     if (service_mode < 0)
         shz_exit(97);
+    if (!native_policy) {
+        unsigned selected;
+        int mode;
+        if (k32_ipc_select_endpoint(bi, &selected, &mode) < 0) shz_exit(97);
+    }
     arch_init();
     kprintf("%s: Protected Mode kernel starting, %u MiB RAM, tsc %u kHz\n", KVER, (uint32_t)(bi->ram_size >> 20),
             (uint32_t)(bi->tsc_hz / 1000));
@@ -35,10 +41,13 @@ void kmain(const shz_bootinfo_t *bi)
         shz_exit(native_result==1?0:98);
     }
     sti();
-    if (bi->channel_count) {
-        ipc_init(bi);
-        server = thread_create("ipc-server", ipc_server_thread, 0);
-        KASSERT(server);
+    if (!native_policy) {
+        const int endpoint = ipc_init(bi);
+        if (endpoint < 0) shz_exit(97);
+        if (endpoint) {
+            server = thread_create("ipc-server", ipc_server_thread, 0);
+            KASSERT(server);
+        }
     }
     if (service_mode) {
         KASSERT(server);

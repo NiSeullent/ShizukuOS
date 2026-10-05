@@ -14,6 +14,8 @@ typedef struct {
  * No caller approval/hash substitutes for observed physical origin. */
 int archive_source_bind_origin(const shz_bootinfo_t *,const uint8_t *,uint64_t);
 int archive_source_origin(shz_storage_provenance_t *);
+/* Kernel-only exact accepted-loader-archive namespace custody. */
+fsnode_t *archive_source_bound_node(const char *);
 /* Resolves the actual C: namespace node and independently proves its exact
  * extent in the accepted loader archive, then snapshots into private PMM pages.
  * Kernel owner pointers/handles never cross a user ABI. SHA authenticates this

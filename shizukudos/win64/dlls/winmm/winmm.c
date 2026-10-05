@@ -2,11 +2,11 @@
  * winmm.dll - the multimedia timer API (timeGetTime, timeBeginPeriod/EndPeriod, timeGetDevCaps, timeGetSystemTime,
  * timeSetEvent/timeKillEvent) and the waveOut/waveIn/midiOut/midiIn device APIs over the audio drivers of this system.
  *
- * Kernel64 has no audio or MIDI hardware driver, so the device APIs report exactly that: every *GetNumDevs is 0, opening a
- * device id fails with MMSYSERR_BADDEVICEID (there is no device with that id), opening the mapper fails with MMSYSERR_NODRIVER
- * (waveOut) / MIDIERR_NODEVICE (midiOut: "no MIDI port was found", the documented mapper error), and since no device can be
- * opened, every function that takes a device handle finds none in the table of open devices and fails with
- * MMSYSERR_INVALHANDLE. The mixer*, aux*, joy* families and PlaySound are not exported.
+ * waveOut* (wavout.c) and PlaySound/sndPlaySound (playsnd.c) are real consumers of the ShizukuOS Core audio service
+ * (NtShzSound, shizukudos/abi/shz_audio.h): waveOutGetNumDevs is 1 only while Core reports an initialised AC97 function and 0
+ * otherwise (then device id 0 is MMSYSERR_BADDEVICEID and the mapper MMSYSERR_NODRIVER). waveIn and all MIDI remain absent:
+ * *GetNumDevs is 0, opening fails as documented and handle calls find no open device (MMSYSERR_INVALHANDLE). The mixer*, aux*
+ * and joy* families are not exported.
  *
  * Time base: kernel32 GetTickCount64 (the Kernel64 1 kHz system tick). Kernel64 already ticks at 1 ms, so the
  * timer period range reported by timeGetDevCaps is [1 ms, 1000000 ms] and timeBeginPeriod cannot make anything finer;
@@ -22,6 +22,7 @@
 #include <string.h>
 #define _WINMM_
 #include <mmsystem.h>
+#include "wavxp.h"
 
 #define PERIOD_MIN 1u
 #define PERIOD_MAX 1000000u
@@ -35,11 +36,14 @@ typedef struct timer {
     DWORD_PTR user;
 } timer_t_;
 
+void shz_wave_attach(void); void shz_wave_detach(int dynamic_unload);
+void shz_play_attach(void); void shz_play_detach(int dynamic_unload);
 static CRITICAL_SECTION g_lock;
 static timer_t_ *g_timers;
 static UINT g_next_id = 1;
 static UINT g_running;                  /* id of the callback the worker is executing now, 0 if none */
 static HANDLE g_wake, g_thread;
+static HMODULE g_thread_mod;            /* loader reference owned by the timer worker while it exists */
 static DWORD g_thread_id;
 static volatile LONG g_quit;
 /* The worker never blocks for longer than this: Kernel64 terminates the other threads of an exiting process only when
@@ -110,6 +114,15 @@ static DWORD WINAPI timer_thread(LPVOID unused)
         DWORD wait = MAX_WAIT_MS;
         EnterCriticalSection(&g_lock);
         now = GetTickCount64();
+        if (!g_timers) {
+            /* Idle worker ends (recreated by the next timeSetEvent) and drops its loader reference from kernel32 code, so
+             * FreeLibrary can unload winmm and the worker never runs unmapped code. */
+            HMODULE m = g_thread_mod;
+            CloseHandle(g_thread);
+            g_thread = 0; g_thread_id = 0; g_thread_mod = 0;
+            LeaveCriticalSection(&g_lock);
+            xp_modexit(m);
+        }
         for (t = g_timers; t; t = t->next)
             if (!best || t->due < best->due) best = t;
         if (best && best->due <= now) {
@@ -154,8 +167,10 @@ DLLAPI MMRESULT WINAPI timeSetEvent(UINT delay, UINT resolution, LPTIMECALLBACK 
     EnterCriticalSection(&g_lock);
     if (!g_thread) {
         if (!g_wake) g_wake = CreateEventW(0, FALSE, FALSE, 0);
-        if (g_wake) g_thread = CreateThread(0, 0, timer_thread, 0, 0, 0);
+        g_thread_mod = g_wake ? xp_modref() : 0;
+        if (g_thread_mod) g_thread = CreateThread(0, 0, timer_thread, 0, 0, 0);
         if (!g_wake || !g_thread) {
+            xp_modunref(g_thread_mod); g_thread_mod = 0;
             LeaveCriticalSection(&g_lock);
             HeapFree(GetProcessHeap(), 0, t);
             return 0;
@@ -218,36 +233,18 @@ static int open_handle(HANDLE h, int kind)
 
 #define CALLBACK_TYPES (CALLBACK_WINDOW | CALLBACK_TASK | CALLBACK_FUNCTION | CALLBACK_EVENT)
 
-DLLAPI UINT WINAPI waveOutGetNumDevs(void) { return g_num_devs[DEV_WAVEOUT]; }
 DLLAPI UINT WINAPI waveInGetNumDevs(void) { return g_num_devs[DEV_WAVEIN]; }
 DLLAPI UINT WINAPI midiOutGetNumDevs(void) { return g_num_devs[DEV_MIDIOUT]; }
 DLLAPI UINT WINAPI midiInGetNumDevs(void) { return g_num_devs[DEV_MIDIIN]; }
-
-DLLAPI MMRESULT WINAPI waveOutOpen(LPHWAVEOUT phwo, UINT id, LPCWAVEFORMATEX fmt, DWORD_PTR cb, DWORD_PTR inst, DWORD flags)
-{
-    (void)cb; (void)inst;
-    if (!fmt || (!phwo && !(flags & WAVE_FORMAT_QUERY))) return MMSYSERR_INVALPARAM;
-    if (flags & ~(DWORD)(CALLBACK_TYPES | WAVE_FORMAT_QUERY | WAVE_ALLOWSYNC | WAVE_MAPPED | WAVE_FORMAT_DIRECT)) return MMSYSERR_INVALFLAG;
-    if (phwo) *phwo = 0;
-    if (id == WAVE_MAPPER) return MMSYSERR_NODRIVER;         /* the mapper needs at least one device driver */
-    return id < g_num_devs[DEV_WAVEOUT] ? MMSYSERR_ERROR : MMSYSERR_BADDEVICEID;
-}
-
-DLLAPI MMRESULT WINAPI waveOutClose(HWAVEOUT h) { return open_handle(h, DEV_WAVEOUT) ? MMSYSERR_ERROR : MMSYSERR_INVALHANDLE; }
-DLLAPI MMRESULT WINAPI waveOutPause(HWAVEOUT h) { return open_handle(h, DEV_WAVEOUT) ? MMSYSERR_ERROR : MMSYSERR_INVALHANDLE; }
-DLLAPI MMRESULT WINAPI waveOutRestart(HWAVEOUT h) { return open_handle(h, DEV_WAVEOUT) ? MMSYSERR_ERROR : MMSYSERR_INVALHANDLE; }
-DLLAPI MMRESULT WINAPI waveOutReset(HWAVEOUT h) { return open_handle(h, DEV_WAVEOUT) ? MMSYSERR_ERROR : MMSYSERR_INVALHANDLE; }
 
 static MMRESULT header_op(HANDLE h, int kind, const void *hdr, UINT cb, UINT need)
 {
     if (!open_handle(h, kind)) return MMSYSERR_INVALHANDLE;
     if (!hdr || cb < need) return MMSYSERR_INVALPARAM;
-    return MMSYSERR_ERROR;                                    /* unreachable: no device is ever open */
+    return MMSYSERR_ERROR;                                    /* unreachable: no MIDI device is ever open */
 }
 
-DLLAPI MMRESULT WINAPI waveOutPrepareHeader(HWAVEOUT h, LPWAVEHDR hdr, UINT cb) { return header_op(h, DEV_WAVEOUT, hdr, cb, sizeof(WAVEHDR)); }
-DLLAPI MMRESULT WINAPI waveOutUnprepareHeader(HWAVEOUT h, LPWAVEHDR hdr, UINT cb) { return header_op(h, DEV_WAVEOUT, hdr, cb, sizeof(WAVEHDR)); }
-DLLAPI MMRESULT WINAPI waveOutWrite(HWAVEOUT h, LPWAVEHDR hdr, UINT cb) { return header_op(h, DEV_WAVEOUT, hdr, cb, sizeof(WAVEHDR)); }
+/* waveOut* and PlaySound live in wavout.c / playsnd.c: real Core audio service consumers. */
 
 DLLAPI MMRESULT WINAPI midiOutOpen(LPHMIDIOUT phmo, UINT id, DWORD_PTR cb, DWORD_PTR inst, DWORD flags)
 {
@@ -296,14 +293,15 @@ DLLAPI MMRESULT WINAPI midiInUnprepareHeader(HMIDIIN h, LPMIDIHDR hdr, UINT cb) 
 BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID res)
 {
     (void)h;
+    if (reason == DLL_PROCESS_DETACH) { shz_play_detach(!res); shz_wave_detach(!res); }     /* owned audio workers first */
     if (reason == DLL_PROCESS_ATTACH) {
         InitializeCriticalSection(&g_lock);
-    } else if (reason == DLL_PROCESS_DETACH && g_wake) {
-        InterlockedExchange((LONG *)&g_quit, 1);                 /* let the worker leave promptly */
-        SetEvent(g_wake);
-        /* Dynamic unload (res == NULL): the worker runs code of this image, so wait until it has left. At process exit
-         * (res != NULL) the system ends the other threads itself. */
-        if (!res && g_thread && GetCurrentThreadId() != g_thread_id) WaitForSingleObject(g_thread, 5000);
+        shz_wave_attach();
+        shz_play_attach();
+    } else if (reason == DLL_PROCESS_DETACH && g_wake && !res) {
+        /* FreeLibrary: the timer worker holds a loader reference, so it is gone (or is the thread running this very
+         * detach from FreeLibraryAndExitThread). Never wait here: thread exit needs the loader lock held by DllMain. */
+        CloseHandle(g_wake); g_wake = 0;
     }
     return TRUE;
 }

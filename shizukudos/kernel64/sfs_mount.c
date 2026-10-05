@@ -19,52 +19,13 @@
  * fs.c while ext4 names are case-sensitive: of two names differing only in case, the first enumerated wins.
  * Supported: read, write (sparse extension), truncate, create file/directory, delete (file, empty directory,
  * delete-on-close), rename/move within the volume (replace allowed), flush. One kernel mutex per volume.
- * Access control: ShizukuFS POSIX DAC (libsfs sfs_access) for the requesting process, see task_cred().
  */
 #include "fs.h"
+#include "fs_policy.h"
+#include "sfs_mount.h"
 #include "blk.h"
 #include "vfs_mounts.h"
 #include "../../shizukufs/v1/libsfs/sfs.h"
-#include "../../shizukufs/v1/libsfs/sfs_subject.h"
-#include "auth_policy.h"
-
-/* Account-authority subject export (sysk32_auth.c, 74b0 authority state). */
-int shz_auth_fs_subject(process_t *, shz_subject *, int *);
-
-/* ---------------------------------------------------------------- caller credential (DAC)
- * Every vol_* operation below runs synchronously on the thread that issued the file system
- * request (sysfile.c / ipc_io.c / ipc_section.c / ntdrv_zw.c call fs.c in their own context; no
- * deferred worker reaches these ops), so the requester is the current thread's process. Kernel
- * threads (no process: boot mount, drivers' own threads) keep the mechanism path. A user process
- * gets the credential the account authority binds to its kernel process object, mapped by libsfs
- * (sfs_cred_from_subject); a refused or unmappable subject is SFS_EACCES -- never a fallback to
- * uid 0. With no enrolled account the authority reports inactive and the mapper yields the
- * existing development-realm uid 0 credential. The primary subject is used; thread
- * impersonation is not consulted (it can only be narrower and has no file identity yet). */
-static int task_cred(sfs_cred *c, int *kernel)
-{
-    thread_t *t = thread_current();
-    process_t *p = t ? t->proc : 0;
-    shz_subject s;
-    sfs_subject_in in;
-    int active;
-    memset(c, 0, sizeof *c);
-    *kernel = !p;
-    if (!p) return 0;
-    if (!shz_auth_fs_subject(p, &s, &active)) return SFS_EACCES;
-    in.uid = s.uid; in.session = s.session; in.integrity = s.integrity; in.roles = s.roles;
-    in.flags = s.flags; in.reserved = s.reserved; in.auth_id = s.auth_id; in.accounts_active = active ? 1u : 0u;
-    return sfs_cred_from_subject(&in, c);
-}
-
-/* 0 when the requester may apply `mask` (SFS_MAY_*) to inode `ino`; caller holds v->lock. */
-static int may(sfs_fs *fs, uint32_t ino, uint32_t mask)
-{
-    sfs_cred c;
-    int kernel, rc = task_cred(&c, &kernel);
-    if (rc || kernel) return rc;
-    return sfs_permission(fs, &c, ino, mask);
-}
 
 #define SFSK_MAX 8
 #define SFSK_CACHE_BLOCKS 512u
@@ -82,36 +43,7 @@ typedef struct sfsk_vol {
 
 static sfsk_vol vols[SFSK_MAX];
 static unsigned nvols;
-
-static int vol_volume_info(fsvol_t *fv, fs_volume_info_t *out)
-{
-    sfsk_vol *v;
-    sfs_statfs_t f;
-    uint32_t serial = 2166136261u;
-    unsigned i;
-    int rc;
-    if (!fv || fv->volume_info != vol_volume_info || !fv->priv || !out) return -1;
-    v = fv->priv;
-    if (&v->vol != fv) return -1;
-    mutex_lock(&v->lock);
-    rc = sfs_statfs(v->fs, &f);
-    if (!rc && (f.block_size < 512 || f.block_size % 512 || f.free_blocks > f.blocks)) rc = SFS_EIO;
-    if (!rc) {
-        memset(out, 0, sizeof *out);
-        for (i = 0; i < sizeof f.uuid; ++i) serial = (serial ^ f.uuid[i]) * 16777619u;
-        out->serial = serial;           /* stable 32-bit identity derived from the on-disk UUID */
-        memcpy(out->label, f.label, 16);
-        memcpy(out->filesystem, "SHIZUKUFS", 10);
-        out->total_units = f.blocks;
-        out->free_units = f.free_blocks;
-        out->sectors_per_unit = f.block_size / 512;
-        out->bytes_per_sector = 512;
-        out->attributes = 0x2u | 0x4u;
-        out->writable = fv->write && !v->ro && !f.read_only;
-    }
-    mutex_unlock(&v->lock);
-    return rc ? -1 : 0;
-}
+static int sys_vol = -1;                               /* index of the installed system volume, -1 none */
 
 /* ---------------------------------------------------------------- libsfs callbacks */
 static int io_unaligned(sfsk_vol *v, uint64_t off, uint8_t *buf, uint32_t bytes, int write)
@@ -217,8 +149,7 @@ static int vol_read(fsvol_t *fv, fsnode_t *n, uint64_t off, void *buf, uint64_t 
     sfsk_vol *v = fv->priv;
     int rc;
     mutex_lock(&v->lock);
-    rc = may(v->fs, n->first_cluster, SFS_MAY_READ);
-    if (!rc) rc = sfs_read(v->fs, n->first_cluster, off, buf, len, done);
+    rc = sfs_read(v->fs, n->first_cluster, off, buf, len, done);
     if (!rc) v->reads++;
     mutex_unlock(&v->lock);
     return rc ? -1 : 0;
@@ -231,8 +162,7 @@ static int vol_write(fsvol_t *fv, fsnode_t *n, uint64_t off, const void *buf, ui
     int rc;
     if (n->view) return -1;                             /* the file backs a mapped image: its pages must not change */
     mutex_lock(&v->lock);
-    rc = may(v->fs, n->first_cluster, SFS_MAY_WRITE);
-    if (!rc) rc = sfs_write(v->fs, n->first_cluster, off, buf, len, &done);
+    rc = sfs_write(v->fs, n->first_cluster, off, buf, len, &done);
     if (done && off + done > n->size) n->size = off + done;
     if (done) n->ftime_m = filetime((int64_t)cb_now(0), 0);
     if (!rc) v->writes++;
@@ -247,8 +177,7 @@ static int vol_truncate(fsvol_t *fv, fsnode_t *n, uint64_t size)
     int rc;
     if (n->view) return -1;
     mutex_lock(&v->lock);
-    rc = may(v->fs, n->first_cluster, SFS_MAY_WRITE);
-    if (!rc) rc = sfs_truncate(v->fs, n->first_cluster, size);
+    rc = sfs_truncate(v->fs, n->first_cluster, size);
     if (!rc) { n->size = size; n->ftime_m = filetime((int64_t)cb_now(0), 0); }
     mutex_unlock(&v->lock);
     return rc ? errno_of(rc) : 0;
@@ -260,17 +189,10 @@ static fsnode_t *vol_create(fsvol_t *fv, fsnode_t *dir, const char *name, int is
     uint32_t ino;
     sfs_stat_t st;
     fsnode_t *c = 0;
-    sfs_cred cr;
-    int rc, kernel;
+    int rc;
     mutex_lock(&v->lock);
-    rc = task_cred(&cr, &kernel);
-    if (!rc && kernel)
-        rc = is_dir ? sfs_mkdir(v->fs, dir->first_cluster, name, strlen(name), 0755, &ino)
-                    : sfs_create(v->fs, dir->first_cluster, name, strlen(name), 0644, &ino);
-    else if (!rc)                                       /* owner = requester; needs write+search on dir */
-        rc = is_dir ? sfs_mkdir_as(v->fs, &cr, dir->first_cluster, name, strlen(name), 0755, &ino)
-                    : sfs_open_as(v->fs, &cr, dir->first_cluster, name, strlen(name),
-                                  SFS_O_WRITE | SFS_O_CREATE | SFS_O_EXCL, 0644, &ino);
+    rc = is_dir ? sfs_mkdir(v->fs, dir->first_cluster, name, strlen(name), 0755, &ino)
+                : sfs_create(v->fs, dir->first_cluster, name, strlen(name), 0644, &ino);
     if (!rc) rc = sfs_stat(v->fs, ino, &st);
     if (!rc) {
         c = fs_new_child(dir, name, is_dir);
@@ -289,17 +211,11 @@ static fsnode_t *vol_create(fsvol_t *fv, fsnode_t *dir, const char *name, int is
 static int vol_remove(fsvol_t *fv, fsnode_t *n)
 {
     sfsk_vol *v = fv->priv;
-    sfs_cred cr;
-    int rc, kernel;
+    int rc;
     if (!n->parent || n->view) return -1;
     mutex_lock(&v->lock);
-    rc = task_cred(&cr, &kernel);
-    if (!rc && kernel)
-        rc = n->is_dir ? sfs_rmdir(v->fs, n->parent->first_cluster, n->name, strlen(n->name))
-                       : sfs_unlink(v->fs, n->parent->first_cluster, n->name, strlen(n->name));
-    else if (!rc)                                       /* write+search on the parent, sticky rule */
-        rc = n->is_dir ? sfs_rmdir_as(v->fs, &cr, n->parent->first_cluster, n->name, strlen(n->name))
-                       : sfs_unlink_as(v->fs, &cr, n->parent->first_cluster, n->name, strlen(n->name));
+    rc = n->is_dir ? sfs_rmdir(v->fs, n->parent->first_cluster, n->name, strlen(n->name))
+                   : sfs_unlink(v->fs, n->parent->first_cluster, n->name, strlen(n->name));
     if (!rc) v->removes++;
     mutex_unlock(&v->lock);
     if (rc) kprintf("K64 sfs: delete %s failed: %s\n", n->name, sfs_strerror(rc));
@@ -309,17 +225,11 @@ static int vol_remove(fsvol_t *fv, fsnode_t *n)
 static int vol_rename(fsvol_t *fv, fsnode_t *n, fsnode_t *newdir, const char *newname, int replace)
 {
     sfsk_vol *v = fv->priv;
-    sfs_cred cr;
-    int rc, kernel;
+    int rc;
     if (!n->parent || n->view) return -1;
     mutex_lock(&v->lock);
-    rc = task_cred(&cr, &kernel);
-    if (!rc && kernel)
-        rc = sfs_rename(v->fs, n->parent->first_cluster, n->name, strlen(n->name), newdir->first_cluster, newname,
-                        strlen(newname), replace);
-    else if (!rc)
-        rc = sfs_rename_as(v->fs, &cr, n->parent->first_cluster, n->name, strlen(n->name), newdir->first_cluster,
-                           newname, strlen(newname), replace);
+    rc = sfs_rename(v->fs, n->parent->first_cluster, n->name, strlen(n->name), newdir->first_cluster, newname,
+                    strlen(newname), replace);
     if (!rc) v->renames++;
     mutex_unlock(&v->lock);
     if (rc) kprintf("K64 sfs: rename %s -> %s failed: %s\n", n->name, newname, sfs_strerror(rc));
@@ -334,15 +244,6 @@ static int vol_populate(fsvol_t *fv, fsnode_t *dir)
     int rc, n = 0;
     if (!de) return -1;
     mutex_lock(&v->lock);
-    /* fs.c caches the enumeration for every later requester, so listing needs read+search here. A
-     * refused requester leaves the directory unpopulated (fs_populate set the flag first) so a
-     * permitted requester enumerates it later instead of everyone seeing it empty. */
-    if (may(v->fs, dir->first_cluster, SFS_MAY_READ | SFS_MAY_EXEC)) {
-        dir->populated = 0;
-        mutex_unlock(&v->lock);
-        kfree(de);
-        return -1;
-    }
     while ((rc = sfs_readdir(v->fs, dir->first_cluster, &cookie, de)) == 1) {
         sfs_stat_t st;
         fsnode_t *c;
@@ -406,6 +307,196 @@ static int vol_shutdown(fsvol_t *fv)
     return rc ? -1 : 0;
 }
 
+/* ---------------------------------------------------------------- record store + file access policy */
+#define SFSK_PROT_MAX 8
+static struct { sfsk_vol *v; uint32_t ino; } prot[SFSK_PROT_MAX];
+static unsigned nprot;
+
+/* fs.c policy: nothing below a record directory is reachable through the name space (see fs_policy.h). */
+static int sfsk_policy(const fsnode_t *n, unsigned op)
+{
+    unsigned i;
+    (void)op;
+    if (!nprot || n->backing != FSB_DISK || !n->vol || n->vol->populate != vol_populate) return 0;
+    for (; n; n = n->parent)
+        if (n->is_dir)
+            for (i = 0; i < nprot; ++i)
+                if (prot[i].v == n->vol->priv && prot[i].ino == n->first_cluster) return 1;
+    return 0;
+}
+
+/* Called with v->lock held. Returns 1 when the directory was newly walled off (the caller then recovers it). */
+static int protect_dir(sfsk_vol *v, uint32_t ino)
+{
+    unsigned i;
+    for (i = 0; i < nprot; ++i)
+        if (prot[i].v == v && prot[i].ino == ino) return 0;
+    if (nprot >= SFSK_PROT_MAX) return -1;
+    if (fs_policy_register(sfsk_policy)) return -1;
+    prot[nprot].v = v;
+    prot[nprot].ino = ino;
+    ++nprot;
+    return 1;
+}
+
+static sfsk_vol *vol_of_letter(char l)
+{
+    unsigned i;
+    if (l >= 'a' && l <= 'z') l = (char)(l - 32);
+    for (i = 0; i < nvols; ++i)
+        if (vols[i].vol.letter == l) return &vols[i];
+    return 0;
+}
+
+/* Splits "X:\A\B" (also "\??\X:..."); NULL / "" selects the account directory of the system volume. */
+static sfsk_vol *parse_dir(const char *path, const char **rest)
+{
+    if (!path || !path[0]) {
+        *rest = SFSK_ACCOUNT_DIR;
+        return sys_vol >= 0 ? &vols[sys_vol] : 0;
+    }
+    if (path[0] == '\\' && path[1] == '?' && path[2] == '?' && path[3] == '\\') path += 4;
+    if (!path[0] || path[1] != ':') return 0;
+    *rest = path + 2;
+    return vol_of_letter(path[0]);
+}
+
+/* Resolves (and with `create` makes, mode 0700) the directory chain `rest` from the root. v->lock held. */
+static int resolve_dir(sfsk_vol *v, const char *rest, int create, uint32_t *out)
+{
+    uint32_t ino = SFS_ROOT_INO;
+    while (*rest) {
+        const char *e;
+        uint32_t next;
+        uint8_t type = 0;
+        int rc;
+        while (*rest == '\\' || *rest == '/') ++rest;
+        if (!*rest) break;
+        for (e = rest; *e && *e != '\\' && *e != '/'; ++e) ;
+        if ((size_t)(e - rest) > SFS_NAME_MAX) return SFS_ENAMETOOLONG;
+        rc = sfs_lookup(v->fs, ino, rest, (size_t)(e - rest), &next, &type);
+        if (rc == SFS_ENOENT && create) {
+            rc = sfs_mkdir(v->fs, ino, rest, (size_t)(e - rest), 0700, &next);
+            type = SFS_FT_DIR;
+        }
+        if (rc) return rc;
+        if (type != SFS_FT_DIR) return SFS_ENOTDIR;
+        ino = next;
+        rest = e;
+    }
+    *out = ino;
+    return 0;
+}
+
+/* Walls the directory off and, the first time, removes staging files of puts interrupted by a crash. */
+static void guard_dir(sfsk_vol *v, uint32_t dir)
+{
+    if (protect_dir(v, dir) == 1 && !v->ro) {
+        const int rc = sfs_record_recover(v->fs, dir);
+        if (rc) kprintf("K64 sfs: %c: record directory %u recovery: %d\n", v->vol.letter, dir, rc);
+    }
+}
+
+static int record_name_ok(const char *name)
+{
+    const char *p;
+    if (!name || !name[0]) return 0;
+    for (p = name; *p; ++p) if (*p == '\\') return 0;
+    return 1;
+}
+
+int sfsk_record_put(const char *dir_path, const char *name, const void *data, uint32_t len, uint64_t *seq)
+{
+    const char *rest;
+    sfsk_vol *v = parse_dir(dir_path, &rest);
+    uint32_t dir;
+    int rc;
+    if (seq) *seq = 0;
+    if (!v) return SFSK_ENOVOL;
+    if (!record_name_ok(name)) return SFS_EINVAL;
+    if (v->ro) return SFS_EROFS;
+    mutex_lock(&v->lock);
+    rc = resolve_dir(v, rest, 1, &dir);
+    if (!rc) {
+        guard_dir(v, dir);
+        rc = sfs_record_put(v->fs, dir, name, strlen(name), data, len, seq);
+    }
+    if (!rc) v->writes++;
+    mutex_unlock(&v->lock);
+    if (rc) kprintf("K64 sfs: %c: record put %s failed: %s\n", v->vol.letter, name, sfs_strerror(rc));
+    return rc;
+}
+
+int sfsk_record_get(const char *dir_path, const char *name, void *buf, uint32_t cap, uint32_t *len, uint64_t *seq)
+{
+    const char *rest;
+    sfsk_vol *v = parse_dir(dir_path, &rest);
+    uint32_t dir;
+    int rc;
+    if (len) *len = 0;
+    if (seq) *seq = 0;
+    if (!v) return SFSK_ENOVOL;
+    if (!record_name_ok(name)) return SFS_EINVAL;
+    mutex_lock(&v->lock);
+    rc = resolve_dir(v, rest, 0, &dir);
+    if (!rc) {
+        guard_dir(v, dir);
+        rc = sfs_record_get(v->fs, dir, name, strlen(name), buf, cap, len, seq);
+    }
+    if (!rc) v->reads++;
+    mutex_unlock(&v->lock);
+    if (rc == SFS_ECORRUPT) kprintf("K64 sfs: %c: record %s failed validation\n", v->vol.letter, name);
+    return rc;
+}
+
+int sfsk_record_delete(const char *dir_path, const char *name)
+{
+    const char *rest;
+    sfsk_vol *v = parse_dir(dir_path, &rest);
+    uint32_t dir;
+    int rc;
+    if (!v) return SFSK_ENOVOL;
+    if (!record_name_ok(name)) return SFS_EINVAL;
+    if (v->ro) return SFS_EROFS;
+    mutex_lock(&v->lock);
+    rc = resolve_dir(v, rest, 0, &dir);
+    if (!rc) {
+        guard_dir(v, dir);
+        rc = sfs_record_delete(v->fs, dir, name, strlen(name));
+    }
+    if (!rc) v->removes++;
+    mutex_unlock(&v->lock);
+    return rc;
+}
+
+/* The project installer (win64/setup/install.c) lays the system volume out with SHZ\SETUP. The first such volume
+ * is the installed system volume; its account directory (if present) is walled off and recovered at mount. */
+static void detect_system_volume(sfsk_vol *v)
+{
+    uint32_t shz, setup, acct;
+    uint8_t t1 = 0, t2 = 0;
+    sfs_statfs_t f;
+    if (sys_vol >= 0) return;
+    mutex_lock(&v->lock);
+    if (sfs_lookup(v->fs, SFS_ROOT_INO, "SHZ", 3, &shz, &t1) || t1 != SFS_FT_DIR ||
+        sfs_lookup(v->fs, shz, "SETUP", 5, &setup, &t2) || t2 != SFS_FT_DIR) {
+        mutex_unlock(&v->lock);
+        return;
+    }
+    sys_vol = (int)(v - vols);
+    if (!resolve_dir(v, SFSK_ACCOUNT_DIR, 0, &acct)) guard_dir(v, acct);
+    sfs_statfs(v->fs, &f);
+    mutex_unlock(&v->lock);
+    kprintf("K64 sfs: %c: installed system volume, %s%s (ro reason %x)\n", v->vol.letter,
+            v->ro ? "read-only" : "read/write", v->ro ? ": account persistence unavailable" : "", f.ro_reason);
+}
+
+char sfsk_system_volume(int *writable)
+{
+    if (writable) *writable = sys_vol >= 0 && !vols[sys_vol].ro;
+    return sys_vol >= 0 ? vols[sys_vol].vol.letter : 0;
+}
+
 /* ---------------------------------------------------------------- probe + mount */
 static int probe_one(blk_dev_t *d)
 {
@@ -457,7 +548,6 @@ static int probe_one(blk_dev_t *d)
         v->vol.rename = vol_rename;
     }
     v->vol.priv = v;
-    v->vol.volume_info = vol_volume_info;
     v->root.is_dir = 1;
     v->root.readonly = v->ro;
     v->root.attrs = FILE_ATTRIBUTE_DIRECTORY;
@@ -476,6 +566,7 @@ static int probe_one(blk_dev_t *d)
             letter, d->name, d->mbr_type, d->type_guid[3] == 0x0f && d->type_guid[2] == 0xc6 ? ", GPT Linux data" : "",
             f.label, f.block_size, f.blocks, f.free_blocks, f.inodes, f.free_inodes, f.groups, f.feature_compat,
             f.feature_incompat, f.feature_ro_compat, f.journal_features, v->ro ? "read-only" : "read/write", f.ro_reason);
+    detect_system_volume(v);
     fs_populate(&v->root);
     {
         fsnode_t *c;
@@ -484,6 +575,12 @@ static int probe_one(blk_dev_t *d)
         kprintf("K64 sfs: %c: root holds %u entries shown (%llu skipped)\n", letter, n, v->skipped);
     }
     return 0;
+}
+
+char sfsk_mount_device(blk_dev_t *d)
+{
+    if (!d || probe_one(d)) return 0;
+    return vols[nvols - 1].vol.letter;
 }
 
 int sfs_probe_all(blk_dev_t *skip)

@@ -39,6 +39,12 @@ static uint64_t host_rdtsc(void) { return now; }
 #undef rdtsc
 
 void kprintf(const char *format, ...) { (void)format; }
+int win98_native_gop_epoch_word(domain_t *d, uint64_t index, uint64_t version,
+                                uint32_t *word)
+{
+    (void)d; (void)index; (void)version; (void)word;
+    return SHZ_E_UNSUPPORTED;  /* unrelated native service is not exercised */
+}
 uint8_t dev_cmos_read(uint8_t reg) { (void)reg; return 0; }
 void dev_poll(uint64_t tsc) { CHECK(tsc == now); }
 int dev_irq_pending(void) { return 0; }
@@ -86,6 +92,17 @@ static void exercise_doorbell(dom_kind_t kind, unsigned id)
     d->timer_period = 10000; d->timer_next = 2000000; d->timer_vector = 0x20;
     sender = &g_dom[sender_id];
     sender->id = sender_id; sender->state = SHZ_DS_RUNNABLE;
+    sender->kind = sender_id == SHZ_DOM_KERNEL64 ? DK_KERNEL64 : DK_WIN98;
+    d->generation = sender->generation = 1;
+    info.ipc_base = 291504128;   /* actual loader's page-aligned allocation */
+    info.ipc_size = (uint64_t)SHZ_MAX_CHANNELS * SHZ_IPC_REGION_SIZE;
+    {
+        const unsigned c = id == SHZ_DOM_KERNEL32 ? 0 : 2;
+        d->chan[c].mapped = sender->chan[c].mapped = 1;
+        d->chan[c].peer = sender_id; sender->chan[c].peer = id;
+        d->chan[c].hpa = sender->chan[c].hpa =
+            info.ipc_base + (uint64_t)c * SHZ_IPC_REGION_SIZE;
+    }
     interruptible = 1;
     call(d, SHZ_HC_SET_DOORBELL_VECTOR, 0x21, 0);
 

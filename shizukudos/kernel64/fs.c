@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "fs.h"
+#include "fs_policy.h"
 
 static fsnode_t root;
 static uint64_t total_bytes;
@@ -64,9 +65,33 @@ char fs_letter_of(const fsnode_t *n)
     return 0;
 }
 
+/* ---------------------------------------------------------------- access policy hooks (fs_policy.h) */
+static fs_policy_fn policies[FS_POLICY_MAX];
+
+int fs_policy_register(fs_policy_fn fn)
+{
+    unsigned i;
+    if (!fn) return -1;
+    for (i = 0; i < FS_POLICY_MAX; ++i) {
+        if (policies[i] == fn) return 0;
+        if (!policies[i]) { policies[i] = fn; return 0; }
+    }
+    return -1;
+}
+
+int fs_policy_denied(const fsnode_t *n, unsigned op)
+{
+    unsigned i;
+    if (!n) return 0;
+    for (i = 0; i < FS_POLICY_MAX && policies[i]; ++i)
+        if (policies[i](n, op)) return 1;
+    return 0;
+}
+
 void fs_populate(fsnode_t *dir)
 {
     if (dir && dir->is_dir && dir->backing == FSB_DISK && !dir->populated && dir->vol && dir->vol->populate) {
+        if (fs_policy_denied(dir, FS_OP_LIST)) return;     /* walled-off directory: stays unenumerated */
         dir->populated = 1;                     /* set first: a failed enumeration is not retried on every lookup */
         dir->vol->populate(dir->vol, dir);
     }
@@ -195,6 +220,7 @@ fsnode_t *fs_create(const char *path, int is_dir, int *created)
     fsnode_t *dir = resolve(path, 1, leaf, sizeof leaf), *n;
     if (created) *created = 0;
     if (!dir || !dir->is_dir || !leaf[0] || dir->readonly) return 0;
+    if (fs_policy_denied(dir, FS_OP_CREATE)) return 0;
     n = child_named(dir, leaf, strlen(leaf));
     if (n) return n;
     if (dir->backing == FSB_DISK)                   /* on-disk directory entry first; the volume adds the node */
@@ -210,6 +236,7 @@ fsnode_t *fs_create(const char *path, int is_dir, int *created)
 int fs_read(fsnode_t *n, uint64_t off, void *buf, uint64_t len, uint64_t *done)
 {
     if (n->is_dir) return -1;
+    if (fs_policy_denied(n, FS_OP_READ)) { *done = 0; return -1; }
     if (n->backing == FSB_DISK) {
         if (!n->vol || !n->vol->read) { *done = 0; return -1; }
         return n->vol->read(n->vol, n, off, buf, len, done);
@@ -226,6 +253,7 @@ static int reserve(fsnode_t *n, uint64_t need)
     uint8_t *nd;
     uint64_t cap;
     if (n->readonly) return -1;
+    if (need > (64ull << 20)) return -2; /* reject before capacity doubling can overflow */
     if (need <= n->cap) return 0;
     cap = n->cap ? n->cap : 256;
     while (cap < need) cap *= 2;
@@ -246,6 +274,7 @@ int fs_write(fsnode_t *n, uint64_t off, const void *buf, uint64_t len)
     int rc;
     if (n->is_dir || n->readonly) return -1;
     if (off + len < off) return -1;
+    if (fs_policy_denied(n, FS_OP_WRITE)) return -1;
     if (n->backing == FSB_DISK) return n->vol && n->vol->write ? n->vol->write(n->vol, n, off, buf, len) : -1;
     rc = reserve(n, off + len);
     if (rc) return rc;
@@ -268,6 +297,7 @@ int fs_truncate(fsnode_t *n, uint64_t size)
 {
     int rc;
     if (n->is_dir || n->readonly) return -1;
+    if (fs_policy_denied(n, FS_OP_WRITE)) return -1;
     if (n->backing == FSB_DISK) return n->vol && n->vol->truncate ? n->vol->truncate(n->vol, n, size) : -1;
     if (size > n->size) {
         rc = reserve(n, size);
@@ -289,21 +319,29 @@ static void detach(fsnode_t *n)
     n->sibling = 0;
 }
 
-void fs_remove(fsnode_t *n)
+/* Checked companion. Existing void callers keep their ABI. Negative volume
+ * errors remain intact; -4 is a local policy/root refusal, -5 unsupported. */
+int fs_remove_checked(fsnode_t *n)
 {
-    if (!n->parent) return;
+    int rc;
+    if (!n) return -4;
+    if (!n->parent || n->view || fs_policy_denied(n, FS_OP_DELETE)) { n->delete_pending = 0; return -4; }
     if (n->backing == FSB_DISK) {
         /* volumes that can delete (vol->remove) do it on disk first; a refused delete keeps the node visible */
-        if (!n->vol || !n->vol->remove || n->vol->remove(n->vol, n)) { n->delete_pending = 0; return; }
+        if (!n->vol || !n->vol->remove) { n->delete_pending = 0; return -5; }
+        rc=n->vol->remove(n->vol,n);
+        if(rc){n->delete_pending=0;return rc;}
         detach(n);
         kfree(n);
-        return;
+        return 0;
     }
     fs_notify(n, 2, NOTIFY_NAME(n));                           /* FILE_ACTION_REMOVED (RAM volume; ipc_notify.c) */
     detach(n);
     if (n->data && !n->readonly) { total_bytes -= n->cap; kfree(n->data); }
     kfree(n);
+    return 0;
 }
+void fs_remove(fsnode_t *n) { (void)fs_remove_checked(n); }
 
 int fs_rename(fsnode_t *n, const char *newpath, int replace)
 {
@@ -313,6 +351,7 @@ int fs_rename(fsnode_t *n, const char *newpath, int replace)
     if (n->backing != FSB_DISK || !n->vol || !n->vol->rename || !n->parent) return -1;
     if (!dir || !dir->is_dir || !leaf[0] || dir->backing != FSB_DISK || dir->vol != n->vol) return -1;
     for (a = dir; a; a = a->parent) if (a == n) return -1;          /* into its own subtree */
+    if (fs_policy_denied(n, FS_OP_DELETE) || fs_policy_denied(dir, FS_OP_CREATE)) return -1;
     dst = child_named(dir, leaf, strlen(leaf));
     if (dst == n && !strcmp(n->name, leaf)) return 0;
     if (dst && dst != n && (!replace || dst->open_count)) return -3;

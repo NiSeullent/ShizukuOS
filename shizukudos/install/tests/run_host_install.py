@@ -9,6 +9,7 @@ Also: the ShizukuFS writer alone on large volumes (sfsw_host.c), and refusal cas
 Needs the payload: python3 shizukudos/install/mkpayload.py. Writes build/shizukudos/install/host-test/result.json.
 """
 import hashlib
+import zlib
 import json
 import shutil
 import subprocess
@@ -101,6 +102,14 @@ def main():
     (WORK / "install-a.log").write_text(out)
     row("install (Select=serial, Win98MiB=64): SETUP-RESULT: OK, exit 0", rc == 0 and "SETUP-RESULT: OK" in out, out[-600:])
     row("the other disk is untouched", digest(d2) == before_b)
+    with open(d1, "rb") as f:
+        f.seek(2047 * 512)
+        rec = f.read(512)
+    row("install record SHZINSR1 at LBA 2047: COMPLETE, stage DONE, CRC32 valid",
+        rec[:8] == b"SHZINSR1" and int.from_bytes(rec[12:16], "little") == 3 and int.from_bytes(rec[16:20], "little") == 10
+        and int.from_bytes(rec[508:512], "little") == (zlib.crc32(rec[:508]) & 0xffffffff), rec[:32].hex())
+    row("ESP FAT32 file readback and boot closure logged", "p1 verify: FAT32 decoded from the target" in out
+        and "boot closure: UEFI fallback /EFI/BOOT/BOOTX64.EFI" in out, out[-600:])
     rep = verify_disk.verify(d1, INSTALL, want_win98=True)
     for r in rep.rows:
         row("disk-a: " + r["check"], r["status"] == "PASS", r["detail"])
@@ -156,8 +165,11 @@ def main():
     with open(d3, "rb") as f:
         f.seek(512)
         no_gpt = f.read(8) != b"EFI PART"
-    row("corrupted SYSTEM.ARC: FAIL on the manifest SHA-256, no partition table written",
-        rc == 1 and "does not match its manifest sha256" in out and no_gpt, out[-300:])
+    with open(d3, "rb") as f:
+        f.seek(2047 * 512)
+        no_record = f.read(8) != b"SHZINSR1"
+    row("corrupted SYSTEM.ARC: refused by the source closure before any write (no GPT, no install record)",
+        rc == 1 and "does not match system.archive_sha256" in out and no_gpt and no_record, out[-300:])
     esp = bytearray((INSTALL / "payload" / "ESP.SIM").read_bytes())
     esp[-5] ^= 0x01
     (bad / "SYSTEM.ARC").write_bytes((INSTALL / "payload" / "SYSTEM.ARC").read_bytes())

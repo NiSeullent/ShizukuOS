@@ -275,7 +275,93 @@ def origin_hash(curl, route, output, number, expected_size, insecure):
     return value.hexdigest(), count
 
 
+def publish_reviewed_site(argv):
+    """Publish a source/docs-only update through the same origin and verifier."""
+    parser = argparse.ArgumentParser(description=publish_reviewed_site.__doc__)
+    parser.add_argument('--site-review', required=True, type=Path)
+    parser.add_argument('--site-review-sha256', required=True)
+    parser.add_argument('--release-id', required=True)
+    parser.add_argument('--receipt-out', required=True, type=Path)
+    parser.add_argument('--publish', action='store_true')
+    parser.add_argument('--origin-insecure', action='store_true')
+    args = parser.parse_args(argv)
+    manifest = canonical(args.site_review)
+    need(re.fullmatch('[0-9a-f]{64}', args.site_review_sha256), 'review SHA required')
+    need(sha_file(manifest, 256 * 1024)[0] == args.site_review_sha256, 'site review drift')
+    review = json.loads(manifest.read_bytes(), object_pairs_hook=pairs)
+    need(review['ISO_published'] is False and review['existing_routes_changed'] is False,
+         'docs mode cannot distribute an ISO or alter routes')
+    need(re.fullmatch('[a-z0-9][a-z0-9_-]{0,63}', args.release_id), 'safe release id')
+    base = canonical(Path('/srv/m98'), directory=True)
+    previous, literal = current_release(base, canonical(Path(review['expected_current']), directory=True))
+    candidate = canonical(Path(review['candidate']), directory=True)
+    old = inventory(previous)
+    staged = inventory(candidate)
+    hashes = lambda rows: {key: value['sha256'] for key, value in rows.items()}
+    need(hashes(old) == review['expected_files'], 'complete current hash map differs')
+    need(hashes(staged) == review['candidate_files'], 'complete candidate hash map differs')
+    need(set(old) <= set(staged), 'docs publication cannot remove existing assets')
+    need(not any(Path(key).suffix.lower() in {'.iso', '.img', '.qcow2', '.exe', '.dll'}
+                 for key in set(staged) - set(old)), 'binary in docs update')
+    new = base / 'releases' / args.release_id
+    need(not new.exists(), 'fresh release required')
+    if not args.publish:
+        print(json.dumps({'status': 'READ_ONLY_SITE_PLAN', 'files': len(staged),
+                          'changed': review['changed_existing'], 'added': review['new_files']}))
+        return 0
+    need(shutil.disk_usage(base).free >= FLOOR + sum(row['size'] for row in staged.values()) + RESERVE,
+         'site copy free floor')
+    output = args.receipt_out
+    need(output.is_absolute() and not output.exists(), 'fresh absolute receipt directory required')
+    output.mkdir(parents=True)
+    curl = shutil.which('curl')
+    need(curl is not None, 'curl required')
+    receipt = {'status': 'PREPARING', 'previous_release': str(previous), 'release': str(new),
+               'review_sha256': args.site_review_sha256, 'certificate_validation': not args.origin_insecure,
+               'ISO_published': False, 'origin_checks': [], 'public_edge_verified': False}
+    activated = False
+    with (base / '.publish.lock').open('a+b') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            same_current(base, previous, literal)
+            need(inventory(previous) == old and inventory(candidate) == staged, 'precopy source drift')
+            shutil.copytree(candidate, new)
+            for directory, _, names in os.walk(new):
+                Path(directory).chmod(0o755)
+                for name in names:
+                    (Path(directory) / name).chmod(0o644)
+            need(hashes(inventory(new)) == hashes(staged), 'copied site differs')
+            need(inventory(previous) == old and inventory(candidate) == staged, 'late source drift')
+            need(sha_file(manifest, 256 * 1024)[0] == args.site_review_sha256, 'late review drift')
+            same_current(base, previous, literal)
+            activated = True
+            switch(base, str(new), args.release_id)
+            for index, (relative, row) in enumerate(staged.items()):
+                route = '/' + quote(relative[len('site/'):], safe='/')
+                need(origin_hash(curl, route, output, index, row['size'], args.origin_insecure) ==
+                     (row['sha256'], row['size']), 'origin body differs: ' + route)
+                receipt['origin_checks'].append({'path': route, 'sha256': row['sha256'],
+                                                'size': row['size'], 'status': 'PASS'})
+            need((base / 'current').resolve(strict=True) == new and inventory(previous) == old,
+                 'current or original changed during verification')
+            need(hashes(inventory(new)) == hashes(staged), 'published site drift')
+            receipt.update(status='PASS', published=True, previous_unchanged=True, routes_modified=False)
+            atomic_bytes(output / 'result.json', (json.dumps(receipt, indent=2) + '\n').encode(), True)
+        except BaseException as error:
+            receipt.update(status='FAILED', error=str(error), published=False)
+            if activated and (base / 'current').is_symlink() and os.readlink(base / 'current') == str(new):
+                switch(base, literal, args.release_id + '-rollback')
+                receipt['rollback'] = True
+            atomic_bytes(output / 'failed-result.json', (json.dumps(receipt, indent=2) + '\n').encode(), True)
+            raise
+    print(json.dumps({'status': 'PASS', 'docs': ORIGIN + '/docs/', 'receipt': str(output / 'result.json')}))
+    return 0
+
+
 def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if '--site-review' in argv:
+        return publish_reviewed_site(argv)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--manifest', required=True, type=Path)
     parser.add_argument('--manifest-sha256', required=True)

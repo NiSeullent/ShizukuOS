@@ -135,7 +135,8 @@ int user_fault(struct regs *r);         /* nonzero if the fault was in user mode
 uint32_t user_syscall_count(void);
 
 /* ---- ipc.c ---- */
-void ipc_init(const shz_bootinfo_t *bi);
+/* 1: real K64 endpoint bound; 0: valid handoff without that peer; <0: refused. */
+int ipc_init(const shz_bootinfo_t *bi);
 void ipc_server_thread(void *arg);
 uint32_t ipc_requests_served(void);
 uint32_t ipc_protocol_errors(void);

@@ -24,8 +24,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "tools"))
 import verres  # noqa: E402  (VS_VERSIONINFO resource of every built image)
 import public_trust_fixtures  # noqa: E402  (pinned public CA/chain inputs; never modifies host trust)
 import public_network_catalogs  # noqa: E402  (public services/protocols/hosts, no host settings copied)
-sys.path.insert(0, str(Path(__file__).resolve().parent / "tools"))
-import import_audit  # noqa: E402  (PE import table vs packed DLL export tables)
 
 W64 = SHZ / "win64"
 OUT = BUILD / "win64"
@@ -193,7 +191,17 @@ def build_modules():
             raise SystemExit(f"circular or missing module dependency among {sorted(pending)}")
         for name in ready:
             d, cfg = pending.pop(name)
-            src = sorted(d.glob("*.c"))
+            selected = cfg.get("sources")
+            if selected is None:
+                src = sorted(d.glob("*.c"))
+            else:
+                if (not isinstance(selected, list) or not selected or
+                        any(not isinstance(n, str) or Path(n).name != n or not n.endswith(".c") for n in selected) or
+                        len(set(selected)) != len(selected)):
+                    raise SystemExit(f"{name}: sources must be unique local C basenames")
+                src = [d / n for n in selected]
+                if any(not p.is_file() or p.is_symlink() for p in src):
+                    raise SystemExit(f"{name}: selected production source missing or symlinked")
             names = scan_exports(src, "DLLAPI")
             write_def(OUT / f"{name}.def", f"{name}.dll", names, cfg.get("forwarders", []), cfg.get("ordinals"))
             has_main = any(re.search(r"\bDllMain\s*\(", s.read_text()) for s in src)
@@ -443,11 +451,10 @@ def build_wineport():
 def runtime_source_paths():
     """Local build inputs, including patches, specs, resources and shipped fixtures."""
     suffixes = {".c", ".cpp", ".cc", ".cxx", ".h", ".s", ".asm", ".rc", ".json", ".py", ".patch",
-                ".def", ".spec", ".pem", ".der", ".bin", ".txt", ".htm", ".html", ".js", ".cmake", ".ini", ".idl", ".rgs", ".hex", ".bdf", ".pcf"}
+                ".def", ".spec", ".pem", ".der", ".bin", ".txt", ".htm", ".html", ".js", ".cmake", ".ini", ".idl", ".rgs"}
     return sorted({p for directory in (W64, SHZ / "install", SHZ / "abi")
                    for p in directory.rglob("*") if p.is_file() and p.suffix.lower() in suffixes}
-                  | {SHZ / "accounts/account.h", SHZ / "accounts/sha256.c", SHZ / "accounts/sha256.h", SHZ / "kernel64/setup_native_abi.h", NTSYS, SHZ / "tools/shzlib.py", SHZ / "upstream/manifest.json",
-                     SHZ / "kcommon/nt_process_priority.h", SHZ / "kcommon/nt_sched_policy.h",
+                  | {SHZ / "accounts/sha256.c", SHZ / "accounts/sha256.h", SHZ / "kernel64/setup_native_abi.h", NTSYS, SHZ / "tools/shzlib.py", SHZ / "upstream/manifest.json",
                      SHZ / "boot_profile/storage/provenance.h",
                      SHZ / "boot_profile/native_installer_capacity.h"})
 
@@ -493,16 +500,6 @@ def main():
     files.append(("\\SHZ\\SETUP\\SHZSETUP.EXE", setup_exe.read_bytes()))
     for name, (exe, _) in sorted(sys_apps.items()):
         files.append((f"\\SHZ\\SYS64\\{exe.name.upper()}", exe.read_bytes()))
-    # Default native shell (apps/shizuku_shell, packed as \\SHZ\\SYS64\\SHIZUKU_SHELL.EXE): every import must resolve
-    # against the DLLs that are really packed into the same archive; unresolved imports fail the build.
-    shell_import_audit = None
-    if "shizuku_shell" in sys_apps:
-        packed_dlls = {p.rsplit("\\", 1)[-1].lower(): d for p, d in files
-                       if p.upper().startswith("\\SHZ\\SYS64\\") and p.upper().endswith(".DLL")}
-        bad = import_audit.audit(sys_apps["shizuku_shell"][0].read_bytes(), packed_dlls)
-        if bad:
-            raise RuntimeError("shizuku_shell has unresolved imports: " + ", ".join(bad))
-        shell_import_audit = {"unresolved": 0, "dlls_checked": sorted(import_audit.imports(sys_apps["shizuku_shell"][0].read_bytes()))}
     data_dir = W64 / "tests" / "data"
     if data_dir.exists():
         for f in sorted(data_dir.iterdir()):
@@ -558,8 +555,6 @@ def main():
         "public_network_catalogs": catalog_info,
         "setup": {"SHZSETUP.EXE": sha256_file(setup_exe)},
         "sys_apps": {n: sha256_file(e) for n, (e, _) in sys_apps.items()},
-        "shell": {"default_image": "\\SHZ\\SYS64\\SHIZUKU_SHELL.EXE", "built": "shizuku_shell" in sys_apps,
-                  "import_audit": shell_import_audit, "legacy_selectable": "shz.shell=shzdesk"},
         "archive": {"sha256": sha256_file(img), "files": [p for p, _ in files]},
         "ntdrv": {
             "ntoskrnl_exports": len(nt_exports["ntoskrnl.exe"]), "hal_exports": len(nt_exports["hal.dll"]),

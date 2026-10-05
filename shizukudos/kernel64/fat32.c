@@ -141,13 +141,27 @@ int fat32_mount(fat32_vol_t *v)
         for (page = 0; page < npages; ++page) {
             v->fat_pages[page] = v->alloc_page(v->ctx);
             if (!v->fat_pages[page]) { fat32_unmount(v); return FAT32_E_NOMEM; }
-            for (sec = 0; sec < 8; ++sec) {
+            for (sec = 0; sec < 8;) {
                 const uint32_t fat_sector = page * 8 + sec;
+                const uint64_t lba = v->part_lba + reserved + fat_sector;
+                uint32_t count = 1, left;
+                uint8_t *dst = (uint8_t *)v->fat_pages[page] + sec * FAT32_SECTOR;
                 if (fat_sector >= fatsz) break;
-                if ((rc = read_sector(v, v->part_lba + reserved + fat_sector, (uint8_t *)v->fat_pages[page] + sec * FAT32_SECTOR))) {
+                left = fatsz - fat_sector;
+                if (left > 8 - sec) left = 8 - sec;
+                if (v->read_many && left >= 2) count = left > FAT32_READ_MAX_SECTORS ? FAT32_READ_MAX_SECTORS : left;
+                if (count > 1) {
+                    /* bounded chunk inside this page; staged so a failed callback never touches page contents */
+                    if ((rc = operation_guard(v))) { fat32_unmount(v); return rc; }
+                    if (lba >= v->disk_sectors || count > v->disk_sectors - lba) { fat32_unmount(v); return FAT32_E_RANGE; }
+                    v->sector_reads += count;
+                    if (v->read_many(v->ctx, lba, count, v->read_batch)) { fat32_unmount(v); return FAT32_E_IO; }
+                    f32_copy(dst, v->read_batch, (uint64_t)count * FAT32_SECTOR);
+                } else if ((rc = read_sector(v, lba, dst))) {
                     fat32_unmount(v);
                     return rc;
                 }
+                sec += count;
             }
         }
     }

@@ -18,15 +18,19 @@ EXT_WEAK(sys_ext_gpu)
 EXT_WEAK(sys_ext_setup)
 EXT_WEAK(sys_ext_blk)
 EXT_WEAK(sys_ext_ntdrv)
+EXT_WEAK(sys_ext_audio)               /* audio 0xda-0xdf (kernel64/audio.c) */
 EXT_WEAK(sys_ext_ipc)                 /* IPC / process model 0xc0-0xcf and 0x100-0x10f (kernel64/ipc_core.c) */
+EXT_WEAK(sys_ext_saw)
 
 int32_t sysext_dispatch(process_t *cur, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4)
 {
+    if (num == SYS_NtShzSaw) return sys_ext_saw(cur, r, num, a1, a2, a3, a4);
     if (num >= 0x50 && num < 0x60) return sys_ext_registry(cur, r, num, a1, a2, a3, a4);
     if (num >= 0x60 && num < 0x80) return sys_ext_graphics(cur, r, num, a1, a2, a3, a4);
     if (num >= 0x80 && num < 0x90) return sys_ext_net(cur, r, num, a1, a2, a3, a4);
     if (num >= 0x90 && num < 0xa0) return sys_ext_k32(cur, r, num, a1, a2, a3, a4);
     if (num >= 0xa0 && num < 0xb0) return sys_ext_misc(cur, r, num, a1, a2, a3, a4);
+    if (num >= 0xda && num < 0xe0) return sys_ext_audio(cur, r, num, a1, a2, a3, a4);   /* before the gpu range 0xd0-0xdf */
     if (num >= 0xd0 && num < 0xe0) return sys_ext_gpu(cur, r, num, a1, a2, a3, a4);
     if (num >= 0xb0 && num < 0xc0) return sys_ext_setup(cur, r, num, a1, a2, a3, a4);
     if (num >= 0xe0 && num < 0xf0) return sys_ext_ntdrv(cur, r, num, a1, a2, a3, a4);   /* NT driver host */

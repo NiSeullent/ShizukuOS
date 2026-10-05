@@ -1,0 +1,158 @@
+{
+  "_comment": "Shell20 recorded values of root-owned READONLY font inputs, taken by `sudo -n sha256sum` at author time. These are supplied-text-not-claims: the producer's own cheap controls passed, guest rendering is UNVERIFIED. build.py fails closed if any file differs.",
+  "files": {
+    "shz_text.h": {
+      "sha256": "656b19f7ae56e8548cae1b1e1c8aa09d325c6cc3b611fe06646f88a1384a7c96",
+      "bytes": 601
+    }
+  },
+  "licenses": {
+    "licenses/FTL.TXT": "FreeType License (staged beside the EXE, FreeType is linked)",
+    "shz_text_noto.c/noto_*.c": "SPDX GPL-2.0-only per file headers"
+  },
+  "_comment_font23": "font23 successor: shell text now comes from the Noto/FreeType provider (font23/ + font23-native/) and the staged native inputs below. 'files' keeps ONLY the shared header still consumed (shz_text.h; its pin must be refreshed if the common font owner changes it). The old bitmap-atlas inputs (shz_text.c, generated/*) are no longer compiled or staged; their pins are kept in historical_bitmap_inputs as record. Native inputs are hash-checked by build.py before compiling (fail closed). No font FILE is staged here.",
+  "historical_bitmap_inputs": {
+    "shz_text.c": {
+      "sha256": "5f141182590823b35a63569517306085a9f629ad30f250345a299d799dfdcc7f",
+      "bytes": 3209
+    },
+    "generated/glyphs.h": {
+      "sha256": "7df93479f3c886ff786e34ddae44721a8621647eef888dac41df0aa0f2557c32",
+      "bytes": 1824293
+    },
+    "generated/OFL.txt": {
+      "sha256": "39b4bcbf824a8156b857d48712556c1626f448b30970367f4b085b407e23801d",
+      "bytes": 4449
+    },
+    "generated/generation.json": {
+      "sha256": "ccae98b4dc59ab44aaea063d09234bb76424efd52b733f8e1f5f6185c4185187",
+      "bytes": 982
+    }
+  },
+  "native_inputs_root": "build/font23-inputs-74b0",
+  "native_inputs": {
+    "include/freetype/config/ftconfig.h": {
+      "sha256": "7caf12036163a655dded82d63520f4e9e3145e1c4fae8ee86702e6632b30d6a4",
+      "bytes": 1614
+    },
+    "include/freetype/config/ftheader.h": {
+      "sha256": "0e731fa6a148f64ff15274423553ec187a1aef297d130c430ff07951554ef8a1",
+      "bytes": 23919
+    },
+    "include/freetype/config/ftoption.h": {
+      "sha256": "6a14a03776c822b4c528cb05de40e3fea2b87649984a4fb3a852bee87c0f63d9",
+      "bytes": 40350
+    },
+    "include/freetype/config/ftstdlib.h": {
+      "sha256": "fafd7eb672702cb2dc20b7e7e19540d251a3d978745821bc0632ba807c8b6f46",
+      "bytes": 4576
+    },
+    "include/freetype/config/integer-types.h": {
+      "sha256": "8cc533596bff2f044823853f5d394bc697d6572c9c664f6beaaa67e066bfe162",
+      "bytes": 7072
+    },
+    "include/freetype/config/mac-support.h": {
+      "sha256": "557701edb1bf2c98e38c7331e7522b4c35d390cb9899461d2eea4a74ab460196",
+      "bytes": 1597
+    },
+    "include/freetype/config/public-macros.h": {
+      "sha256": "eb069473a8fbd2342388fbaade8f1159428b3b7a95a070a16eb84c16cd26316c",
+      "bytes": 4207
+    },
+    "include/freetype/freetype.h": {
+      "sha256": "b8d8b9e32b2956cce3a9c5d9b8d18041fb7451acb747805c20b62bf1b4804cdb",
+      "bytes": 177200
+    },
+    "include/freetype/fterrdef.h": {
+      "sha256": "b83e0829b58949afede67e2f8a2fc9b3cafad9e3b4fd11d7ee9c87bd92c6d6c0",
+      "bytes": 12559
+    },
+    "include/freetype/fterrors.h": {
+      "sha256": "12e955a5cb109519ee4421a03d4a5c324986c8fa01296eaa56e144e2851927ec",
+      "bytes": 9301
+    },
+    "include/freetype/ftimage.h": {
+      "sha256": "6245bd165b8a2f5ea6615be6cfc51aa8327ecbea45f42cbce2b8fb625f84574a",
+      "bytes": 42150
+    },
+    "include/freetype/ftmm.h": {
+      "sha256": "173d1d20553eec5163d9bb18a78acb3a0059e2879618b9edc5632a3e7a6252a3",
+      "bytes": 24595
+    },
+    "include/freetype/ftmodapi.h": {
+      "sha256": "3b05e210b4705017d68e00def6820749fd0fca2f185ab2bb5df06d71928e29eb",
+      "bytes": 22544
+    },
+    "include/freetype/ftmoderr.h": {
+      "sha256": "5d09e4a254f2f6272ae2661720124cae7678f7b846eb536ff728ae2c62f8bde3",
+      "bytes": 6675
+    },
+    "include/freetype/ftsystem.h": {
+      "sha256": "07371a83dafbe99e8575a839da3adb69cc2c5a1c8ebe49c3bc9d40f1baf04078",
+      "bytes": 8502
+    },
+    "include/freetype/fttypes.h": {
+      "sha256": "29dd7f8b460633aa04d4eb7313893e43093643036dd025d384d7b1cc20f71375",
+      "bytes": 14735
+    },
+    "include/ft2build.h": {
+      "sha256": "4a6bc059d8e53b189649793aafd26e737d9df0ffafd97b5d6bcbad711bf2548d",
+      "bytes": 990
+    },
+    "lib/libfreetype.a": {
+      "sha256": "b72b5b5e9012074468c47b35e4dddbf69775bc002a81ff2ac040c478749e15f9",
+      "bytes": 1202436
+    },
+    "lib/libshzwcrt.a": {
+      "sha256": "1341dba0136ec44a3a95bd0d90fa40ce5a9bb519a01031990437f959e7a81789",
+      "bytes": 229956
+    },
+    "licenses/FTL.TXT": {
+      "sha256": "08c135755dd589039470f1fdbb400daaabaaa50d0b366d19cebff4d22986baa1",
+      "bytes": 6743
+    },
+    "licenses/GPLv2.TXT": {
+      "sha256": "c4120c6752c910c299e3bd9cb3a46ff262c268303ca2069b61f92f10a5656c18",
+      "bytes": 17994
+    },
+    "licenses/LICENSE.TXT": {
+      "sha256": "2e3bbb7d7c5c396368dd0853a790ec29ce5b8647163dde42a0493fb0d6556b2b",
+      "bytes": 2074
+    }
+  },
+  "f23_common_sources": {
+    "integration/shizuku-font/noto_provider.c": {
+      "sha256": "e2d7247c04ab8ccd07d1334157425fec87ff749e2c92a2ba00ab03f101e1bd68",
+      "bytes": 19056
+    },
+    "integration/shizuku-font/noto_provider.h": {
+      "sha256": "6a4acdf3189b73b51be1586aae6920369722afb9e8902ca45621dc88d2b80e6d",
+      "bytes": 8010
+    },
+    "integration/shizuku-font/noto_win32.c": {
+      "sha256": "5a1463f4a4271374643cab3f8237c3001f26d3befec51fe2db63b1c4b2bdaa16",
+      "bytes": 2234
+    },
+    "integration/shizuku-font/noto_win32.h": {
+      "sha256": "39ab1815d4e7b900ab87a46e072aa962a7c1b3ddc6437900b83c5469f73d3012",
+      "bytes": 1403
+    },
+    "integration/shizuku-font/noto_asset_pins.h": {
+      "sha256": "6bb48cc287d6b1d51d68b435f905cb55083495c193f74de154b1c509bb931208",
+      "bytes": 1505
+    },
+    "shizukudos/win64/dlls/bcrypt/hashes.c": {
+      "sha256": "433dc08dcc0019b22cd5f4974a20ea26fab9d1bac5538f82fda7c99ff6fd13d7",
+      "bytes": 11066
+    },
+    "shizukudos/win64/dlls/bcrypt/hashes.h": {
+      "sha256": "6cbc0799d47b8585f2afb60fd9668cd2dcf44dbf84de74abb002e7f8cbbd3f33",
+      "bytes": 1694
+    },
+    "shizukudos/win64/dlls/bcrypt/hash_consts.h": {
+      "sha256": "ee26d514193dfdbc9d4c01c6646f4423b2d069775cf073b8fd4dd4c1081f0100",
+      "bytes": 5026
+    }
+  },
+  "_comment_f23_common": "F23 postfix: the shell compiles the COMMON core integration/shizuku-font (not the historical shell font23/ draft) plus portable bcrypt hashes. Repo-relative pins, build.py fails closed on mismatch. noto_asset_pins.h carries the compiled font SHA-256 pins from root-font-assets.json (manifest sha 82657c99...)."
+}

@@ -43,6 +43,7 @@ extern const unsigned ntdrv_ntoskrnl_export_count, ntdrv_hal_export_count;
 void *ntdrv_resolve_export(const char *dll, const char *symbol);
 
 /* ---- loaded driver / device namespace (ntdrv_io.c, ntdrv_ldr.c) ---- */
+#define NTDRV_MAX_DEPS 8u              /* one capacity for import collection and retained references */
 typedef struct ntdrv_driver {
     struct ntdrv_driver *next;
     char name[64];                      /* service name, e.g. "echo" */
@@ -55,7 +56,7 @@ typedef struct ntdrv_driver {
     uint32_t export_rva, export_size;   /* the image's export directory (an export driver such as ndis.sys) */
     unsigned users;                     /* loaded images whose imports were resolved against this one */
     int dependency;                     /* loaded because an image imports it, not by a Services-key request */
-    struct ntdrv_driver *deps[8];       /* modules this image imports from (their `users` count it) */
+    struct ntdrv_driver *deps[NTDRV_MAX_DEPS]; /* modules this image imports from (their `users` count it) */
     unsigned ndeps;
 } ntdrv_driver_t;
 
@@ -125,6 +126,20 @@ int32_t ntdrv_pnp_remove_devices(ntdrv_driver_t *d);
 ntdrv_pdo_t *ntdrv_pdo_from_device(DEVICE_OBJECT *dev);
 /* IofCallDriver + wait for completion (a pended IRP included) + IoFreeIrp; returns IoStatus.Status (ntdrv_io.c). */
 int32_t ntdrv_send_irp_sync(DEVICE_OBJECT *dev, IRP *irp, uint64_t *info);
+
+/* ---- boot-time driver bring-up (ntdrv_pnp.c): enumeration -> catalog match -> existing init owners -> report ----
+ * shz_driver_bringup_init(bootinfo, SHZ_BRINGUP_PHASE_EARLY|DEVICES, flags) is the single Core64 boot entry; the row
+ * and report layouts live in drivers/common/shz_bringup.h (fixed width, no kernel pointers). */
+#include "../../drivers/common/shz_bringup.h"
+/* ntdrv_catalog.c: installed driver catalog v2 importer (drivers/common/shz_catalog.h). Import once before DEVICES loads
+ * services: 0 imported, 1 absent, < 0 rejected as a whole. */
+int ntdrv_catalog_import(void);
+void ntdrv_catalog_report(shz_bringup_report_t *r);
+uint64_t ntdrv_install_generation(void);           /* k64_install_generation() when install_identity.h exists, else 0 */
+/* NtLoadDriver's kernel core (ntdrv_io.c): load the Services\<name> image, bind its Enum\PCI devnodes, AddDevice and
+ * IRP_MN_START_DEVICE. `w` is the "\Registry\Machine\System\CurrentControlSet\Services\<name>" object path. */
+int32_t ntdrv_load_service_path(const uint16_t *w, unsigned chars);
+void ntdrv_send_shutdown(void);                                   /* ntdrv_dev.c: IRP_MJ_SHUTDOWN to registered devices */
 
 /* ---- IRP engine (ntdrv_io.c) ---- */
 /* Synchronous device control entirely on kernel buffers: builds an IRP, IoCallDriver()s the

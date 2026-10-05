@@ -4,6 +4,7 @@
  * the very library Kernel64 uses (shizukudos/abi/shz_ipc.h) as the peer would. */
 #include "../bridge.h"
 #include "../../../shizukudos/abi/shz_ipc.h"
+#include "../../../shizukudos/abi/shz_w64_owner.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -63,7 +64,7 @@ static int32_t hcall(uint32_t op, uint32_t a, uint32_t b, uint32_t *ebx, uint32_
 static void *map_phys(uint32_t phys, uint32_t bytes)
 { CHECK(phys == channel_gpa && bytes == SHZ_IPC_REGION_SIZE); return map_fail ? 0 : channel; }
 static const struct ntwv_pages ops = { check_range, lock_range, unlock_range, ptes, enter, leave, write_alias, read_alias };
-static const struct ntwv_hv hv = { hypervisor_present, hcall, map_phys, 0 };
+static const struct ntwv_hv hv = { hypervisor_present, hcall, map_phys };
 static void try_reenter(void)
 {
     const struct ntwv_dioc nested = { .code = NTWV_IOCTL_W64_OPEN,
@@ -80,12 +81,14 @@ static shz_ring_hdr_t *k64_rx(void) { return shz_channel_ring_rx(channel, chdr()
 static shz_ring_hdr_t *k64_tx(void) { return shz_channel_ring_tx(channel, chdr(), SHZ_DOM_KERNEL64); }
 
 /* One DeviceIoControl as VWIN32 would deliver it: input at user 0x00700ff0.., output at 0x00500ff0, count at 0x00600ffe. */
+/* Fake Core echoes the owner id the VxD derived for VWIN32 context (vm, cur_dev, process) */
+static uint32_t echo_cap = 0x100u, cur_dev = 0x10u;
 static uint32_t dioc(uint32_t code, const void *in, uint32_t in_bytes, uint32_t out_bytes, void *out, uint32_t *returned)
 {
     struct ntwv_dioc request = { 0 };
     uint32_t result;
     step = unlocks = writes = reads = protected_now = 0;    /* per-call counters; `failure` etc. stay */
-    request.code = code;
+    request.code = code; request.vm = 0xc1000000u; request.device = cur_dev; request.process = 0xc2000000u;
     request.output = 0x00500ff0; request.output_bytes = out_bytes; request.returned = 0x00600ffe;
     if (in_bytes) {                             /* an oversize count is rejected before any byte is read */
         request.input = 0x00700ff0; request.input_bytes = in_bytes;
@@ -97,12 +100,13 @@ static uint32_t dioc(uint32_t code, const void *in, uint32_t in_bytes, uint32_t 
     return result;
 }
 
+
 static void k64_reply(uint64_t request_id, uint32_t opcode, int32_t status, const void *payload, uint16_t len)
 {
     shz_msg_hdr_t h;
     memset(&h, 0, sizeof h);
     h.flags = SHZ_MSGF_REPLY; h.opcode = opcode; h.request_id = request_id; h.src_domain = SHZ_DOM_KERNEL64;
-    h.dst_domain = SHZ_DOM_WIN98; h.generation = chdr()->generation; h.status = status; h.payload_length = len;
+    h.dst_domain = SHZ_DOM_WIN98; h.generation = chdr()->generation; h.status = status; h.payload_length = len; h.capability_id = echo_cap;
     CHECK(shz_ring_push(k64_tx(), &h, payload) == SHZ_OK);
 }
 
@@ -137,6 +141,159 @@ static shz_msg_hdr_t regression_pool_request(void)
     CHECK(shz_ring_pop(k64_rx(), &received, payload, sizeof payload, &reason) == SHZ_OK);
     CHECK(shz_pool_check(channel, chdr(), &received, SHZ_DOM_WIN98) == SHZ_OK);
     return received;
+}
+
+/* ------------------------------------------------------------------ C6 typed broker requests (0x20A..0x20C)
+ * The scan covers every static object of this process (the mocked user pages, the mapped channel and all VxD
+ * statics: copied input, scratch, mailboxes, stash); stack locals of the test are outside it. */
+extern char __data_start[], _end[];
+__attribute__((no_sanitize("address"), noinline)) static unsigned secret_hits(const uint8_t *sec, size_t n)
+{
+    const volatile uint8_t *p = (const volatile uint8_t *)__data_start, *e = (const volatile uint8_t *)_end;
+    unsigned hits = 0;
+    for (; p + n <= e; ++p) {
+        size_t k = 0;
+        while (k < n && p[k] == sec[k]) ++k;
+        if (k == n) ++hits;
+    }
+    return hits;
+}
+
+static void auth_frame(uint8_t *frame, uint32_t opcode, uint64_t rid, uint32_t cap, const uint8_t *sec, uint32_t sec_len)
+{
+    shz_msg_hdr_t h;
+    shz_w64_auth_req_t a;
+    memset(&h, 0, sizeof h); memset(&a, 0, sizeof a);
+    h.opcode = opcode; h.request_id = rid; h.capability_id = cap; h.payload_length = sizeof a;
+    a.size = sizeof a; a.version = SHZ_W64_AUTH_VERSION; a.user_len = 5; memcpy(a.user, "alice", 5);
+    a.secret_len = sec_len; memcpy(a.secret, sec, sec_len);
+    memcpy(frame, &h, sizeof h); memcpy(frame + sizeof h, &a, sizeof a);
+}
+
+static uint32_t auth_open(uint32_t dev)
+{
+    struct ntwv_w64_open info;
+    cur_dev = dev; reset();
+    CHECK(dioc(NTWV_IOCTL_W64_OPEN, 0, 0, sizeof info, &info, 0) == 0 && shz_w64_owner_id_valid(info.owner_id));
+    return info.owner_id;
+}
+
+static void regression_auth(void)
+{
+    enum { F = 64 + sizeof(shz_w64_auth_req_t) };
+    uint8_t sec[16], frame[F + 1], slot[SHZ_MSG_SLOT_SIZE], pl[SHZ_MSG_MAX_INLINE];
+    shz_msg_hdr_t got, hm;
+    shz_w64_auth_req_t a;
+    shz_w64_auth_reply_t r;
+    uint32_t A, B, mask = 0, before, k;
+    int32_t status;
+    int reason;
+    for (k = 0; k < sizeof sec; ++k) sec[k] = (uint8_t)(0xa0u ^ (k * 29u + 7u));   /* built at run time: no literal */
+    A = auth_open(0x31u); B = auth_open(0x32u);
+    CHECK(A != B && secret_hits(sec, sizeof sec) == 0);
+
+    /* rejected before forwarding; the copied input and the validation scratch are scrubbed on every reject */
+    before = shz_ring_count(k64_rx());
+    for (k = 0; k < 13; ++k) {
+        uint32_t len = F, want = NTWV_ERROR_INVALID_PARAMETER;
+        cur_dev = 0x31u;
+        auth_frame(frame, SHZ_OP_W64_AUTH_LOGIN, 0x7000u + k, 0, sec, sizeof sec);
+        memcpy(&hm, frame, sizeof hm); memcpy(&a, frame + 64, sizeof a);
+        switch (k) {
+        case 0: hm.payload_length = sizeof a - 1; len = F - 1; break;                 /* short body */
+        case 1: frame[F] = 0x55; len = F + 1; break;                                   /* oversize: trailing pool byte */
+        case 2: hm.flags = SHZ_MSGF_ONEWAY; want = NTWV_ERROR_ACCESS_DENIED; break;
+        case 3: hm.capability_id = SHZ_W64_OWNER_PRIVILEGED_ID; want = NTWV_ERROR_ACCESS_DENIED; break;
+        case 4: hm.capability_id = B; want = NTWV_ERROR_ACCESS_DENIED; break;          /* another owner's id */
+        case 5: a.user_len = 0; break;
+        case 6: a.user_len = 31; memset(a.user, 'x', 32); break;                        /* not NUL-terminated */
+        case 7: a.secret[sizeof sec] = 1; break;                                        /* bytes past secret_len */
+        case 8: a.version = 2; break;
+        case 9: a.roles = 1; break;                                                     /* roles only for REGISTER */
+        case 10: hm.status = 1; break;
+        case 11: a.secret_len = SHZ_W64_AUTH_SECRET_MAX + 1; break;
+        default: hm.opcode = SHZ_OP_W64_AUTH_CONFIRM_ELEVATION + 1; want = NTWV_ERROR_ACCESS_DENIED; break;  /* outside 0x20A..0x20C */
+        }
+        memcpy(frame, &hm, sizeof hm); memcpy(frame + 64, &a, sizeof a);
+        reset();
+        CHECK(dioc(NTWV_IOCTL_W64_SEND, frame, len, 4, &status, 0) == want);
+        memset(buffers[2], 0, sizeof buffers[2]);                                       /* the application's own copy */
+        CHECK(shz_ring_count(k64_rx()) == before && secret_hits(sec, sizeof sec) == 0);
+    }
+
+    /* allowlisted + valid: forwarded intact with the owner id stamped; the VxD copy is scrubbed right away */
+    auth_frame(frame, SHZ_OP_W64_AUTH_LOGIN, 0x7100u, 0, sec, sizeof sec);
+    cur_dev = 0x31u; reset();
+    CHECK(dioc(NTWV_IOCTL_W64_SEND, frame, F, 4, &status, 0) == 0 && status == SHZ_OK);
+    memset(buffers[2], 0, sizeof buffers[2]);
+    CHECK(secret_hits(sec, sizeof sec) == 1);                    /* only the queued transmit ring slot */
+    CHECK(shz_ring_pop(k64_rx(), &got, pl, sizeof pl, &reason) == SHZ_OK);
+    CHECK(got.opcode == SHZ_OP_W64_AUTH_LOGIN && got.capability_id == A && got.flags == 0 && got.request_id == 0x7100u &&
+          got.src_domain == SHZ_DOM_WIN98 && got.dst_domain == SHZ_DOM_KERNEL64 && got.generation == chdr()->generation);
+    CHECK(shz_w64_auth_req_check(&got, pl, &a) == SHZ_OK && a.secret_len == sizeof sec && !memcmp(a.secret, sec, sizeof sec));
+    memset(&a, 0, sizeof a); memset(pl, 0, sizeof pl);
+    CHECK(secret_hits(sec, sizeof sec) == 1);                    /* this fake Core does not scrub what it consumed */
+    cur_dev = 0x31u; reset();
+    CHECK(dioc(NTWV_IOCTL_W64_WAIT, &(uint32_t){1}, 4, 4, &mask, 0) == 0);
+    CHECK(secret_hits(sec, sizeof sec) == 0);                    /* the VxD scrubbed the consumed slot */
+    /* one credential request per owner: a second one is BUSY and leaves nothing behind */
+    auth_frame(frame, SHZ_OP_W64_AUTH_LOGIN, 0x7101u, A, sec, sizeof sec);
+    reset(); CHECK(dioc(NTWV_IOCTL_W64_SEND, frame, F, 4, &status, 0) == NTWV_ERROR_BUSY);
+    memset(buffers[2], 0, sizeof buffers[2]);
+    CHECK(shz_ring_count(k64_rx()) == 0 && secret_hits(sec, sizeof sec) == 0);
+    /* B registers with its own id in capability_id (accepted, still stamped) */
+    auth_frame(frame, SHZ_OP_W64_AUTH_REGISTER, 0x7200u, B, sec, sizeof sec);
+    cur_dev = 0x32u; reset();
+    CHECK(dioc(NTWV_IOCTL_W64_SEND, frame, F, 4, &status, 0) == 0);
+    memset(buffers[2], 0, sizeof buffers[2]);
+    CHECK(shz_ring_pop(k64_rx(), &got, pl, sizeof pl, &reason) == SHZ_OK && got.capability_id == B &&
+          got.opcode == SHZ_OP_W64_AUTH_REGISTER);
+    memset(pl, 0, sizeof pl);
+
+    /* replies: a reply naming A with a request A never sent is dropped; A's reply reaches A only */
+    memset(&r, 0, sizeof r); r.size = sizeof r; r.status = SHZ_OK; r.auth_epoch = 5; r.subject_flags = 1;
+    echo_cap = A; k64_reply(0x7999u, SHZ_OP_W64_AUTH_LOGIN, SHZ_OK, &r, sizeof r);
+    k64_reply(0x7100u, SHZ_OP_W64_AUTH_LOGIN, SHZ_OK, &r, sizeof r);
+    r.reserved = 1;                                              /* malformed body for B's accepted request */
+    echo_cap = B; k64_reply(0x7200u, SHZ_OP_W64_AUTH_REGISTER, SHZ_OK, &r, sizeof r);
+    cur_dev = 0x32u; reset();
+    CHECK(dioc(NTWV_IOCTL_W64_RECV, 0, 0, sizeof slot, slot, 0) == 0);
+    memcpy(&hm, slot, sizeof hm);
+    CHECK(hm.capability_id == B && hm.request_id == 0x7200u && hm.status == SHZ_E_PROTO && hm.payload_length == 0);
+    CHECK(shz_msg_checksum((const shz_msg_hdr_t *)slot) == hm.checksum);   /* sanitized, terminal, not dropped */
+    reset(); CHECK(dioc(NTWV_IOCTL_W64_RECV, 0, 0, sizeof slot, slot, 0) == NTWV_ERROR_NO_MORE_ITEMS);   /* not A's */
+    cur_dev = 0x31u; reset();
+    CHECK(dioc(NTWV_IOCTL_W64_RECV, 0, 0, sizeof slot, slot, 0) == 0);
+    memcpy(&hm, slot, sizeof hm); memcpy(&r, slot + 64, sizeof r);
+    CHECK(hm.capability_id == A && hm.request_id == 0x7100u && hm.flags == SHZ_MSGF_REPLY && hm.payload_length == sizeof r &&
+          r.auth_epoch == 5 && r.subject_flags == 1);
+    reset(); CHECK(dioc(NTWV_IOCTL_W64_RECV, 0, 0, sizeof slot, slot, 0) == NTWV_ERROR_NO_MORE_ITEMS);   /* consumed once */
+
+    /* the reply cleared A's outstanding request; a revoke with a queued credential frame scrubs it after consumption */
+    auth_frame(frame, SHZ_OP_W64_AUTH_CONFIRM_ELEVATION, 0x7300u, 0, sec, sizeof sec);
+    cur_dev = 0x31u; reset();
+    CHECK(dioc(NTWV_IOCTL_W64_SEND, frame, F, 4, &status, 0) == 0);
+    memset(buffers[2], 0, sizeof buffers[2]);
+    ntwv_w64_owner_departed(&hv, 0xc1000000u, 0x31u, 0xc2000000u, SHZ_W64_REVOKE_DEVICE_CLOSE);
+    CHECK(shz_ring_pop(k64_rx(), &got, pl, sizeof pl, &reason) == SHZ_OK && got.opcode == SHZ_OP_W64_AUTH_CONFIRM_ELEVATION);
+    CHECK(shz_ring_pop(k64_rx(), &got, pl, sizeof pl, &reason) == SHZ_OK && got.opcode == SHZ_OP_W64_OWNER_CONTROL &&
+          got.capability_id == A);
+    memset(pl, 0, sizeof pl);
+    CHECK(secret_hits(sec, sizeof sec) == 1);
+    cur_dev = 0x32u; reset();
+    CHECK(dioc(NTWV_IOCTL_W64_WAIT, &(uint32_t){1}, 4, 4, &mask, 0) == 0 && secret_hits(sec, sizeof sec) == 0);
+    echo_cap = A; k64_reply(0x7300u, SHZ_OP_W64_AUTH_CONFIRM_ELEVATION, SHZ_OK, &r, sizeof r);   /* departed: no receiver */
+    cur_dev = 0x31u; reset();
+    CHECK(dioc(NTWV_IOCTL_W64_RECV, 0, 0, sizeof slot, slot, 0) == NTWV_ERROR_NO_MORE_ITEMS);
+    cur_dev = 0x32u; reset();
+    CHECK(dioc(NTWV_IOCTL_W64_RECV, 0, 0, sizeof slot, slot, 0) == NTWV_ERROR_NO_MORE_ITEMS);
+    /* PMA and privileged opcodes remain refused on the same raw SEND */
+    memset(&hm, 0, sizeof hm); hm.opcode = 0x300u; memcpy(frame, &hm, sizeof hm);
+    reset(); CHECK(dioc(NTWV_IOCTL_W64_SEND, frame, 64, 4, &status, 0) == NTWV_ERROR_ACCESS_DENIED);
+    hm.opcode = SHZ_OP_W64_SHUTDOWN; memcpy(frame, &hm, sizeof hm);
+    reset(); CHECK(dioc(NTWV_IOCTL_W64_SEND, frame, 64, 4, &status, 0) == NTWV_ERROR_ACCESS_DENIED);
+    CHECK(shz_ring_count(k64_rx()) == 0 && secret_hits(sec, sizeof sec) == 0);
+    cur_dev = 0x10u; echo_cap = 0x100u;
 }
 
 static void regression(const char *name)
@@ -238,6 +395,7 @@ static void regression(const char *name)
                 response.flags = SHZ_MSGF_REPLY; response.opcode = request.opcode;
                 response.request_id = request.request_id; response.generation = 1;
                 response.src_domain = SHZ_DOM_KERNEL64; response.dst_domain = SHZ_DOM_WIN98;
+                response.capability_id = echo_cap;    /* Core echoes the owner: only the corrupted field differs */
                 switch (i) {
                 case 0: response.generation = 2; break;
                 case 1: response.src_domain = SHZ_DOM_KERNEL32; break;
@@ -260,6 +418,8 @@ static void regression(const char *name)
             CHECK(shz_pool_check(channel, chdr(), &request, SHZ_DOM_WIN98) == SHZ_E_DENIED);
             reset();
             CHECK(dioc(NTWV_IOCTL_W64_OPEN, 0, 0, sizeof info, &info, 0) == 0 && info.pending_pool == 0 && info.proto_errors == 7);
+        } else if (!strcmp(name, "auth")) {
+            regression_auth();
         } else {
             CHECK(!"unknown regression");
         }
@@ -308,6 +468,16 @@ int main(int argc, char **argv)
     CHECK(got.opcode == SHZ_OP_W64_QUERY && got.request_id == 0x1234 && got.src_domain == SHZ_DOM_WIN98 &&
           got.dst_domain == SHZ_DOM_KERNEL64 && got.generation == 1 && !(got.flags & SHZ_MSGF_BUFFER) &&
           got.buffer_length == 0 && got.buffer_offset == 0 && got.abi_minor == 1);
+    CHECK(got.capability_id == 0x100u);   /* VxD-derived owner, app value 0 overwritten */
+    { /* control: forged SHUTDOWN / PMA / OWNER_CONTROL refused */
+        shz_msg_hdr_t f; uint8_t ff[64]; memset(&f,0,sizeof f); f.capability_id = 0x80000000u;
+        f.opcode = SHZ_OP_W64_SHUTDOWN; memcpy(ff,&f,64); reset();
+        CHECK(dioc(NTWV_IOCTL_W64_SEND, ff, 64, 4, &status, &returned) == NTWV_ERROR_ACCESS_DENIED);
+        f.opcode = 0x300; memcpy(ff,&f,64); reset();
+        CHECK(dioc(NTWV_IOCTL_W64_SEND, ff, 64, 4, &status, &returned) == NTWV_ERROR_ACCESS_DENIED);
+        f.opcode = 0x209; memcpy(ff,&f,64); reset();
+        CHECK(dioc(NTWV_IOCTL_W64_SEND, ff, 64, 4, &status, &returned) == NTWV_ERROR_ACCESS_DENIED);
+    }
 
     /* 3. RECV: empty ring, then the reply, then empty again */
     reset();
@@ -318,7 +488,9 @@ int main(int argc, char **argv)
         wi.abi_major = 1; wi.abi_minor = 1; wi.max_processes = 4;
         k64_reply(0x1234, SHZ_OP_W64_QUERY, SHZ_OK, &wi, sizeof wi);
     }
-    reset();
+    cur_dev = 0x20u; reset();   /* a different handle/owner must not receive owner 0x100's reply */
+    CHECK(dioc(NTWV_IOCTL_W64_RECV, 0, 0, SHZ_MSG_SLOT_SIZE, slot, &returned) == NTWV_ERROR_NO_MORE_ITEMS);
+    cur_dev = 0x10u; reset();
     CHECK(dioc(NTWV_IOCTL_W64_RECV, 0, 0, SHZ_MSG_SLOT_SIZE, slot, &returned) == 0 && returned == SHZ_MSG_SLOT_SIZE);
     memcpy(&got, slot, sizeof got);
     CHECK(got.opcode == SHZ_OP_W64_QUERY && got.request_id == 0x1234 && (got.flags & SHZ_MSGF_REPLY) && got.payload_length == sizeof(shz_w64_info_t));
@@ -370,7 +542,7 @@ int main(int argc, char **argv)
         for (i = 0; i < NTWV_W64_PENDING_POOL; ++i) { reset(); CHECK(dioc(NTWV_IOCTL_W64_RECV, 0, 0, SHZ_MSG_SLOT_SIZE, slot, &returned) == 0); }
         while (shz_ring_pop(k64_rx(), &got, pl, sizeof pl, &reason) != SHZ_E_NOENT) { }
         reset();
-        CHECK(dioc(NTWV_IOCTL_W64_SEND, frame, total, 4, &status, &returned) == NTWV_ERROR_BUSY);
+        CHECK(dioc(NTWV_IOCTL_W64_SEND, frame, total, 4, &status, &returned) == NTWV_ERROR_ACCESS_DENIED);
         h.flags = 0;
     }
 
@@ -415,10 +587,60 @@ int main(int argc, char **argv)
         reset(); CHECK(dioc(NTWV_IOCTL_W64_WAIT, &(uint32_t){100}, 3, 4, &mask, &returned) == NTWV_ERROR_INVALID_PARAMETER);
         memset(&h, 0, sizeof h);
         h.opcode = SHZ_OP_W64_QUERY;
-        for (i = 0; i < 32; ++i) { h.request_id = 100 + i; memcpy(frame, &h, sizeof h); reset(); CHECK(dioc(NTWV_IOCTL_W64_SEND, frame, 64, 4, &status, &returned) == 0); }
+        /* per-owner bound: 7 outstanding non-oneway requests, the 8th is BUSY for that owner only */
+        cur_dev = 0x100u;
+        for (i = 0; i < 7; ++i) { h.request_id = 100 + i; memcpy(frame, &h, sizeof h); reset(); CHECK(dioc(NTWV_IOCTL_W64_SEND, frame, 64, 4, &status, &returned) == 0); }
+        h.request_id = 999; memcpy(frame, &h, sizeof h); reset();
+        CHECK(dioc(NTWV_IOCTL_W64_SEND, frame, 64, 4, &status, &returned) == NTWV_ERROR_BUSY);
+        /* other owners fill the shared ring; a full transmit ring is BUSY */
+        for (i = 7; i < 32; ++i) { cur_dev = 0x100u + i / 7; h.request_id = 100 + i; memcpy(frame, &h, sizeof h); reset(); CHECK(dioc(NTWV_IOCTL_W64_SEND, frame, 64, 4, &status, &returned) == 0); }
         reset();
         CHECK(dioc(NTWV_IOCTL_W64_SEND, frame, 64, 4, &status, &returned) == NTWV_ERROR_BUSY);
-        for (i = 0; i < 32; ++i) CHECK(shz_ring_pop(k64_rx(), &got, pl, sizeof pl, &reason) == SHZ_OK && got.request_id == 100 + i);
+        for (i = 0; i < 32; ++i) CHECK(shz_ring_pop(k64_rx(), &got, pl, sizeof pl, &reason) == SHZ_OK && got.request_id == 100 + i &&
+                                      shz_w64_owner_id_valid(got.capability_id));
+    }
+
+    /* 7b. revoke round trip: device close -> OWNER_CONTROL(REVOKE); no reply keeps REVOKING (slot held, no re-push);
+     * an error reply re-pushes; the OK reply frees the slot. A full owner table is BUSY without eviction. */
+    {
+        shz_w64_owner_ctl_t c;
+        shz_w64_owner_ctl_reply_t cr;
+        uint32_t mask = 0, revoked, n = 0, k;
+        cur_dev = 0x100u; reset();
+        CHECK(dioc(NTWV_IOCTL_W64_OPEN, 0, 0, sizeof info, &info, &returned) == 0);
+        revoked = info.owner_id;
+        CHECK(shz_w64_owner_id_valid(revoked) && revoked != 0x100u);
+        ntwv_w64_owner_departed(&hv, 0xc1000000u, 0x100u, 0xc2000000u, SHZ_W64_REVOKE_DEVICE_CLOSE);
+        CHECK(shz_ring_pop(k64_rx(), &got, &c, sizeof c, &reason) == SHZ_OK && got.opcode == SHZ_OP_W64_OWNER_CONTROL &&
+              got.flags == 0 && got.capability_id == revoked && got.payload_length == sizeof c && c.owner_id == revoked &&
+              c.action == SHZ_W64_OWNER_CTL_REVOKE && c.reason == SHZ_W64_REVOKE_DEVICE_CLOSE && c.expected_channel_generation == got.generation);
+        cur_dev = 0x10u; reset();
+        CHECK(dioc(NTWV_IOCTL_W64_WAIT, &(uint32_t){1}, 4, 4, &mask, &returned) == 0);
+        CHECK(shz_ring_count(k64_rx()) == 0);            /* outstanding: no duplicate push */
+        /* REVOKING still holds its slot: free slots = 16 - (0x10, 0x100..0x104); 0x20 only RECVed (no bind) */
+        for (k = 0; k < 16; ++k) { cur_dev = 0x200u + k; reset(); if (dioc(NTWV_IOCTL_W64_OPEN, 0, 0, sizeof info, &info, &returned) != 0) break; ++n; }
+        CHECK(n == 10 && k == 10);
+        reset(); CHECK(dioc(NTWV_IOCTL_W64_OPEN, 0, 0, sizeof info, &info, &returned) == NTWV_ERROR_BUSY);
+        /* a forged reply from another owner id does not complete the revoke */
+        echo_cap = 0x101u; k64_reply(got.request_id, SHZ_OP_W64_OWNER_CONTROL, SHZ_OK, 0, 0);
+        echo_cap = revoked; k64_reply(got.request_id, SHZ_OP_W64_OWNER_CONTROL, SHZ_E_BUSY, 0, 0);   /* error: retained */
+        cur_dev = 0x10u; reset();
+        CHECK(dioc(NTWV_IOCTL_W64_WAIT, &(uint32_t){1}, 4, 4, &mask, &returned) == 0);
+        reset(); CHECK(dioc(NTWV_IOCTL_W64_WAIT, &(uint32_t){1}, 4, 4, &mask, &returned) == 0);
+        CHECK(shz_ring_pop(k64_rx(), &got, &c, sizeof c, &reason) == SHZ_OK && got.opcode == SHZ_OP_W64_OWNER_CONTROL &&
+              got.capability_id == revoked);           /* re-pushed with a fresh request id */
+        cur_dev = 0x300u; reset();
+        CHECK(dioc(NTWV_IOCTL_W64_OPEN, 0, 0, sizeof info, &info, &returned) == NTWV_ERROR_BUSY);   /* still held */
+        memset(&cr, 0, sizeof cr);
+        cr.size = sizeof cr; cr.version = SHZ_W64_OWNER_CTL_VERSION; cr.owner_id = revoked; cr.reason = c.reason; cr.revoked_processes = 0;
+        k64_reply(got.request_id, SHZ_OP_W64_OWNER_CONTROL, SHZ_OK, &cr, sizeof cr);
+        cur_dev = 0x10u; reset();
+        CHECK(dioc(NTWV_IOCTL_W64_WAIT, &(uint32_t){1}, 4, 4, &mask, &returned) == 0 && shz_ring_count(k64_rx()) == 0);
+        cur_dev = 0x300u; reset();
+        CHECK(dioc(NTWV_IOCTL_W64_OPEN, 0, 0, sizeof info, &info, &returned) == 0 &&
+              shz_w64_owner_slot(info.owner_id) == shz_w64_owner_slot(revoked) &&
+              shz_w64_owner_gen(info.owner_id) == shz_w64_owner_gen(revoked) + 1);   /* freed slot, next generation */
+        echo_cap = 0x100u; cur_dev = 0x10u;
     }
 
     /* 8. buffer policy for the new codes */
@@ -447,15 +669,25 @@ int main(int argc, char **argv)
     memcpy(frame, &h, sizeof h); memcpy(frame + 64, "payload!", 8);
     reset(); CHECK(dioc(NTWV_IOCTL_W64_SEND, frame, 72, 4, &status, &returned) == 0); total = step;
     CHECK(shz_ring_pop(k64_rx(), &got, pl, sizeof pl, &reason) == SHZ_OK && got.payload_length == 8 && !memcmp(pl, "payload!", 8));
+    /* Owner bound: the fake Core answers each pushed request so the owner's 7-outstanding limit drains. */
+    k64_reply(0x4444, SHZ_OP_W64_QUERY, SHZ_OK, 0, 0);
+    reset(); CHECK(dioc(NTWV_IOCTL_W64_RECV, 0, 0, SHZ_MSG_SLOT_SIZE, slot, &returned) == 0);
     {
         unsigned w;
         const uint32_t before = shz_ring_count(k64_rx());
+        uint32_t seen = before;
         for (w = 1; w <= total; ++w) {
             reset(); failure = w;
             CHECK(dioc(NTWV_IOCTL_W64_SEND, frame, 72, 4, &status, &returned) == NTWV_ERROR_NOACCESS);
             CHECK(!protected_now);
             if (w <= 12) CHECK(writes == 0 && reads == 0);   /* 3 x (check, lock) + 6 PTE lookups precede the copy */
             if(locked) {failure=0;CHECK(dioc(NTWV_IOCTL_QUERY,0,0,32,0,0)==0 && !locked);}
+            if (shz_ring_count(k64_rx()) != seen) {          /* the frame went out: deliver its reply */
+                seen = shz_ring_count(k64_rx());
+                failure = 0;
+                k64_reply(0x4444, SHZ_OP_W64_QUERY, SHZ_OK, 0, 0);
+                reset(); CHECK(dioc(NTWV_IOCTL_W64_RECV, 0, 0, SHZ_MSG_SLOT_SIZE, slot, &returned) == 0);
+            }
         }
         /* 3 x (check, lock) + 6 PTE lookups precede the send; the 4 reply-side PTE lookups and 3 unlocks follow it, so
          * exactly those 7 failures leave a frame on the ring while still reporting NOACCESS (the error is authoritative) */
@@ -466,7 +698,22 @@ int main(int argc, char **argv)
     reset(); physical_xor = 0x1000; CHECK(dioc(NTWV_IOCTL_W64_SEND, frame, 72, 4, &status, &returned) == NTWV_ERROR_NOACCESS && !reads && !locked);
     CHECK(shz_ring_count(k64_rx()) == 0);
 
-    /* 10. OPEN refusals: no hypervisor, wrong ABI major, no channel, mapping failure, foreign channel */
+    /* 10. OPEN refusals: no hypervisor, wrong ABI major, no channel, mapping failure, foreign channel.
+     * Reset refuses while owners are LIVE/REVOKING: depart the VM, acknowledge every revoke, then reset. */
+    {
+        shz_w64_owner_ctl_t c; shz_w64_owner_ctl_reply_t cr; uint32_t mask = 0, revokes = 0;
+        ntwv_w64_owner_departed(&hv, 0xc1000000u, 0, 0, SHZ_W64_REVOKE_PROCESS_DEPARTURE);
+        ntwv_w64_reset();
+        reset(); CHECK(dioc(NTWV_IOCTL_W64_OPEN, 0, 0, sizeof info, &info, &returned) == NTWV_ERROR_BUSY);   /* reset refused; 16 REVOKING slots: no eviction */
+        while (shz_ring_pop(k64_rx(), &got, &c, sizeof c, &reason) == SHZ_OK) {
+            CHECK(got.opcode == SHZ_OP_W64_OWNER_CONTROL && c.reason == SHZ_W64_REVOKE_PROCESS_DEPARTURE && c.owner_id == got.capability_id);
+            memset(&cr, 0, sizeof cr); cr.size = sizeof cr; cr.version = SHZ_W64_OWNER_CTL_VERSION; cr.owner_id = c.owner_id; cr.reason = c.reason;
+            echo_cap = c.owner_id; k64_reply(got.request_id, SHZ_OP_W64_OWNER_CONTROL, SHZ_OK, &cr, sizeof cr); ++revokes;
+        }
+        CHECK(revokes == 16);
+        cur_dev = 0x999u; reset(); CHECK(dioc(NTWV_IOCTL_W64_WAIT, &(uint32_t){1}, 4, 4, &mask, &returned) == 0);
+        cur_dev = 0x10u; echo_cap = 0x100u;
+    }
     ntwv_w64_reset();
     reset(); hv_present = 0; CHECK(dioc(NTWV_IOCTL_W64_OPEN, 0, 0, sizeof info, &info, &returned) == NTWV_ERROR_NOT_SUPPORTED && writes == 0); hv_present = 1;
     reset(); abi_reply = 2u << 16; CHECK(dioc(NTWV_IOCTL_W64_OPEN, 0, 0, sizeof info, &info, &returned) == NTWV_ERROR_REVISION_MISMATCH); abi_reply = (1u << 16) | 1u;
@@ -484,5 +731,6 @@ int main(int argc, char **argv)
     CHECK(ntwv_shutdown());
     reset(); CHECK(dioc(NTWV_IOCTL_W64_OPEN, 0, 0, sizeof info, &info, &returned) == NTWV_ERROR_NOT_READY);
     printf("PASS: VxD WIN64 bridge %u assertions; frames validated with the Kernel64 library; failed aliases retained until real release\n", checks);
+    regression("auth");                         /* C6 typed broker requests through the owner SEND allowlist */
     return 0;
 }

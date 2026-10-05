@@ -18,11 +18,13 @@ extern void vm_set_demand_range(uint64_t lo, uint64_t hi);
 
 static process_t procs[MAX_PROCS + 1];
 static unsigned char reserved_slots[MAX_PROCS + 1];
+static uint64_t next_saw_generation = 1;
 
 /* IPC hooks (kernel64/ipc_core.c; no-ops when it is not linked). */
 void __attribute__((weak)) ipc_thread_exit(thread_t *t) { (void)t; }               /* cancel its I/O, drop its APCs */
 void __attribute__((weak)) ipc_process_terminating(process_t *p) { (void)p; }      /* wake its blocked threads */
 void __attribute__((weak)) ipc_process_teardown(process_t *p) { (void)p; }         /* IRPs, views, job accounting */
+void __attribute__((weak)) audio_process_teardown(process_t *p) { (void)p; }        /* stops an owned audio stream (audio.c) */
 void __attribute__((weak)) setup_native_process_teardown(process_t *p) { (void)p; } /* no native service when not linked */
 static uint64_t next_cid = 4;       /* process and thread ids share one namespace (NT's client-id table): unique ids */
 static uint64_t alloc_client_id(void)
@@ -53,16 +55,19 @@ process_t *process_by_pid(int pid)
 process_t *process_create_empty(const char *name)
 {
     process_t *p = 0;
+    uint64_t generation = 0;
     unsigned i, k;
     thread_reap_exited();                       /* exited threads drop their process references: dead processes' slots */
     {const uint64_t f=irq_save();
-     for(i=1;i<=MAX_PROCS;i++)if(!procs[i].used&&!reserved_slots[i]){p=&procs[i];reserved_slots[i]=1;break;}
+     for(i=1;i<=MAX_PROCS;i++)if(!procs[i].used&&!reserved_slots[i]&&next_saw_generation){p=&procs[i];reserved_slots[i]=1;generation=next_saw_generation++;break;}
      irq_restore(f);}
     if (!p) {
         kprintf("K64: process table full (%u slots)\n", (unsigned)MAX_PROCS);
         return 0;
     }
     memset(p, 0, sizeof *p);
+    p->saw_constructing = 1;           /* loader owns mappings until first fully built thread publishes */
+    p->saw_generation = generation;
     p->pml4 = vm_new_space();
     if (!p->pml4) goto failed;
     p->handle_cap = HANDLE_CAP_FULL;
@@ -190,7 +195,7 @@ static int start_thread_common(process_t *p, uint64_t rip, uint64_t rsp, uint64_
         stack_base = rsp - 0x10000;
         stack_size = 0x10000;
     }
-    if (p->terminated || p->exit_owner) {       /* no new thread in a process that is exiting */
+    if (p->terminated || p->teardown || p->exit_owner || p->saw_fenced) {
         if (stack_base) { uint64_t b = stack_base, z = 0; vad_free(p, &b, &z, MEM_RELEASE); }
         return -1;
     }
@@ -218,7 +223,7 @@ static int start_thread_common(process_t *p, uint64_t rip, uint64_t rsp, uint64_
         const uint32_t cls = p->priority_class ? p->priority_class : SHZ_NT_PROCESS_NORMAL;
         /* A retarget sees either an unpublished TCB or a fully initialized
          * user policy. TLS may block, so it runs after this publication. */
-        if (p->terminated || p->exit_owner ||
+        if (p->terminated || p->teardown || p->exit_owner || p->saw_fenced ||
             shz_nt_sched_from_win32(cls, 0, &projection) != SHZ_NT_SCHED_OK ||
             thread_get_sched_policy(t, &policy) ||
             thread_set_sched_policy(t, projection.absolute_priority, policy.quantum_ticks, policy.cpu_mask)) {
@@ -237,6 +242,7 @@ static int start_thread_common(process_t *p, uint64_t rip, uint64_t rsp, uint64_
         ob_ref(p->object);                     /* held until thread_object_detach */
         t->creator_hold = out != 0;
         ++p->threads_alive;
+        p->saw_constructing = 0;
         if (!p->main_thread) p->main_thread = t;
         irq_restore(f);
     }
@@ -284,6 +290,7 @@ void process_teardown(process_t *p)
     p->teardown = 1;
     irq_restore(f);
     ipc_process_teardown(p);
+    audio_process_teardown(p);                  /* DMA stopped before the owner slot or address space is reused */
     setup_native_process_teardown(p);
     handles_close_all(p);
     if (p->token) {                             /* the primary token (sysk32_sec.c) */

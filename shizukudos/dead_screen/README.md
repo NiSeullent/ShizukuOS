@@ -11,20 +11,53 @@ The caller owns severity classification. `DS_RECOVERABLE` returns without changi
 A fatal state never resumes the damaged kernel. The first trusted record is copied and held immutable. The games change only their own bounded static state. On graphics/load prerequisite failure or recursive fatal handling, the first line is exactly:
 
 ```text
-You session got wasted
+Your computer was trashed.
 ```
 
-An English traceback follows on COM1/the console. If a valid retained framebuffer remains, a separate minimal ASCII renderer writes the same first record directly to it, even after the full game renderer has failed. Small framebuffers clip text and return a truncation result; serial output still carries the complete record. If drawing that fallback itself faults, one further serial-only takeover is allowed; another recursive fault halts immediately. The first record is never replaced. If the output device also fails, the adapter halts rather than claiming an error report was written. There is no heap allocation, file I/O, IPC, compositor lock, scheduler call, GPU command submission or interrupt re-enable in the fatal module. If the kernel/module itself never loads or the CPU cannot execute it, it cannot provide a fallback; no bootloader interception is claimed.
+An English traceback follows on COM1/the console. If a valid retained framebuffer remains, a separate minimal ASCII renderer writes the same first record directly to it, even after the full game renderer has failed. Small framebuffers clip text and return a truncation result; serial output still carries the complete record. If drawing that fallback itself faults, one further serial-only takeover is allowed; another recursive fault halts immediately. The first record is never replaced. If the output device also fails, the adapter halts rather than claiming an error report was written. There is no heap allocation, file I/O, IPC, compositor lock, scheduling operation, GPU command submission or interrupt re-enable in the fatal module. If the kernel/module itself never loads or the CPU cannot execute it, it cannot provide a fallback; no bootloader interception is claimed.
 
-## Panic-time game admission
+The native adapter claims one verified physical CPU using a lock-free atomic
+compare-and-exchange before modifying the captured reason or static fault
+record. A fatal entry from another CPU halts that CPU locally without changing
+the first record, fallback depth, serial output or framebuffer. Unknown physical
+CPU identity also halts before those writes. The owning CPU may continue from
+panic text capture into the panic handler. Its recursive exception before the
+record has latched halts safely; after the latch, its bounded fallback retains
+the original record. Only the owner may append captured panic text. This gate
+protects module-owned fatal state: it does not stop other CPUs running ordinary
+kernel code, quiesce all devices, or establish general SMP panic recovery.
 
-Games are offered only after `ds_admit_games` accepts a measured context; otherwise the stacked-error visual and traceback still render, the menu shows `GAMES UNAVAILABLE` with the `UNSAFE` bit mask, the console receives `Dead Screen: games refused, unsafe=0x...`, and the kernel halts without entering the game loop. Refusal bits: not latched, broken static-state guard words or invariants, no measured context, IF set, NMI/#DF/#MC vector, SP outside the boot or current-task kernel stack or under 8 KiB headroom, a secondary CPU was ever started, fallback recursion, or a prior renderer failure. Admission is one-shot and monotonic: a later safer context never re-enables games. A game mode in a refused or guard-corrupted state is treated as corruption and takes the exact `You session got wasted` fallback. The `ds_native_secondary_cpu_started()` call is source-integrated in `kernel64/smp_boot.c` before secondary CPU startup; games remain refused once that fact is latched. This wiring is not an actual SMP fatal-path or game execution result. The WASM preview admits itself with an explicitly synthetic context.
+## Nyan fatal fallback
+
+The native fallback now renders an original small rainbow cat directly into a
+retained framebuffer when the game controller cannot run, or when the explicit
+`shz.nyan-control` fault-control token is supplied. It keeps the first real fault
+record and never resumes the main kernel. No GUI, compositor, filesystem or
+allocation is used after the fatal boundary. CPU metadata uses the verified
+physical identity of the fatal owner. Cached scheduler PID/TID are included only
+when the cached CPU matches that owner; otherwise task context remains unknown.
+
+Audio levels describe measured output facilities: previously prepared AC97
+retained DMA pages with observed progress, verified PIT channel-2 pitched output,
+verified fixed-tone counter/gate transitions, or silent. PCM progress is checked
+again during playback; a stalled or halted engine demotes to primitive output.
+Loss of a previously verified fixed-tone gate demotes to silent, rerenders and
+reports the unavailable output, then halts. Stopping an unresponsive primitive
+speaker is best effort; the silent level means no output remains verified.
+There is no panic-time codec enumeration or DMA allocation. Neither register
+readback nor DMA progress proves a physical speaker is audible. Missing output
+cannot establish a specific processor defect. `shz.nyan-beep`,
+`shz.nyan-fixed`, and `shz.nyan-silent` constrain this explicit control; they do
+not alter ordinary boot or automatically force a process teardown. The optional `shz.nyan-pcm-prepare` control readies the real backend during
+healthy execution before inducing the fatal fault. It is not a panic-time
+probe. Host hardware
+models test selection and demotion separately from real native execution.
 
 ## Actual capture and limits
 
 An unhandled Kernel64 exception supplies its real `struct regs` IP/SP/BP, flags, vector, CPU error, all integer registers and sampled CR2/CR3. A panic supplies its actual caller return address, the panic function's current SP/BP and flags after CLI, sampled CR2/CR3, and the bounded text produced by the existing formatter. That is a panic snapshot, not a complete interrupted register frame. CR2 is the sampled CPU register and may describe an earlier page fault. The first frame is the actual captured IP; further unwinding is explicitly unavailable. No arbitrary stack pointer is dereferenced, no fake OS stack frames are synthesized, and no claim is made that register capture survives memory corruption or every double fault. Existing panic formatting and exception diagnostic console/evidence writes remain prerequisites before handoff and can themselves fault. The immutable first-record guarantee starts at `ds_latch`; it does not cover a fault before that boundary.
 
-Rendering requires a retained, already mapped BGRX/RGBX framebuffer at least 640×480, at most 4096×4096, with checked stride/span/pointer arithmetic. Normal GOP/BGA probe binds the real mapping only after probe succeeds. It remains mapped for the kernel lifetime. Unsupported virtio submission, early faults, a small/unusable framebuffer or a fault in the drawing path use the textual fallback. The renderer writes the visible framebuffer only; padding is untouched. Drawing and input assume the current single-CPU standalone Kernel64 profile. SMP fault takeover and corrupted page tables/mappings are unsupported.
+Rendering requires a retained, already mapped BGRX/RGBX framebuffer at least 640×480, at most 4096×4096, with checked stride/span/pointer arithmetic. Normal GOP/BGA probe binds the real mapping only after probe succeeds. It remains mapped for the kernel lifetime. Unsupported virtio submission, early faults, a small/unusable framebuffer or a fault in the drawing path use the textual fallback. The renderer writes the visible framebuffer only; padding is untouched. Drawing and input execute exclusively on the fatal owner. The local secondary-CPU halt gate provides first-record protection; peer-CPU stop, general SMP recovery and corrupted page tables/mappings remain unsupported.
 
 The existing i8042 setup must have established translated set-1 input and received the keyboard scanning ACK before the fatal adapter reads keys. Mouse and parity/timeout bytes are discarded. USB-only keyboards are unsupported. COM1 also accepts 1/2, A/D/W/S in lowercase, Space, R/L/T and Escape. COM1 output has a finite ready wait and propagates timeout. Under the Supervisor profile there is no direct device input/GOP binding; the adapter falls back to the existing console hypercall with static image storage.
 
@@ -39,6 +72,16 @@ The explicit startup controls are exactly `shz.dead-screen-panic-control`, `shz.
 Run `python3 shizukudos/dead_screen/build.py --out build/dead-screen-candidate-<new-version>` from a fresh checkout. The source build requires Python 3.9 or newer, Pillow, GCC, Clang with ASan/UBSan, NASM, GNU binutils (`ld`, `nm`, `objcopy`, `objdump`, `as`) and `ldd`. It does not require previous build outputs, Windows media or private lab receipts. An existing output directory is refused. Every failure writes a separate result and retains logs. Optimized GCC controls and Clang controls with ASan/UBSan call the actual core/renderer. A separate host build calls actual `native.c` with compile-time modeled port/CLI/HLT services, proving source control flow without executing privileged hardware instructions. Real native compilation contains none of those host hooks. Tests cover unchanged recoverable state, first-record ownership, recursive refusal, fallback/write failures, malformed surface bounds, row padding/RGBX, collision/wall kicks/line clears/top-out, Suika merges/crowding/bounds, input sequences, prolonged gameplay, real adapter fallback/timeout/reentry and immutable trace across both games. Compiler/source/dependency/log/whole-kernel/artifact/ABI hashes are frozen. This source-build command touches no VM, guest disk, current display driver, target application or system setting.
 
 For the original lab's historical chain only, add `--verify-history`. This requires all four original `build/dead-screen-candidate-20261001T{1035-v1,1040-v2,1045-v3,1100-v4}/result.json` receipts and their exact recorded SHA256 values. Missing or changed receipts fail the build; existing receipts are never rewritten. The result and manifest separately record `build_scope: source-build-and-host-controls`, `history_verification.requested` and its `NOT_REQUESTED`, `VERIFIED` or `FAILED` status. A source-build `PASS`, including one with verified history, does not establish native execution or Win98/VMM acceptance; those fields remain false and native acceptance remains pending.
+
+The focused 2026-10-05 fatal-owner check executed the actual native adapter in
+19 host I/O/CPU-model modes with 10,997 assertions, and compiled its production
+translation unit using the existing Kernel64 flags. These checks covered
+cross-CPU reentry without diagnostic writes, actual-owner CPU metadata,
+unavailable CPU identity, pre-latch recursion, owner-only text capture and
+fixed-tone gate loss. The native object contains a lock-free `lock cmpxchg`
+instruction and no external `libatomic` dependency. These results prove the
+tested source branches and production compilation; they do not prove real SMP
+fault behavior, audio hardware, a full kernel link or native guest execution.
 
 The RPC lifecycle observer and its outer fixture under `ntwin32/rpc_lifecycle_observer/` retain the original lab's fixed receipt and licensed-input identity checks. Their builders need the separately supplied matching private lab inputs; they are not part of this fresh-checkout Dead Screen source build. Those inputs and Windows original binaries must not be added to the public repository.
 

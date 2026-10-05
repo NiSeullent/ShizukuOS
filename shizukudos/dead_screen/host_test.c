@@ -1,6 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "dead_screen.h"
-#include "sprites.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,8 +11,6 @@ static ds_state state;
 static ds_fault fault;
 static uint32_t image[480][648];
 static ds_surface surface={&image[0][0],640,480,648,480*648,0};
-/* Host-modelled proven context: IF clear, 16 KiB headroom, one CPU, depth 0. */
-static const ds_context safe_context={0x46,0x20000+16384,0x20000,0x28000,0,0,1};
 static char text[4096];static size_t text_len;static unsigned calls,fail_call;
 static int writer(void *context,const char *s,size_t n)
 {
@@ -32,7 +29,6 @@ static void start(void)
     fault.frames[0]=fault.ip;fault.frame_count=1;
     strcpy(fault.reason,"HOST CONTROL: original renderer / native acceptance pending");
     CHECK(ds_latch(&state,DS_KERNEL_FATAL,&fault)==1);
-    CHECK(ds_admit_games(&state,&safe_context)==0 && state.games_allowed);
 }
 static void write_ppm(const char *directory,const char *name)
 {
@@ -56,7 +52,7 @@ int main(int argc,char **argv)
     CHECK(ds_latch(&state,DS_KERNEL_FATAL,&fault)==1);CHECK(state.fault.frame_count==8);
     CHECK(!state.fault.reason[159]);CHECK(state.fault.registers_valid==1);
     CASE();start();text_len=calls=fail_call=0;CHECK(!ds_fallback(&state,writer,0));
-    CHECK(!strncmp(text,"You session got wasted\nEnglish traceback:",41));
+    CHECK(!strncmp(text,"Your computer was trashed.\nEnglish traceback:",41));
     CHECK(strstr(text,"FRAME=0x") && strstr(text,"Further unwind unavailable"));
     const unsigned writes=calls;
     CASE();for(unsigned n=1;n<=writes;++n) {text_len=calls=0;fail_call=n;CHECK(ds_fallback(&state,writer,0)==-1);CHECK(calls==n);}
@@ -166,60 +162,32 @@ int main(int argc,char **argv)
         for(unsigned j=0;j<DS_BALLS;++j)if(state.suika.ball[j].used){ds_ball *b=&state.suika.ball[j];
             CHECK(b->level<6 && b->x>=0 && b->x<=240*256 && b->y>=-64*256 && b->y<=288*256);}
     }
-    /* Panic-time safety gate: every refusal branch, monotonic admission, and
-     * that a refused state still renders the stacked-error visual + trace. */
-    {
-        ds_context c;
-        CASE();ds_init(&state);CHECK(ds_game_safety(&state,&safe_context)==DS_UNSAFE_NOT_LATCHED);
-        CHECK(ds_game_safety(0,&safe_context)==(DS_UNSAFE_NOT_LATCHED|DS_UNSAFE_STATE));
-        CASE();start();CHECK(ds_game_safety(&state,&safe_context)==0);
-        CHECK(ds_game_safety(&state,0)==DS_UNSAFE_NO_CONTEXT);
-        c=safe_context;c.proven=0;CHECK(ds_game_safety(&state,&c)==DS_UNSAFE_NO_CONTEXT);
-        c=safe_context;c.flags|=0x200;CHECK(ds_game_safety(&state,&c)==DS_UNSAFE_INTERRUPTS);
-        c=safe_context;c.sp=c.stack_low+DS_GAME_STACK_MIN-1;CHECK(ds_game_safety(&state,&c)==DS_UNSAFE_STACK);
-        c.sp=c.stack_low+DS_GAME_STACK_MIN;CHECK(ds_game_safety(&state,&c)==0);
-        c=safe_context;c.sp=c.stack_high+8;CHECK(ds_game_safety(&state,&c)==DS_UNSAFE_STACK);
-        c=safe_context;c.stack_low=c.stack_high=0;CHECK(ds_game_safety(&state,&c)==DS_UNSAFE_STACK);
-        c=safe_context;c.secondary_cpus_started=1;CHECK(ds_game_safety(&state,&c)==DS_UNSAFE_SMP);
-        c=safe_context;c.fault_depth=1;CHECK(ds_game_safety(&state,&c)==DS_UNSAFE_RECURSION);
-        for(unsigned v=0;v<3;++v){static const uint64_t bad_vec[3]={2,8,18};
-            CASE();ds_init(&state);fault.vector=bad_vec[v];CHECK(ds_latch(&state,DS_KERNEL_FATAL,&fault)==1);
-            CHECK(ds_game_safety(&state,&safe_context)==DS_UNSAFE_VECTOR);}
-        fault.vector=0;
-        CASE();start();state.guard_tail^=1;CHECK(ds_game_safety(&state,&safe_context)&DS_UNSAFE_STATE);
-        ds_key_event(&state,DS_ONE);CHECK(state.graphics_failed && state.mode==DS_MENU);
-        CHECK(ds_render(&state,&surface)==-1);
-        /* Rendering failure still has the exact text fallback + English trace. */
-        text_len=0;calls=0;fail_call=0;CHECK(!ds_fallback(&state,writer,0));
-        CHECK(!strncmp(text,"You session got wasted\n",23));CHECK(strstr(text,"English traceback:"));
-        CASE();ds_init(&state);CHECK(ds_latch(&state,DS_KERNEL_FATAL,&fault)==1);
-        c=safe_context;c.secondary_cpus_started=1;
-        CHECK(ds_admit_games(&state,&c)==DS_UNSAFE_SMP && !state.games_allowed);
-        /* Monotonic: a later safe context cannot re-enable games. */
-        CHECK(ds_admit_games(&state,&safe_context)==DS_UNSAFE_SMP && !state.games_allowed);
-        ds_key_event(&state,DS_ONE);CHECK(state.mode==DS_MENU && !state.graphics_failed);
-        ds_key_event(&state,DS_TWO);ds_key_event(&state,DS_RESTART);CHECK(state.mode==DS_MENU);
-        ds_tick(&state);CHECK(!state.graphics_failed && state.mode==DS_MENU);
-        ds_key_event(&state,DS_LANGUAGE);CHECK(!state.korean);
-        memset(image,0,sizeof image);CHECK(!ds_render(&state,&surface));
-        {unsigned lit=0;for(unsigned y=0;y<480;++y)for(unsigned x=0;x<640;++x)lit+=image[y][x]!=0;CHECK(lit>2000);}
-        if(argc==2)write_ppm(argv[1],"games-refused-en-host");
-        /* Forcing a game mode into a refused state is a corruption -> fallback. */
-        state.mode=DS_TETRIS;CHECK(ds_render(&state,&surface)==-1 && state.graphics_failed);
-        CASE();start();ds_key_event(&state,DS_ONE);CHECK(state.mode==DS_TETRIS);
-        CHECK(ds_admit_games(&state,&c)==DS_UNSAFE_SMP && state.mode==DS_MENU && !state.games_allowed);
-    }
     CASE();start();ds_key_event(&state,DS_ONE);
     for(unsigned i=0;i<10000;++i){ds_key_event(&state,(enum ds_key)(DS_LEFT+(i*7)%5));ds_tick(&state);
         if(state.tetris.over)ds_key_event(&state,DS_RESTART);
         CHECK(!state.graphics_failed);}
-    CASE();{ /* static sprite table: bounds, non-empty, pairwise distinct, OOB = 0 */
-        for(unsigned l=0;l<DS_SPRITE_COUNT;++l){unsigned on=0;
-            for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x)on+=ds_sprite_bit(l,x,y);
-            CHECK(on>20 && on<256);
-            for(unsigned m=l+1;m<DS_SPRITE_COUNT;++m)CHECK(memcmp(ds_sprites[l],ds_sprites[m],sizeof ds_sprites[l])!=0);}
-        CHECK(!ds_sprite_bit(6,0,0) && !ds_sprite_bit(0,16,0) && !ds_sprite_bit(0,0,16));
+    CASE();start();
+    for(unsigned pcm=0;pcm<2;pcm++)for(unsigned pitch=0;pitch<2;pitch++)for(unsigned fixed=0;fixed<2;fixed++) {
+        enum ds_fatal_audio a=ds_nyan_audio_select(pcm,pitch,fixed);
+        CHECK(a==(pcm?DS_AUDIO_PCM:pitch?DS_AUDIO_PITCHED:fixed?DS_AUDIO_FIXED:DS_AUDIO_SILENT));
+        CHECK(!ds_nyan_framebuffer(&state,&surface,a));
     }
+    CASE(); /* A minimal fallback accepts small retained surfaces safely. */
+    const unsigned widths[]={8,320,1920},heights[]={8,200,1440};
+    for(unsigned n=0;n<3;n++) {
+        const unsigned w=widths[n],h=heights[n],pitch=w+11;
+        const size_t words=(size_t)pitch*h;
+        uint32_t *guard=malloc((words+128)*sizeof *guard);CHECK(guard);
+        for(size_t k=0;k<words+128;k++)guard[k]=0xa5a5a5a5;
+        ds_surface edge={guard+64,w,h,pitch,words,0};
+        CHECK(!ds_nyan_framebuffer(&state,&edge,DS_AUDIO_SILENT));
+        for(unsigned k=0;k<64;k++){CHECK(guard[k]==0xa5a5a5a5);CHECK(guard[64+words+k]==0xa5a5a5a5);}
+        for(unsigned y=0;y<h;y++)for(unsigned x=w;x<pitch;x++)CHECK(edge.pixels[(size_t)y*pitch+x]==0xa5a5a5a5);
+        if(w>=320)CHECK(edge.pixels[((size_t)h/2-18)*pitch+w/2-36]==0xe6ba81);
+        free(guard);
+    }
+    bad=surface;bad.span_words=1;CHECK(ds_nyan_framebuffer(&state,&bad,DS_AUDIO_SILENT)==-1);
+    CHECK(ds_nyan_framebuffer(0,&surface,DS_AUDIO_SILENT)==-1);
     printf("{\"status\":\"PASS\",\"cases\":%u,\"checks\":%u,\"native_execution\":false}\n",cases,checks);
     return 0;
 }

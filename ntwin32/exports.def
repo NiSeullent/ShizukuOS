@@ -25,12 +25,6 @@ EXPORTS
     NtwCloseConsole64=NtwCloseConsole64@4
     NtwKillProcess64=NtwKillProcess64@8
     NtwCloseProcess64=NtwCloseProcess64@4
-    NtwQueryGui64=NtwQueryGui64@8
-    NtwAcquireGuiFrame64=NtwAcquireGuiFrame64@8
-    NtwReadGuiFrame64=NtwReadGuiFrame64@24
-    NtwReleaseGuiFrame64=NtwReleaseGuiFrame64@12
-    NtwSendGuiInput64=NtwSendGuiInput64@12
-    NtwCloseGui64=NtwCloseGui64@4
-    NtwQueryCoreClock=NtwQueryCoreClock@8
-    NtQueryPerformanceCounter=NtwNtQueryPerformanceCounter@8
-    NtwShutdownCoreClock=NtwShutdownCoreClock@0
+    Ntw64AuthLogin=Ntw64AuthLogin@16
+    Ntw64AuthRegister=Ntw64AuthRegister@20
+    Ntw64AuthElevateConfirm=Ntw64AuthElevateConfirm@16

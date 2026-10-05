@@ -7,6 +7,7 @@
 #define SHZ_BLKIO_H
 #include <stdint.h>
 #include "plat.h"
+#include "interactive_ui.h"
 
 #define BLKIO_MAX_SECTORS 2048u
 
@@ -16,5 +17,6 @@ int blkio_info(void *ctx, unsigned index, plat_disk_t *out);
 int blkio_read(void *ctx, unsigned index, uint64_t lba, uint32_t count, void *buf);
 int blkio_write(void *ctx, unsigned index, uint64_t lba, uint32_t count, const void *buf);
 int blkio_flush(void *ctx, unsigned index);
+int blkio_public_backend(setup_ui_backend_t *);
 void blkio_power(int action);                           /* SETUP_POWER_* */
 #endif

@@ -1,62 +1,104 @@
-/* SPDX-License-Identifier: GPL-2.0-only
- * NTWRAP9X W64 derived owner identity (native-window lane, clone prototype behind NTWV_W64_DERIVED_OWNER).
+/* SPDX-License-Identifier: GPL-2.0-only -- original implementation.
+ * NTWRAP9X.VXD native endpoint owner: raw SEND allowlist extension for the C6 typed broker requests
+ * (SHZ_OP_W64_AUTH_LOGIN/REGISTER/CONFIRM_ELEVATION, shizukudos/abi/shz_w64_owner.h) and credential hygiene.
  *
- * The caller of a W64 SEND is identified by the VWIN32-filled DIOCParams (VMHandle, tagProcess), never by the
- * application's message: VWIN32 writes those fields before the VxD's W32_DEVICEIOCONTROL handler runs. The VxD
- * issues a nonzero 31-bit token per (system VM, tagProcess, channel generation) and overwrites capability_id of
- * every outgoing W64 request with SHZ_W64_OWNER_CAP_DERIVED|token. Tokens come from a monotonic counter and are
- * never reissued (exhaustion fails closed); DIOC_CLOSEHANDLE of the owner, a channel generation change and a
- * channel reset retire them, so a recycled tagProcess gets a fresh identity. K64 binds the creating request's
- * capability into the slot (subsys64 owner_cap), so a different Win98 process presenting a spoofed pid or
- * capability_id is refused by shz_w64_gui_subject_authorized().
+ * Header-only (static inline): included by bridge.c after shz_ipc.h/shz_w64_owner.h, so the existing VxD object list
+ * (build.py, tests/test_vxd.py) is unchanged. The frozen contract header is consumed unchanged; it deliberately keeps
+ * the auth opcodes out of shz_w64_endpoint_op_allowed, and this VxD-local predicate is that separate change.
  *
- * Handle lifetime (batch 5): VWIN32 sends DIOC_OPEN (code 0) per CreateFile and DIOC_CLOSEHANDLE (code -1) per
- * CloseHandle, both with the caller's tagProcess. The VxD keeps a per-process count of live NTWRAP9X handles; an
- * identity is derivable only while that count is nonzero, and only the LAST close retires it (a second handle, e.g. a
- * PMA client, closing no longer drops the W64 identity). A close with no recorded open retires the process
- * (fail closed); an open the table cannot record leaves the process without a derivable identity (W64 denied,
- * the handle itself still opens so PMA/account semantics are unchanged). The count table is guarded by the bound
- * interrupt-disable lock (uniprocessor VMM), never by the W64 admission token, because opens/closes are not admitted.
- *
- * Locking: derive/stamp/reset run under bridge.c's W64 admission token. Departure may arrive while that token is
- * held elsewhere; it is then queued in a bounded lock-free list and applied before the next derive. If that list
- * overflows, every identity is retired (fail closed: existing views become DENIED, nothing is granted). */
+ * Contract for a native endpoint (NTW32) auth SEND (NTWV_IOCTL_W64_SEND, no new IOCTL):
+ *   input_bytes == 64 + sizeof(shz_w64_auth_req_t) == 248 exactly (no pool data, nothing trailing);
+ *   header: opcode 0x20A..0x20C, flags 0, status 0, buffer_offset/length 0, payload_length 184,
+ *           capability_id 0 or the caller's own OPEN owner_id (anything else is ACCESS_DENIED); the VxD stamps
+ *           capability_id/src/dst/generation itself;
+ *   payload: shz_w64_auth_req_check() must accept it with the stamped owner (else INVALID_PARAMETER);
+ *   at most one auth request outstanding per owner (second one BUSY until its reply is RECVed or the owner departs).
+ * The reply arrives on the caller's own mailbox only (capability_id echo): flags REPLY, same opcode/request_id,
+ * payload either a valid 24-byte shz_w64_auth_reply_t or empty with a non-OK status. A malformed Core reply to an
+ * accepted request is delivered sanitized (status SHZ_E_PROTO, no payload), never dropped and never forwarded raw.
+ */
 #ifndef NTWV_W64_OWNER_H
 #define NTWV_W64_OWNER_H
-#include <stdint.h>
-#include "../../shizukudos/abi/shz_abi.h"
-#include "../../shizukudos/abi/shz_w64_gui.h"
-
-#ifndef NTWV_ERROR_ACCESS_DENIED
-#define NTWV_ERROR_ACCESS_DENIED 5u
+#ifndef SHZ_W64_OWNER_H
+#error "include shizukudos/abi/shz_w64_owner.h (with the VxD SHZ_IPC_MEMCPY/MEMSET) before w64_owner.h"
 #endif
-#define NTWV_W64_OWNER_SLOTS 16u
-#define NTWV_W64_OWNER_DEFERRED 8u
-#define NTWV_W64_OWNER_HANDLE_PROCS 32u
+#include "bridge.h"
 
-/* Installed by native.c at init from Get_Sys_VM_Handle; host tests set a model value. 0 = unbound => deny all. */
-void ntwv_w64_owner_bind_system_vm(uint32_t system_vm);
-/* Installed by native.c at init (ntwv_irq_enter/leave); host tests supply a model. Unbound => opens are not recorded. */
-void ntwv_w64_owner_bind_lock(uintptr_t (*enter)(void *opaque), void (*leave)(void *opaque, uintptr_t saved));
-/* Any context, after a successful DIOC_OPEN: count one live handle of (system VM, tagProcess). 0 when recorded;
- * NTWV_ERROR_ACCESS_DENIED (not the bound system VM / tag 0 / no lock) or NTWV_ERROR_BUSY (table full) otherwise. */
-uint32_t ntwv_w64_owner_handle_open(uint32_t vm, uint32_t process);
-/* Any context, on DIOC_CLOSEHANDLE: drop one handle; the last one (or an unrecorded close) retires the identity. */
-void ntwv_w64_owner_handle_close(uint32_t process);
-/* Live recorded handles of process (diagnostics / derive precondition). */
-uint32_t ntwv_w64_owner_handles(uint32_t process);
-/* Locked (W64 admission held). 0 and *capability on success; else an NTWV_ERROR_* code and no capability. */
-uint32_t ntwv_w64_owner_derive(uint32_t vm, uint32_t process, uint32_t channel_generation, uint32_t *capability);
-/* Locked. Overwrite the app-supplied identity: stamp=1 -> derived capability, stamp=0 (trusted in-VxD endpoint
- * send) -> clear the DERIVED bit so only a stamped request can ever carry it. */
-void ntwv_w64_owner_stamp(shz_msg_hdr_t *header, int stamp, uint32_t capability);
-/* Locked. Channel teardown: retire every identity (the counter is preserved, so no token is reissued). */
-void ntwv_w64_owner_reset_locked(void);
-/* Any context: queue retirement of tagProcess (last DIOC_CLOSEHANDLE / process departure). */
-void ntwv_w64_owner_departed(uint32_t process);
-/* Locked. 1 while cap is the derived identity of a live (not retired) owner. */
-int ntwv_w64_owner_cap_live(uint32_t capability);
-/* Diagnostics (host tests): live identities, tokens issued. */
-uint32_t ntwv_w64_owner_live(void);
-uint32_t ntwv_w64_owner_issued(void);
+#define NTWV_W64_AUTH_FRAME_BYTES ((uint32_t)(sizeof(shz_msg_hdr_t) + sizeof(shz_w64_auth_req_t)))
+_Static_assert(sizeof(shz_msg_hdr_t) + sizeof(shz_w64_auth_req_t) == 248u, "auth SEND frame size");
+_Static_assert(sizeof(shz_msg_hdr_t) + sizeof(shz_w64_auth_req_t) <= NTWV_W64_SEND_MAX, "auth frame fits one SEND");
+
+/* Non-elidable scrub for buffers that held credentials (or may have). */
+SHZ_IPC_INLINE void ntwv_wipe(void *p, size_t n)
+{
+    volatile uint8_t *v = (volatile uint8_t *)p;
+    while (n--)
+        *v++ = 0;
+}
+
+/* The agreed raw SEND allowlist for a native endpoint owner: the frozen endpoint list (GUI disabled) plus the three
+ * typed broker requests with flags exactly 0. SHUTDOWN, OWNER_CONTROL, events, PMA 0x300..0x3ff stay refused. */
+SHZ_IPC_INLINE int ntwv_w64_owner_op_allowed(uint32_t opcode, uint16_t flags)
+{
+    if (shz_w64_auth_op(opcode))
+        return flags == 0;
+    return shz_w64_endpoint_op_allowed(opcode, flags, 0);
+}
+
+/* Strict inline admission of an auth SEND before anything is forwarded. `h` is the application header copy,
+ * `payload` the copied inline bytes, `in_bytes` the DIOC input length, `owner` the VxD-derived owner id and
+ * `scratch` a VxD-owned bounded copy that is wiped here on every path. Returns 0 or an NTWV_ERROR_*. */
+SHZ_IPC_INLINE uint32_t ntwv_w64_auth_admit(const shz_msg_hdr_t *h, const uint8_t *payload, uint32_t in_bytes,
+                                           uint32_t owner, shz_w64_auth_req_t *scratch)
+{
+    shz_msg_hdr_t stamped;
+    int rc;
+    if (!shz_w64_auth_op(h->opcode) || h->flags != 0)
+        return NTWV_ERROR_ACCESS_DENIED;
+    /* The application may not name another owner or the privileged authority. 0 or its own id only. */
+    if (!shz_w64_owner_id_valid(owner) || (h->capability_id != SHZ_W64_OWNER_NONE && h->capability_id != owner))
+        return NTWV_ERROR_ACCESS_DENIED;
+    if (in_bytes != NTWV_W64_AUTH_FRAME_BYTES || h->payload_length != sizeof *scratch || h->status != 0 ||
+        h->buffer_offset || h->buffer_length)
+        return NTWV_ERROR_INVALID_PARAMETER;
+    ntwv_copy(&stamped, h, sizeof stamped);
+    stamped.capability_id = owner;
+    rc = shz_w64_auth_req_check(&stamped, payload, scratch);
+    ntwv_wipe(scratch, sizeof *scratch);
+    if (rc == SHZ_E_DENIED)
+        return NTWV_ERROR_ACCESS_DENIED;
+    return rc == SHZ_OK ? 0u : NTWV_ERROR_INVALID_PARAMETER;
+}
+
+/* Strict check of a Core auth reply (header already validated for domain/generation/flags by the pump). */
+SHZ_IPC_INLINE int ntwv_w64_auth_reply_ok(const shz_msg_hdr_t *h, const uint8_t *payload)
+{
+    shz_w64_auth_reply_t r;
+    if (h->flags != SHZ_MSGF_REPLY || !shz_w64_auth_op(h->opcode))
+        return 0;
+    if (h->payload_length == 0)
+        return h->status != SHZ_OK;           /* generic refusal (e.g. owner not admitted) */
+    if (h->payload_length != sizeof r)
+        return 0;
+    ntwv_copy(&r, payload, sizeof r);
+    if (r.size != sizeof r || r.status != h->status || r.reserved)
+        return 0;
+    return h->status == SHZ_OK || (!r.auth_epoch && !r.subject_flags);
+}
+
+/* Replace a malformed auth reply frame in place by a terminal SHZ_E_PROTO reply without payload. */
+SHZ_IPC_INLINE void ntwv_w64_auth_reply_sanitize(uint8_t *frame)
+{
+    shz_msg_hdr_t h;
+    ntwv_copy(&h, frame, sizeof h);
+    ntwv_wipe(frame + sizeof h, SHZ_MSG_SLOT_SIZE - sizeof h);
+    h.status = SHZ_E_PROTO;
+    h.payload_length = 0;
+    h.payload_offset = 0;
+    h.message_size = (uint32_t)sizeof h;
+    h.checksum = 0;
+    ntwv_copy(frame, &h, sizeof h);
+    h.checksum = shz_msg_checksum((const shz_msg_hdr_t *)frame);
+    ntwv_copy(frame, &h, sizeof h);
+}
 #endif

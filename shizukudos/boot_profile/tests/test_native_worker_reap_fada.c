@@ -44,6 +44,23 @@ void thread_sleep_ms(uint64_t milliseconds)
 }
 void sem_init(ksem_t *sem, int count) { sem->count = count; sem->waiters = NULL; }
 void kprintf(const char *format, ...) { (void)format; }
+/* Owner revocation is not exercised here: a bound fixture must never reach it. */
+void process_terminate(process_t *p, int64_t code, int faulted)
+{
+    (void)p; (void)code; (void)faulted;
+    fprintf(stderr, "unexpected owner revocation in reap boundary fixture\n");
+    exit(2);
+}
+/* C6 broker: fixture slots are development-admitted (broker_owner 0); any broker call is a fixture violation. */
+int shz_auth_endpoint_binding_current(uint64_t owner, uint64_t epoch, process_t *child)
+{ (void)owner; (void)epoch; (void)child; fprintf(stderr, "unexpected broker binding check\n"); exit(2); }
+int shz_auth_endpoint_child_owned(uint64_t owner, uint64_t epoch, process_t *child)
+{ (void)owner; (void)epoch; (void)child; fprintf(stderr, "unexpected broker child-owned check\n"); exit(2); }
+int32_t shz_auth_endpoint_query(uint64_t owner, shz_subject *out, uint64_t *epoch)
+{ (void)owner; (void)out; (void)epoch; fprintf(stderr, "unexpected broker query\n"); exit(2); }
+/* bind_channel seeds the broker's channel epoch; no login exists in this fixture, so nothing to drop. */
+void shz_auth_endpoint_epoch_reset(uint64_t channel_epoch) { (void)channel_epoch; }
+void shz_auth_endpoint_depart(uint64_t owner) { (void)owner; fprintf(stderr, "unexpected broker depart\n"); exit(2); }
 void kpanic(const char *format, ...)
 {
     fprintf(stderr, "unexpected production panic: %s\n", format);
@@ -87,6 +104,9 @@ static w64_slot_t *fixture(int teardown, int terminated, int threads_alive)
     slot->pid = test_process.pid;
     slot->proc = &test_process;
     slot->state = SHZ_W64_PS_STARTED;
+    /* CREATE-time owner binding (w64_owner_service.h): an unbound slot is revoked, never pumped. */
+    w64_owner_bind(&slot->own, shz_w64_owner_make(0, 1), chan->generation, slot->gen);
+    w64_owner_attach_process(&slot->own, &test_process, test_process.pid);
     return slot;
 }
 

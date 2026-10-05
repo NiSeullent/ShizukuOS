@@ -10,12 +10,39 @@
  * Order of the destructive phase: wipe the old partition tables, write + verify p1, format/populate + verify p2,
  * format p3, write + verify the new partition tables, write the install log. A disk is left with a partition table
  * only if every earlier step verified.
+ *
+ * Bootable-target coherence (checked before the first destructive write, then independently read back):
+ *   - boot closure: the manifest's esp.files must list the UEFI fallback loader \EFI\BOOT\BOOTX64.EFI, the boot
+ *     policy \EFI\SHIZUKU\BOOT.INI, Core64 (KERNEL64.BIN), Core32 (KERNEL32.BIN) and the boot runtime WIN64.IMG;
+ *     with BIOS boot also K64STUB.ELF, KERNEL64S.BIN, syslinux ldlinux.sys/ldlinux.c32 and the 440-byte MBR code;
+ *     the system tree must carry the Win64 runtime (\SHZ\SYS64 ntdll/kernel32);
+ *   - source closure: SYSTEM.ARC is hashed whole against system.archive_sha256, every selected manifest file must be
+ *     in the archive with its size, and ESP.SIM is fully expanded and hashed before anything is erased;
+ *   - capacity/alignment: every partition starts on a 1 MiB boundary, esp.first_lba (the BPB hidden-sector value)
+ *     is mandatory and equals p1's start, the ESP file set fits the ESP image;
+ *   - readback: after p1 is written its FAT32 is decoded again from the target disk (fat32fmt.c reader) and every
+ *     esp.files member, BOOTX64.EFI included, is re-hashed from the disk; p2 files and the generated driver catalog
+ *     \SHZ\DRIVERS\CATALOG.INI are re-read through the independent ShizukuFS reader.
+ *   - boot manifest: the payload must carry \SHZDOS\SHZBOOT.MAN (template: generation 0, install_id zero) and its
+ *     manifest.json "boot_manifest" description. Before the destructive phase the previous target's SHZBOOT.MAN is read
+ *     (only from a valid FAT32 ESP at p1's LBA) to choose install_generation = previous + 1, else 1; install_id is 16
+ *     nonzero bytes of platform RNG output (clock/disk-identifier hash only when the RNG fails, logged as weak). After
+ *     p1 verified, header bytes [24,32) and [72,88) are stamped in place with fat32_overwrite_file (same size, data
+ *     clusters only, no allocation), the file is re-read from a fresh FAT32 mount and verified (magic, header, entry
+ *     table hash, generation, id, every pinned blob re-hashed from the disk). The whole-ESP sha256 in the install
+ *     record and manifest.json therefore describe the image as written before the stamp.
+ * Install record: one 512-byte sector "SHZINSR1" at LBA (p1 start - 1), inside the 1 MiB alignment gap that no GPT
+ * structure or partition uses. It is written (and read back) WRITING when the destructive phase begins, FAILED with
+ * the stage and reason when a later step fails, COMPLETE after the partition tables and the log verified. A target
+ * that fails half way is therefore observable even though it has no partition table. Refusals before the
+ * destructive phase write nothing to the disk.
  */
 #include "plat.h"
 #include "gpt.h"
 #include "sfsw.h"
 #include "fat32fmt.h"
 #include "textparse.h"
+#include "../../supervisor/src/boot_manifest.h"       /* frozen SHZBOOT.MAN layout (boot-core64 owner) */
 #include <stdarg.h>
 #include <string.h>
 #ifdef _WIN32
@@ -33,6 +60,30 @@ int shz_vsnprintf(char *buf, size_t cap, const char *fmt, va_list ap);          
 #define MIB 1048576ull
 #define MIN_SYSTEM_MIB 64ull
 #define SIMG_MAGIC "SHZSIMG1"
+#define INSTALL_RECORD_MAGIC "SHZINSR1"
+#define INSTALL_RECORD_VERSION 1u
+#define DRIVER_CATALOG_PATH "/SHZ/DRIVERS/CATALOG.INI"
+#define DRIVER_CATALOG_SCHEMA "shizuku-driver-catalog/2"
+#define DRIVER_CATALOG_MAX_BYTES 16384u
+#define DRIVER_CATALOG_MAX_ROWS 32u
+#define DRIVER_MATCH_MAX 8u
+#define BMAN_ESP_PATH "/SHZDOS/" SHZ_BMAN_BLOB_NAME
+#define BMAN_GEN_OFFSET 24u
+#define BMAN_ID_OFFSET 72u
+enum { INSTID_RNG = 1, INSTID_WEAK = 2 };
+
+enum { REC_WRITING = 1, REC_FAILED = 2, REC_COMPLETE = 3 };
+enum { STAGE_PREFLIGHT = 1, STAGE_WIPE, STAGE_ESP, STAGE_ESP_VERIFY, STAGE_SYSTEM, STAGE_SYSTEM_VERIFY, STAGE_WIN98,
+       STAGE_GPT, STAGE_LOG, STAGE_DONE };
+
+/* Files the installed ESP must carry for the target to boot without the installer medium. */
+static const char *const uefi_closure[][2] = {
+    {"/EFI/BOOT/BOOTX64.EFI", "UEFI fallback loader"}, {"/EFI/SHIZUKU/BOOT.INI", "boot policy"},
+    {"/SHZDOS/KERNEL64.BIN", "Core64"}, {"/SHZDOS/KERNEL32.BIN", "Core32"}, {"/SHZDOS/WIN64.IMG", "boot runtime"}, {0, 0}};
+static const char *const bios_closure[][2] = {
+    {"/SHZDOS/K64STUB.ELF", "BIOS Multiboot stub"}, {"/SHZDOS/KERNEL64S.BIN", "BIOS Core64 image"},
+    {"/syslinux/ldlinux.sys", "BIOS syslinux core"}, {"/syslinux/ldlinux.c32", "BIOS syslinux module"}, {0, 0}};
+static const char *const runtime_closure[] = {"/SHZ/SYS64/ntdll.dll", "/SHZ/SYS64/kernel32.dll", 0};
 
 typedef struct config {
     int power;
@@ -71,7 +122,41 @@ typedef struct ctx {
     char fail[160];
     uint64_t started;
     uint64_t files_ok, bytes_ok;
+    int stage, record_armed, bios_boot;
+    const setup_plan_t *reviewed_plan;
+    const setup_control_t *control;
+    uint64_t io_bytes, payload_files, notified_bytes, notified_files;
+    int notified_phase;
+    int cleanup, can_cancel, layout_error;
+    uint64_t record_lba;
+    uint8_t esp_sha[32], manifest_sha[32];
+    uint64_t esp_files_ok;
+    uint64_t bman_gen, bman_prev_gen;           /* generation stamped on this target; previous target's (0 = none) */
+    uint8_t bman_id[16], bman_entries[32];      /* install_id; entries_sha256 from manifest.json boot_manifest */
+    uint32_t bman_id_source;                    /* INSTID_* */
 } ctx_t;
+
+/* Events describe completed I/O and verification. They are not a time estimate. */
+static void notify(ctx_t *C, int complete)
+{
+    setup_event_t e;
+    if (!C->control || !C->control->event) return;
+    if(!complete&&C->notified_phase==C->stage&&C->notified_files==C->files_ok&&
+       C->io_bytes-C->notified_bytes<IOBUF)return;
+    C->notified_phase=C->stage;C->notified_files=C->files_ok;C->notified_bytes=C->io_bytes;
+    memset(&e, 0, sizeof e);
+    e.phase=(uint32_t)C->stage; e.cancellable=(uint32_t)C->can_cancel;
+    e.destructive=(uint32_t)C->record_armed; e.verified_complete=(uint32_t)complete;
+    e.io_bytes=C->io_bytes; e.files_done=C->files_ok; e.files_total=C->payload_files;
+    C->control->event(C->control->ctx,&e);
+}
+static void phase(ctx_t *C, int value, int cancellable)
+{ C->stage=value; C->can_cancel=cancellable; notify(C,0); }
+static int cancellation(ctx_t *C)
+{
+    return !C->cleanup && C->can_cancel && C->control && C->control->cancel_requested &&
+           C->control->cancel_requested(C->control->ctx);
+}
 
 static int sncmp(const char *a, const char *b, size_t n)                 /* the Win64 CRT has no strncmp */
 {
@@ -97,6 +182,14 @@ static void log_only(ctx_t *C, const char *text)
         memcpy(C->log + C->log_len, text, n);
         C->log_len += n;
     }
+}
+
+static void setup_snprintf(char *buf, size_t cap, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    setup_vsnprintf(buf, cap, fmt, ap);
+    va_end(ap);
 }
 
 static void say(ctx_t *C, const char *fmt, ...)
@@ -335,6 +428,77 @@ static int package_selected(ctx_t *C, const char *pkg)
     return 0;
 }
 
+static const jnode_t *list_find(const jnode_t *list, const char *path)
+{
+    const jnode_t *x;
+    for (x = list ? list->kid : 0; x; x = x->next)
+        if (json_str(x, "path") && text_ieq(json_str(x, "path"), path)) return x;
+    return 0;
+}
+
+/* Boot/runtime closure, ESP capacity and alignment, checked before any target is selected or written. */
+static int check_closure(ctx_t *C)
+{
+    const jnode_t *root = C->man.root, *esp = json_get(root, "esp"), *sys = json_get(root, "system");
+    const jnode_t *files = json_get(esp, "files"), *sfiles = json_get(sys, "files"), *x, *y;
+    uint64_t esp_bytes = 0, first = 0, sum = 0, v;
+    uint8_t sha[32];
+    unsigned i;
+    json_u64(esp, "bytes", &esp_bytes);
+    if (json_u64(esp, "first_lba", &first) || !first || first % (MIB / 512))
+        return failf(C, "manifest.json: esp.first_lba (the ESP BPB hidden-sector value) must be present and 1 MiB aligned");
+    if (esp_bytes % 4096) return failf(C, "manifest.json: esp.bytes is not a multiple of the 4 KiB image block");
+    if (!files || files->type != J_ARR) return failf(C, "manifest.json: esp.files (the ESP boot closure) missing");
+    for (x = files->kid; x; x = x->next) {
+        const char *p = json_str(x, "path");
+        if (!p || p[0] != '/' || json_u64(x, "bytes", &v) || v > 0xffffffffull || !json_str(x, "sha256") ||
+            unhex_sha(json_str(x, "sha256"), sha))
+            return failf(C, "manifest.json: malformed esp.files entry");
+        for (y = files->kid; y != x; y = y->next)
+            if (text_ieq(json_str(y, "path"), p)) return failf(C, "manifest.json: esp.files lists %s twice", p);
+        sum += (v + 4095) / 4096 * 4096;
+    }
+    if (sum > esp_bytes) return failf(C, "manifest.json: the ESP files (%llu bytes) do not fit the %llu-byte ESP image",
+                                      (unsigned long long)sum, (unsigned long long)esp_bytes);
+    for (i = 0; uefi_closure[i][0]; ++i)
+        if (!list_find(files, uefi_closure[i][0]))
+            return failf(C, "manifest.json: boot closure incomplete: %s (%s) is not on the ESP", uefi_closure[i][0], uefi_closure[i][1]);
+    C->bios_boot = json_str(esp, "bios_boot") != 0;
+    if (C->bios_boot) {
+        for (i = 0; bios_closure[i][0]; ++i)
+            if (!list_find(files, bios_closure[i][0]))
+                return failf(C, "manifest.json: BIOS boot closure incomplete: %s (%s) is not on the ESP", bios_closure[i][0],
+                             bios_closure[i][1]);
+        if (C->cfg.bios_boot_code && !json_get(root, "mbr"))
+            return failf(C, "manifest.json: esp.bios_boot is set but the payload has no mbr boot code");
+    }
+    for (i = 0; runtime_closure[i]; ++i) {
+        const jnode_t *f = list_find(sfiles, runtime_closure[i]);
+        const char *pkg = f ? json_str(f, "package") : 0;
+        if (!f || (pkg && strcmp(pkg, "base")))
+            return failf(C, "manifest.json: runtime closure incomplete: %s is not a base system file", runtime_closure[i]);
+    }
+    if (list_find(sfiles, DRIVER_CATALOG_PATH)) return failf(C, "manifest.json: %s is generated by setup", DRIVER_CATALOG_PATH);
+    {
+        const jnode_t *bm = json_get(root, "boot_manifest"), *st = json_get(bm, "stamp"), *f = list_find(files, BMAN_ESP_PATH);
+        uint64_t go = 0, io = 0, bytes = 0, fb = 0;
+        const char *ts = json_str(bm, "template_sha256");
+        if (!f || !bm || !st || !ts || !json_str(bm, "path") || !text_ieq(json_str(bm, "path"), BMAN_ESP_PATH) ||
+            json_u64(st, "generation_offset", &go) || json_u64(st, "install_id_offset", &io) || go != BMAN_GEN_OFFSET ||
+            io != BMAN_ID_OFFSET || json_u64(bm, "bytes", &bytes) || json_u64(f, "bytes", &fb) || bytes != fb ||
+            bytes < sizeof(shz_bman_header_t) + sizeof(shz_bman_entry_t) || bytes > SHZ_BMAN_MAX_BYTES ||
+            (bytes - sizeof(shz_bman_header_t)) % sizeof(shz_bman_entry_t) || !text_ieq(ts, json_str(f, "sha256")) ||
+            !json_str(bm, "entries_sha256") || unhex_sha(json_str(bm, "entries_sha256"), C->bman_entries))
+            return failf(C, "manifest.json: the payload has no valid installed-target boot manifest %s (boot_manifest/esp.files)",
+                         BMAN_ESP_PATH);
+    }
+    if (!json_str(sys, "archive_sha256") || unhex_sha(json_str(sys, "archive_sha256"), sha))
+        return failf(C, "manifest.json: system.archive_sha256 missing (source closure)");
+    say(C, "boot closure: UEFI fallback %s, Core64, Core32, boot runtime%s; Win64 runtime in \\SHZ\\SYS64",
+        uefi_closure[0][0], C->bios_boot ? ", BIOS chain (MBR -> ESP VBR -> syslinux -> K64STUB)" : "");
+    return 0;
+}
+
 static int read_manifest(ctx_t *C)
 {
     char path[240], err[96];
@@ -367,7 +531,12 @@ static int read_manifest(ctx_t *C)
     for (x = list->kid; x; x = x->next)
         if (!json_str(x, "path") || json_str(x, "path")[0] != '/') return failf(C, "manifest.json: malformed system.dirs entry");
     say(C, "manifest: %s, %s", json_str(root, "product") ? json_str(root, "product") : "(no product)", MANIFEST_SCHEMA);
-    return 0;
+    {
+        void *h = C->P->sha_begin(C->P->ctx);
+        C->P->sha_update(C->P->ctx, h, C->manifest_text, (uint32_t)C->manifest_len);
+        C->P->sha_end(C->P->ctx, h, C->manifest_sha);
+    }
+    return check_closure(C);
 }
 
 /* ---------------------------------------------------------------- disks */
@@ -377,9 +546,12 @@ static int disk_rw(ctx_t *C, int write, uint64_t lba, uint64_t count, void *buf)
     const uint32_t max = C->P->max_io_sectors ? C->P->max_io_sectors : 128;
     while (count) {
         const uint32_t n = count < max ? (uint32_t)count : max;
-        const int st = write ? C->P->disk_write(C->P->ctx, C->disk, lba, n, p) : C->P->disk_read(C->P->ctx, C->disk, lba, n, p);
+        int st;
+        if (cancellation(C)) return failf(C, "installation cancelled at an I/O checkpoint");
+        st = write ? C->P->disk_write(C->P->ctx, C->disk, lba, n, p) : C->P->disk_read(C->P->ctx, C->disk, lba, n, p);
         if (st) return failf(C, "%s error on %s at LBA %llu (%u sectors)", write ? "write" : "read", C->di.name,
                              (unsigned long long)lba, n);
+        C->io_bytes += (uint64_t)n * C->ss; notify(C,0);
         lba += n;
         count -= n;
         p += (size_t)n * C->ss;
@@ -392,7 +564,9 @@ static int starts_with(const char *s, const char *p) { return !sncmp(s, p, strle
 static uint64_t need_bytes(ctx_t *C)
 {
     uint64_t esp = 0;
+    const uint64_t lim = (1ull << 44);                     /* 16 TiB per term: no sum below can wrap */
     json_u64(json_get(C->man.root, "esp"), "bytes", &esp);
+    if (esp >= lim || C->cfg.system_mib >= lim / MIB || C->cfg.win98_mib >= lim / MIB) return ~0ull;
     return esp + (C->cfg.system_mib ? C->cfg.system_mib : MIN_SYSTEM_MIB) * MIB + C->cfg.win98_mib * MIB + 4 * MIB;
 }
 
@@ -408,7 +582,7 @@ static int select_target(ctx_t *C)
         int ok;
         uint64_t bytes;
         if (C->P->disk_info(C->P->ctx, i, &d)) continue;
-        bytes = d.sectors * d.sector_size;
+        bytes = d.sector_size && d.sectors > ~0ull / d.sector_size ? ~0ull : d.sectors * d.sector_size;
         ok = !(d.flags & (PLAT_DISK_PARTITION | PLAT_DISK_READONLY)) && d.sector_size == 512 && bytes >= minb;
         say(C, "  [%u] %s %llu MiB, %u-byte sectors, serial '%s'%s%s", i, d.name, (unsigned long long)(bytes / MIB),
             d.sector_size, d.serial, d.flags & PLAT_DISK_PARTITION ? ", partition" : "",
@@ -519,6 +693,14 @@ static int plan_layout(ctx_t *C)
     if (C->plast[C->nparts - 1] > last)
         return failf(C, "layout does not fit: needs LBA %llu, last usable is %llu", (unsigned long long)C->plast[C->nparts - 1],
                      (unsigned long long)last);
+    {
+        int i;
+        for (i = 0; i < C->nparts; ++i)
+            if (C->pfirst[i] % align || C->plast[i] < C->pfirst[i] || (i && C->pfirst[i] <= C->plast[i - 1]))
+                return failf(C, "layout: p%d is not 1 MiB aligned or overlaps", i + 1);
+    }
+    C->record_lba = C->pfirst[0] - 1;
+    if (C->ss != 512 || C->record_lba < first) return failf(C, "layout: no room for the install record before p1");
     say(C, "layout: p1 ESP LBA %llu-%llu (%llu MiB), p2 ShizukuFS LBA %llu-%llu (%llu MiB)%s",
         (unsigned long long)C->pfirst[0], (unsigned long long)C->plast[0], (unsigned long long)(esp_bytes / MIB),
         (unsigned long long)C->pfirst[1], (unsigned long long)C->plast[1],
@@ -531,18 +713,21 @@ static int plan_layout(ctx_t *C)
 
 static uint32_t le32(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
 static uint64_t le64(const uint8_t *p) { return le32(p) | (uint64_t)le32(p + 4) << 32; }
+static void put64le(uint8_t *p, uint64_t v);
 
 /* ---------------------------------------------------------------- p1: ESP
  * Payload ESP.SIM ("SHZSIMG1" sparse image): 64-byte header {magic[8], u32 block_size (4096), u32 0, u32 chunk_count,
  * u32 0, u64 image_bytes, u8 sha256[32] of the expanded image}, then chunk_count x {u64 first_block, u32 blocks, u32 0}
  * in ascending order, then the chunks' data. Blocks outside every chunk are zero. The installer writes EVERY block,
  * zeros included, so the partition equals esp.img byte for byte. */
-static int write_esp(ctx_t *C)
+/* One pass over ESP.SIM. write=0: source-closure pre-pass (expand and hash only, before anything is erased).
+ * write=1: expand, hash and write every block to p1. The expanded image must hash to esp.sha256 either way. */
+static int esp_pass(ctx_t *C, int write)
 {
     const jnode_t *esp = json_get(C->man.root, "esp");
     char path[240], hexs[65];
     void *h, *s;
-    uint64_t fsize, total = 0, block, blocks, chunk_i = 0, nchunks, cur_first = 0, cur_count = 0, data_off;
+    uint64_t fsize, total = 0, block, blocks, chunk_i = 0, nchunks, cur_first = 0, cur_count = 0, data_off, prev_end = 0;
     uint8_t hdr[64], want[32], got[32], ent[16];
     uint32_t bs;
     join(C, json_str(esp, "image"), path, sizeof path);
@@ -555,16 +740,18 @@ static int write_esp(ctx_t *C)
     }
     bs = le32(hdr + 8);
     nchunks = le32(hdr + 16);
-    if (bs != 4096 || le64(hdr + 24) != total || memcmp(hdr + 32, want, 32)) {
+    if (bs != 4096 || le64(hdr + 24) != total || memcmp(hdr + 32, want, 32) || 64 + nchunks * 16 > fsize) {
         C->P->file_close(C->P->ctx, h);
-        return failf(C, "%s: block size, image size or image sha256 does not match the manifest", path);
+        return failf(C, "%s: block size, image size, chunk table or image sha256 does not match the manifest", path);
     }
-    say(C, "p1: writing %s (%llu MiB, %llu data chunk(s)) to LBA %llu", json_str(esp, "image"),
-        (unsigned long long)(total / MIB), (unsigned long long)nchunks, (unsigned long long)C->pfirst[0]);
+    if (write)
+        say(C, "p1: writing %s (%llu MiB, %llu data chunk(s)) to LBA %llu", json_str(esp, "image"),
+            (unsigned long long)(total / MIB), (unsigned long long)nchunks, (unsigned long long)C->pfirst[0]);
     blocks = total / bs;
     data_off = 64 + nchunks * 16;
     s = C->P->sha_begin(C->P->ctx);
     for (block = 0; block < blocks;) {
+        if(cancellation(C)){C->P->sha_end(C->P->ctx,s,got);C->P->file_close(C->P->ctx,h);return failf(C,"installation cancelled at an ESP checkpoint");}
         const uint32_t per = IOBUF / bs;
         uint32_t i;
         for (i = 0; i < per && block < blocks; ++i, ++block) {
@@ -575,10 +762,12 @@ static int write_esp(ctx_t *C)
                 cur_first = le64(ent);
                 cur_count = le32(ent + 8);
                 ++chunk_i;
-                if (cur_first + cur_count > blocks || data_off + cur_count * bs > fsize) {
+                if (!cur_count || cur_first < prev_end || cur_first > blocks || cur_count > blocks - cur_first ||
+                    data_off + cur_count * bs > fsize) {                       /* ascending, disjoint, inside both */
                     C->P->file_close(C->P->ctx, h);
-                    return failf(C, "%s: chunk table out of range", path);
+                    return failf(C, "%s: chunk table out of range or unordered", path);
                 }
+                prev_end = cur_first + cur_count;
             }
             if (block >= cur_first && block < cur_first + cur_count) {
                 if (C->P->file_read(C->P->ctx, h, data_off + (block - cur_first) * bs, dst, bs)) {
@@ -590,7 +779,7 @@ static int write_esp(ctx_t *C)
             }
         }
         C->P->sha_update(C->P->ctx, s, C->buf, i * bs);
-        if (disk_rw(C, 1, C->pfirst[0] + (block - i) * (bs / C->ss), (uint64_t)i * (bs / C->ss), C->buf)) {
+        if (write && disk_rw(C, 1, C->pfirst[0] + (block - i) * (bs / C->ss), (uint64_t)i * (bs / C->ss), C->buf)) {
             C->P->file_close(C->P->ctx, h);
             return -1;
         }
@@ -598,9 +787,23 @@ static int write_esp(ctx_t *C)
     C->P->file_close(C->P->ctx, h);
     C->P->sha_end(C->P->ctx, s, got);
     hex(got, 32, hexs);
+    if (chunk_i != nchunks) return failf(C, "%s: %llu chunk(s) beyond the image", path, (unsigned long long)(nchunks - chunk_i));
     if (memcmp(got, want, 32)) return failf(C, "p1: the ESP image in the payload does not match the manifest (sha256 %s)", hexs);
-    say(C, "p1: payload image sha256 %s matches the manifest", hexs);
+    memcpy(C->esp_sha, got, 32);
+    say(C, write ? "p1: payload image sha256 %s matches the manifest" : "source closure: ESP.SIM expands to sha256 %s = manifest", hexs);
+    return 0;
+}
+
+static int write_esp(ctx_t *C)
+{
+    char hexs[65];
+    void *s;
+    uint64_t block, total = 0;
+    uint8_t got[32];
+    json_u64(json_get(C->man.root, "esp"), "bytes", &total);
+    if (esp_pass(C, 1)) return -1;
     if (C->P->disk_flush(C->P->ctx, C->disk)) return failf(C, "flush failed");
+    phase(C,STAGE_ESP_VERIFY,1);
     /* read back the whole partition */
     s = C->P->sha_begin(C->P->ctx);
     for (block = 0; block < total / C->ss;) {
@@ -611,9 +814,313 @@ static int write_esp(ctx_t *C)
     }
     C->P->sha_end(C->P->ctx, s, got);
     hex(got, 32, hexs);
-    if (memcmp(got, want, 32)) return failf(C, "p1: read-back sha256 %s differs from the manifest", hexs);
+    if (memcmp(got, C->esp_sha, 32)) return failf(C, "p1: read-back sha256 %s differs from the manifest", hexs);
     say(C, "p1: read back %llu MiB from the disk, sha256 %s = manifest esp.sha256: OK", (unsigned long long)(total / MIB), hexs);
     return 0;
+}
+
+/* Independent file-level readback of the installed ESP: decode its FAT32 from the target disk (not from the payload)
+ * and re-hash every esp.files member, so the UEFI fallback loader, boot policy, Core32/64 and the boot runtime are
+ * proven reachable by path on the target itself. */
+typedef struct { ctx_t *C; void *sha; uint8_t *cap; uint32_t cap_len, cap_max; } esp_sink_t;
+
+static int p1_read(void *ctx, uint64_t sector, uint32_t count, void *buf)
+{
+    ctx_t *C = ctx;
+    if (sector + count > C->plast[0] - C->pfirst[0] + 1) return -1;
+    return disk_rw(C, 0, C->pfirst[0] + sector, count, buf) ? -1 : 0;
+}
+
+static int esp_sink(void *ctx, const void *data, uint32_t len)
+{
+    esp_sink_t *k = ctx;
+    k->C->P->sha_update(k->C->P->ctx, k->sha, data, len);
+    if (k->cap) {
+        if (len > k->cap_max - k->cap_len) return 1;
+        memcpy(k->cap + k->cap_len, data, len);
+        k->cap_len += len;
+    }
+    return 0;
+}
+
+static int bman_field(const char *f, unsigned size)
+{
+    unsigned i;
+    for (i = 0; i < size && f[i]; ++i) if ((unsigned char)f[i] < 0x20 || (unsigned char)f[i] > 0x7e) return 0;
+    if (i == size) return 0;
+    for (; i < size; ++i) if (f[i]) return 0;
+    return 1;
+}
+
+/* SHZBOOT.MAN as installed: structure per boot_manifest.h, self hash, and every entry's blob re-hashed from the
+ * installed copy on the target ESP (the read-back bytes, not the payload). Core admission policy (loader_profile,
+ * capabilities, hierarchy/acyclic dependencies) stays with shz_bman_parse in the Supervisor; this only proves the
+ * installed target carries exactly the files the manifest pins. */
+static int all_zero(const uint8_t *p, size_t n)
+{
+    size_t i;
+    for (i = 0; i < n; ++i) if (p[i]) return 0;
+    return 1;
+}
+
+/* gen == 0: the template as copied from the payload (generation 0, install_id zero). Otherwise the stamped file: its
+ * generation and install_id must equal what this run stamped. Either way the entry table hash must equal the
+ * manifest.json boot_manifest.entries_sha256 (stamping never changes it). */
+static int verify_boot_manifest(ctx_t *C, fat32_vol *v, uint8_t *cbuf, const uint8_t *m, uint32_t len, uint64_t gen,
+                                const uint8_t id[16])
+{
+    shz_bman_header_t h;
+    uint8_t got[32];
+    unsigned i, k;
+    void *s;
+    if (len < sizeof h) return failf(C, "p1 verify: SHZBOOT.MAN too short");
+    memcpy(&h, m, sizeof h);
+    if (h.magic != SHZ_BMAN_MAGIC || h.version != SHZ_BMAN_VERSION || h.header_size != sizeof(shz_bman_header_t) ||
+        h.entry_size != sizeof(shz_bman_entry_t) || !h.entry_count || h.entry_count > SHZ_BMAN_MAX_ENTRIES ||
+        h.total_size != len || len != h.header_size + (uint32_t)h.entry_count * h.entry_size || h.flags || h.reserved[0] ||
+        h.reserved[1])
+        return failf(C, "p1 verify: SHZBOOT.MAN header is not a version-1 boot manifest");
+    if (gen ? h.install_generation != gen || memcmp(h.install_id, id, 16) : h.install_generation || !all_zero(h.install_id, 16))
+        return failf(C, "p1 verify: SHZBOOT.MAN %s", gen ? "stamp (generation/install_id) did not read back"
+                                                         : "template is already stamped (generation/install_id nonzero)");
+    s = C->P->sha_begin(C->P->ctx);
+    C->P->sha_update(C->P->ctx, s, m + h.header_size, len - h.header_size);
+    C->P->sha_end(C->P->ctx, s, got);
+    if (memcmp(got, h.entries_sha256, 32) || memcmp(got, C->bman_entries, 32))
+        return failf(C, "p1 verify: SHZBOOT.MAN entries_sha256 mismatch (file or manifest.json boot_manifest)");
+    for (i = 0; i < h.entry_count; ++i) {
+        shz_bman_entry_t e;
+        char path[65];
+        uint32_t first, size;
+        int st, is_dir;
+        esp_sink_t sk;
+        memcpy(&e, m + h.header_size + i * h.entry_size, sizeof e);
+        if (!bman_field(e.component, 16) || !bman_field(e.parent, 16) || !bman_field(e.blob, 16) ||
+            !bman_field(e.install_path, 64) || e.kind > SHZ_BMAN_KIND_RESOURCE || e.reserved ||
+            (i == 0) != (e.kind == SHZ_BMAN_KIND_CORE) || (i == 0 && strcmp(e.component, SHZ_BMAN_ROOT_NAME)))
+            return failf(C, "p1 verify: SHZBOOT.MAN entry %u is malformed", i);
+        if (!e.size && !e.install_path[0]) continue;
+        if (e.install_path[0] != '\\' || e.size > 0xffffffffull)
+            return failf(C, "p1 verify: SHZBOOT.MAN entry %s has no installed ESP path", e.component);
+        for (k = 0; k < 65 && e.install_path[k]; ++k) path[k] = e.install_path[k] == '\\' ? '/' : e.install_path[k];
+        path[k] = 0;
+        st = fat32_lookup(v, path, &first, &size, &is_dir);
+        if (st == FAT32R_ENOENT && !(e.flags & SHZ_BMAN_REQUIRED)) { say(C, "p1 verify: optional %s absent", path); continue; }
+        if (st || is_dir || size != e.size)
+            return failf(C, "p1 verify: SHZBOOT.MAN %s (%s): %s", e.component, path, st ? fat32_rstrerror(st) : "size differs");
+        sk.C = C;
+        sk.cap = 0;
+        sk.sha = C->P->sha_begin(C->P->ctx);
+        st = fat32_stream(v, first, size, cbuf, esp_sink, &sk);
+        C->P->sha_end(C->P->ctx, sk.sha, got);
+        if (st || memcmp(got, e.sha256, 32))
+            return failf(C, "p1 verify: SHZBOOT.MAN %s (%s) read back with a different sha256", e.component, path);
+    }
+    say(C, "p1 verify: SHZBOOT.MAN %s (%u entries, generation %llu) pins only files read back from the target",
+        gen ? "stamped" : "template", (unsigned)h.entry_count, (unsigned long long)h.install_generation);
+    return 0;
+}
+
+static int verify_esp_files(ctx_t *C)
+{
+    const jnode_t *x;
+    fat32_rio io;
+    fat32_vol *v = C->P->alloc(C->P->ctx, sizeof *v);
+    uint8_t *cbuf = 0, *bman = 0;
+    uint32_t bman_len = 0;
+    int st, is_dir;
+    if (!v) return failf(C, "out of memory");
+    io.ctx = C;
+    io.read = p1_read;
+    io.sectors = C->plast[0] - C->pfirst[0] + 1;
+    if ((st = fat32_mount(v, &io))) { C->P->free(C->P->ctx, v); return failf(C, "p1 verify: %s", fat32_rstrerror(st)); }
+    if (v->hidden != C->pfirst[0]) {
+        C->P->free(C->P->ctx, v);
+        return failf(C, "p1 verify: ESP BPB hidden sectors %u differ from p1 LBA %llu (BIOS chain-load would fail)", v->hidden,
+                     (unsigned long long)C->pfirst[0]);
+    }
+    cbuf = C->P->alloc(C->P->ctx, (size_t)v->spc * 512u);
+    if (!cbuf) { C->P->free(C->P->ctx, v); return failf(C, "out of memory"); }
+    for (x = json_get(json_get(C->man.root, "esp"), "files")->kid; x; x = x->next) {
+        const char *path = json_str(x, "path");
+        uint64_t bytes = 0;
+        uint32_t first, size;
+        uint8_t want[32], got[32];
+        esp_sink_t k;
+        json_u64(x, "bytes", &bytes);
+        unhex_sha(json_str(x, "sha256"), want);
+        if ((st = fat32_lookup(v, path, &first, &size, &is_dir)) || is_dir || size != bytes) {
+            C->P->free(C->P->ctx, v);
+            C->P->free(C->P->ctx, cbuf);
+            if (bman) C->P->free(C->P->ctx, bman);
+            return failf(C, "p1 verify: %s: %s", path, st ? fat32_rstrerror(st) : "wrong type or size");
+        }
+        k.C = C;
+        k.cap = 0;
+        k.cap_len = 0;
+        k.cap_max = SHZ_BMAN_MAX_BYTES;
+        if (text_ieq(path, "/SHZDOS/" SHZ_BMAN_BLOB_NAME) && !bman) k.cap = bman = C->P->alloc(C->P->ctx, SHZ_BMAN_MAX_BYTES);
+        k.sha = C->P->sha_begin(C->P->ctx);
+        st = fat32_stream(v, first, size, cbuf, esp_sink, &k);
+        if (k.cap) bman_len = k.cap_len;
+        C->P->sha_end(C->P->ctx, k.sha, got);
+        if (st || memcmp(got, want, 32)) {
+            C->P->free(C->P->ctx, v);
+            C->P->free(C->P->ctx, cbuf);
+            if (bman) C->P->free(C->P->ctx, bman);
+            return failf(C, "p1 verify: %s %s", path, st ? fat32_rstrerror(st) : "read back with a different sha256");
+        }
+        ++C->esp_files_ok;
+    }
+    if (bman) {
+        st = verify_boot_manifest(C, v, cbuf, bman, bman_len, 0, 0);
+        C->P->free(C->P->ctx, bman);
+    } else {
+        st = failf(C, "p1 verify: \\SHZDOS\\" SHZ_BMAN_BLOB_NAME " was not read back from the target ESP");
+    }
+    C->P->free(C->P->ctx, v);
+    C->P->free(C->P->ctx, cbuf);
+    if (st) return -1;
+    say(C, "p1 verify: FAT32 decoded from the target; %llu ESP file(s) incl. %s, Core64, Core32 re-hashed from disk: OK",
+        (unsigned long long)C->esp_files_ok, uefi_closure[0][0]);
+    return 0;
+}
+
+static int p1_write(void *ctx, uint64_t sector, uint32_t count, const void *buf)
+{
+    ctx_t *C = ctx;
+    if (sector + count > C->plast[0] - C->pfirst[0] + 1) return -1;
+    return disk_rw(C, 1, C->pfirst[0] + sector, count, (void *)buf) ? -1 : 0;
+}
+
+/* Reads SHZBOOT.MAN (bounded by SHZ_BMAN_MAX_BYTES) from a FAT32 volume at p1's LBA into m. 0 = read, else FAT32R_*. */
+static int read_bman_file(ctx_t *C, fat32_vol *v, uint8_t **cbuf, uint8_t *m, uint32_t *len)
+{
+    uint32_t first, size;
+    int st, is_dir;
+    esp_sink_t k;
+    fat32_rio io;
+    io.ctx = C;
+    io.read = p1_read;
+    io.sectors = C->plast[0] - C->pfirst[0] + 1;
+    if ((st = fat32_mount(v, &io))) return st;
+    if (v->hidden != C->pfirst[0]) return FAT32R_EBPB;
+    if (!*cbuf && !(*cbuf = C->P->alloc(C->P->ctx, (size_t)v->spc * 512u))) return FAT32R_EIO;
+    if ((st = fat32_lookup(v, BMAN_ESP_PATH, &first, &size, &is_dir))) return st;
+    if (is_dir || size < sizeof(shz_bman_header_t) || size > SHZ_BMAN_MAX_BYTES) return FAT32R_ESIZE;
+    k.C = C;
+    k.cap = m;
+    k.cap_len = 0;
+    k.cap_max = SHZ_BMAN_MAX_BYTES;
+    k.sha = C->P->sha_begin(C->P->ctx);
+    st = fat32_stream(v, first, size, *cbuf, esp_sink, &k);
+    C->P->sha_end(C->P->ctx, k.sha, (uint8_t[32]){0});
+    *len = k.cap_len;
+    return st;
+}
+
+/* Preflight (reads only): the generation of the target's previous installation, from its SHZBOOT.MAN, and this
+ * installation's install_id. A disk without a valid previous ESP/manifest starts at generation 1. */
+static int plan_install_identity(ctx_t *C)
+{
+    fat32_vol *v = C->P->alloc(C->P->ctx, sizeof *v);
+    uint8_t *m = C->P->alloc(C->P->ctx, SHZ_BMAN_MAX_BYTES), *cbuf = 0, d[32];
+    uint32_t len = 0;
+    int st = -1;
+    if (!v || !m) { if (v) C->P->free(C->P->ctx, v); if (m) C->P->free(C->P->ctx, m); return failf(C, "out of memory"); }
+    C->bman_prev_gen = 0;
+    st = read_bman_file(C, v, &cbuf, m, &len);
+    if (!st) {
+        shz_bman_header_t h;
+        void *s;
+        memcpy(&h, m, sizeof h);
+        s = C->P->sha_begin(C->P->ctx);
+        C->P->sha_update(C->P->ctx, s, m + sizeof h, len - (uint32_t)sizeof h);
+        C->P->sha_end(C->P->ctx, s, d);
+        if (h.magic == SHZ_BMAN_MAGIC && h.version == SHZ_BMAN_VERSION && h.header_size == sizeof h &&
+            h.entry_size == sizeof(shz_bman_entry_t) && h.entry_count && h.entry_count <= SHZ_BMAN_MAX_ENTRIES &&
+            h.total_size == len && len == sizeof h + (uint32_t)h.entry_count * sizeof(shz_bman_entry_t) &&
+            !memcmp(d, h.entries_sha256, 32)) {
+            C->bman_prev_gen = h.install_generation;
+            say(C, "previous target: %s generation %llu found on the ESP at LBA %llu", BMAN_ESP_PATH,
+                (unsigned long long)h.install_generation, (unsigned long long)C->pfirst[0]);
+        } else {
+            say(C, "previous target: %s on the ESP is not a valid boot manifest; generation restarts", BMAN_ESP_PATH);
+        }
+    } else {
+        say(C, "previous target: no readable %s at LBA %llu (%s); first generation", BMAN_ESP_PATH,
+            (unsigned long long)C->pfirst[0], fat32_rstrerror(st));
+    }
+    if (cbuf) C->P->free(C->P->ctx, cbuf);
+    C->P->free(C->P->ctx, v);
+    C->P->free(C->P->ctx, m);
+    if (C->bman_prev_gen == ~0ull) return failf(C, "previous target generation is exhausted");
+    C->bman_gen = C->bman_prev_gen + 1;
+    /* Entropy: the platform RNG (SHZSETUP: bcrypt BCryptGenRandom, system-preferred RNG). Only if it fails, a SHA-256
+     * of the clock and target disk identifiers, logged and recorded as weak. GuidSeed is deliberately not used: two
+     * installations with one answer file must not share an identity. */
+    C->bman_id_source = INSTID_RNG;
+    if (C->P->random(C->P->ctx, C->bman_id, 16) || all_zero(C->bman_id, 16)) {
+        uint64_t t = C->P->now(C->P->ctx);
+        void *s = C->P->sha_begin(C->P->ctx);
+        C->P->sha_update(C->P->ctx, s, &t, sizeof t);
+        C->P->sha_update(C->P->ctx, s, &C->started, sizeof C->started);
+        C->P->sha_update(C->P->ctx, s, C->di.serial, (uint32_t)strlen(C->di.serial));
+        C->P->sha_update(C->P->ctx, s, C->di.name, (uint32_t)strlen(C->di.name));
+        C->P->sha_update(C->P->ctx, s, &C->di.sectors, sizeof C->di.sectors);
+        C->P->sha_update(C->P->ctx, s, &C->bman_gen, sizeof C->bman_gen);
+        C->P->sha_update(C->P->ctx, s, C->manifest_sha, 32);
+        C->P->sha_end(C->P->ctx, s, d);
+        memcpy(C->bman_id, d, 16);
+        C->bman_id_source = INSTID_WEAK;
+    }
+    if (all_zero(C->bman_id, 16)) return failf(C, "install_id: no nonzero identity could be produced");
+    {
+        char hx[33];
+        hex(C->bman_id, 16, hx);
+        say(C, "install identity: generation %llu, install_id %s (%s)", (unsigned long long)C->bman_gen, hx,
+            C->bman_id_source == INSTID_RNG ? "platform RNG" : "WEAK: clock + disk identifiers, platform RNG failed");
+    }
+    return 0;
+}
+
+/* After p1 verified: stamp generation + install_id into the installed SHZBOOT.MAN (same size, data clusters only), then
+ * re-read it through a fresh FAT32 mount and verify everything again. */
+static int stamp_boot_manifest(ctx_t *C)
+{
+    fat32_vol *v = C->P->alloc(C->P->ctx, sizeof *v);
+    uint8_t *m = C->P->alloc(C->P->ctx, SHZ_BMAN_MAX_BYTES), *rb = C->P->alloc(C->P->ctx, SHZ_BMAN_MAX_BYTES), *cbuf = 0;
+    uint32_t len = 0, rlen = 0;
+    int st = -1, rc = -1;
+    if (!v || !m || !rb) { failf(C, "out of memory"); goto done; }
+    if ((st = read_bman_file(C, v, &cbuf, m, &len))) { failf(C, "p1 stamp: %s: %s", BMAN_ESP_PATH, fat32_rstrerror(st)); goto done; }
+    if (len < sizeof(shz_bman_header_t) || (len - sizeof(shz_bman_header_t)) % sizeof(shz_bman_entry_t) ||
+        le64(m + BMAN_GEN_OFFSET) || !all_zero(m + BMAN_ID_OFFSET, 16)) {
+        failf(C, "p1 stamp: %s is not an unstamped template of 96 + n*176 bytes", BMAN_ESP_PATH);
+        goto done;
+    }
+    put64le(m + BMAN_GEN_OFFSET, C->bman_gen);
+    memcpy(m + BMAN_ID_OFFSET, C->bman_id, 16);
+    if ((st = fat32_overwrite_file(v, p1_write, C, BMAN_ESP_PATH, m, len, cbuf))) {
+        failf(C, "p1 stamp: %s: %s", BMAN_ESP_PATH, fat32_rstrerror(st));
+        goto done;
+    }
+    if (C->P->disk_flush(C->P->ctx, C->disk)) { failf(C, "flush failed"); goto done; }
+    /* independent readback: fresh mount, nothing cached from the write */
+    if ((st = read_bman_file(C, v, &cbuf, rb, &rlen)) || rlen != len || memcmp(rb, m, len)) {
+        failf(C, "p1 stamp: %s did not read back as stamped (%s)", BMAN_ESP_PATH, st ? fat32_rstrerror(st) : "content differs");
+        goto done;
+    }
+    if (verify_boot_manifest(C, v, cbuf, rb, rlen, C->bman_gen, C->bman_id)) goto done;
+    say(C, "p1 stamp: %s generation %llu + install_id written in place and read back", BMAN_ESP_PATH,
+        (unsigned long long)C->bman_gen);
+    rc = 0;
+done:
+    if (v) C->P->free(C->P->ctx, v);
+    if (m) C->P->free(C->P->ctx, m);
+    if (rb) C->P->free(C->P->ctx, rb);
+    if (cbuf) C->P->free(C->P->ctx, cbuf);
+    return rc;
 }
 
 /* ---------------------------------------------------------------- p2: ShizukuFS */
@@ -634,6 +1141,8 @@ static int p2_write(void *ctx, uint64_t block, uint32_t count, const void *buf)
 static void *io_alloc(void *ctx, size_t n) { ctx_t *C = ctx; return C->P->alloc(C->P->ctx, n); }
 static void io_free(void *ctx, void *p) { ctx_t *C = ctx; C->P->free(C->P->ctx, p); }
 
+
+static const arc_entry_t *arc_find(ctx_t *C, const char *path);
 
 static int open_archive(ctx_t *C)
 {
@@ -666,6 +1175,32 @@ static int open_archive(ctx_t *C)
         if (C->arc_e[i].off > size || C->arc_e[i].size > size - C->arc_e[i].off) return failf(C, "%s: entry out of range", path);
     }
     say(C, "p2: archive %s, %u file(s)", name, C->arc_n);
+    {   /* source closure: the whole archive is the one the manifest describes, before anything is erased */
+        uint8_t want[32], got[32];
+        uint64_t off = 0;
+        void *s = C->P->sha_begin(C->P->ctx);
+        const jnode_t *x;
+        unhex_sha(json_str(json_get(C->man.root, "system"), "archive_sha256"), want);
+        while (off < size) {
+            const uint32_t n = size - off < IOBUF ? (uint32_t)(size - off) : IOBUF;
+            if (cancellation(C)) { C->P->sha_end(C->P->ctx,s,got); return failf(C,"installation cancelled before disk writes"); }
+            if (C->P->file_read(C->P->ctx, C->arc, off, C->buf, n)) { C->P->sha_end(C->P->ctx, s, got); return failf(C, "%s: read error", path); }
+            C->P->sha_update(C->P->ctx, s, C->buf, n);
+            off += n;
+        }
+        C->P->sha_end(C->P->ctx, s, got);
+        if (memcmp(got, want, 32)) return failf(C, "source closure: %s does not match system.archive_sha256", path);
+        for (x = json_get(json_get(C->man.root, "system"), "files")->kid; x; x = x->next) {
+            const arc_entry_t *a;
+            uint64_t bytes = 0;
+            if (!package_selected(C, json_str(x, "package"))) continue;
+            json_u64(x, "bytes", &bytes);
+            a = arc_find(C, json_str(x, "path"));
+            if (!a || a->size != bytes)
+                return failf(C, "source closure: %s is missing from %s or has the wrong size", json_str(x, "path"), name);
+        }
+        say(C, "source closure: %s sha256 = manifest; every selected system file present with its size", name);
+    }
     return 0;
 }
 
@@ -677,7 +1212,7 @@ static const arc_entry_t *arc_find(ctx_t *C, const char *path)
 }
 
 typedef struct { const char *path; const char *data; uint64_t len; uint32_t handle; } gen_file_t;
-#define MAX_GEN 3
+#define MAX_GEN 5
 
 static int plan_system(ctx_t *C, sfsw_t **wout, uint32_t **handles, uint32_t *log_handle, gen_file_t *gen, unsigned ngen)
 {
@@ -701,32 +1236,34 @@ static int plan_system(ctx_t *C, sfsw_t **wout, uint32_t **handles, uint32_t *lo
     memcpy(prm.uuid, C->fs_uuid, 16);
     copy_str(prm.label, sizeof prm.label, json_str(sys, "label") ? json_str(sys, "label") : "SHZSYS");
     w = sfsw_create(&io, &prm, &err);
-    if (!w) return failf(C, "p2: ShizukuFS format: %s", sfsw_strerror(err));
+    if (!w) { C->layout_error=err; return failf(C, "p2: ShizukuFS format: %s", sfsw_strerror(err)); }
     *wout = w;
     for (x = json_get(sys, "dirs")->kid; x; x = x->next) {
         if (!package_selected(C, json_str(x, "package"))) continue;
-        if ((err = sfsw_mkdir(w, json_str(x, "path")))) return failf(C, "p2: mkdir %s: %s", json_str(x, "path"), sfsw_strerror(err));
+        if ((err = sfsw_mkdir(w, json_str(x, "path")))) { C->layout_error=err; return failf(C, "p2: mkdir %s: %s", json_str(x, "path"), sfsw_strerror(err)); }
     }
     for (i = 0; setup_dirs[i]; ++i)
-        if ((err = sfsw_mkdir(w, setup_dirs[i])) && err != SFSW_EEXIST) return failf(C, "p2: mkdir %s: %s", setup_dirs[i], sfsw_strerror(err));
+        if ((err = sfsw_mkdir(w, setup_dirs[i])) && err != SFSW_EEXIST) { C->layout_error=err; return failf(C, "p2: mkdir %s: %s", setup_dirs[i], sfsw_strerror(err)); }
     for (x = json_get(sys, "files")->kid; x; x = x->next) {
         uint64_t bytes;
         const arc_entry_t *a;
         if (!package_selected(C, json_str(x, "package"))) continue;
         json_u64(x, "bytes", &bytes);
         a = arc_find(C, json_str(x, "path"));
-        if (!a || a->size != bytes) return failf(C, "p2: %s is missing from the archive or has the wrong size", json_str(x, "path"));
+        /* Read-only capacity planning uses the manifest tree without opening
+         * the archive. The executable install always validates the archive. */
+        if (C->arc && (!a || a->size != bytes)) return failf(C, "p2: %s is missing from the archive or has the wrong size", json_str(x, "path"));
         if ((err = sfsw_add_file(w, json_str(x, "path"), bytes, &(*handles)[n])))
-            return failf(C, "p2: add %s: %s", json_str(x, "path"), sfsw_strerror(err));
+            { C->layout_error=err; return failf(C, "p2: add %s: %s", json_str(x, "path"), sfsw_strerror(err)); }
         ++n;
         nbytes += bytes;
     }
     for (i = 0; i < ngen; ++i)
         if ((err = sfsw_add_file(w, gen[i].path, gen[i].len, &gen[i].handle)))
-            return failf(C, "p2: add %s: %s", gen[i].path, sfsw_strerror(err));
+            { C->layout_error=err; return failf(C, "p2: add %s: %s", gen[i].path, sfsw_strerror(err)); }
     if ((err = sfsw_add_file(w, "/SHZ/SETUP/log/install.log", LOG_CAP, log_handle)))
-        return failf(C, "p2: add install.log: %s", sfsw_strerror(err));
-    if ((err = sfsw_layout(w))) return failf(C, "p2: layout: %s", sfsw_strerror(err));
+        { C->layout_error=err; return failf(C, "p2: add install.log: %s", sfsw_strerror(err)); }
+    if ((err = sfsw_layout(w))) { C->layout_error=err; return failf(C, "p2: layout: %s", sfsw_strerror(err)); }
     sfsw_get_info(w, &info);
     uuid_format(C->fs_uuid, uuid);
     say(C, "p2: ShizukuFS v1 (ext4 on-disk format): %llu blocks of 4 KiB, %u group(s), %u inodes, uuid %s",
@@ -752,6 +1289,7 @@ static int write_system_data(ctx_t *C, sfsw_t *w, const uint32_t *handles, gen_f
         s = C->P->sha_begin(C->P->ctx);
         while (off < a->size) {
             const uint32_t n = a->size - off < IOBUF ? (uint32_t)(a->size - off) : IOBUF;
+            if (cancellation(C)) { C->P->sha_end(C->P->ctx,s,got); return failf(C,"installation cancelled while copying system files"); }
             if (C->P->file_read(C->P->ctx, C->arc, a->off + off, C->buf, n)) return failf(C, "p2: archive read error");
             C->P->sha_update(C->P->ctx, s, C->buf, n);
             if ((err = sfsw_write(w, handles[k], off, C->buf, n))) return failf(C, "p2: write %s: %s", a->path, sfsw_strerror(err));
@@ -826,7 +1364,7 @@ static int verify_system(ctx_t *C, gen_file_t *gen, unsigned ngen)
             return failf(C, "p2 verify: %s read back with sha256 %s, manifest says %s", path, hx, json_str(x, "sha256"));
         }
         C->files_ok++;
-        C->bytes_ok += size;
+        C->bytes_ok += size; notify(C,0);
     }
     for (i = 0; i < ngen; ++i) {
         if ((err = sfsr_lookup(r, gen[i].path, &ino, &size, &is_dir)) || size != gen[i].len ||
@@ -992,9 +1530,222 @@ static char *build_system_ini(ctx_t *C, uint64_t *len)
     o = append(o, end, g);
     o = append(o, end, "\r\nDriverPackages=");
     o = append(o, end, C->cfg.drivers);
+    o = append(o, end, "\r\nDriverCatalog=" DRIVER_CATALOG_PATH "\r\n\r\n[Boot]\r\nUefiFallback=\\EFI\\BOOT\\BOOTX64.EFI\r\nBootPolicy="
+               "\\EFI\\SHIZUKU\\BOOT.INI\r\nBiosChain=");
+    o = append(o, end, C->bios_boot && C->have_mbr_code && C->cfg.bios_boot_code ? "yes" : "no");
+    {
+        static const char *const keys2[] = {"\r\nCore64Sha256=", "\r\nCore32Sha256=", "\r\nBootRuntimeSha256="};
+        const jnode_t *files = json_get(json_get(C->man.root, "esp"), "files");
+        for (i = 0; i < 3; ++i) {
+            const jnode_t *f = list_find(files, uefi_closure[2 + i][0]);
+            o = append(o, end, keys2[i]);
+            o = append(o, end, f && json_str(f, "sha256") ? json_str(f, "sha256") : "");
+        }
+    }
+    {
+        char num[24], hx[33];
+        setup_snprintf(num, sizeof num, "%llu", (unsigned long long)C->bman_gen);
+        hex(C->bman_id, 16, hx);
+        o = append(o, end, "\r\nBootManifest=\\SHZDOS\\" SHZ_BMAN_BLOB_NAME "\r\nInstallGeneration=");
+        o = append(o, end, num);
+        o = append(o, end, "\r\nInstallId=");
+        o = append(o, end, hx);
+    }
+    o = append(o, end, "\r\nInstallRecordLba=");
+    {
+        char num[24];
+        setup_snprintf(num, sizeof num, "%llu", (unsigned long long)C->record_lba);
+        o = append(o, end, num);
+    }
     o = append(o, end, "\r\n");
     *len = (uint64_t)(o - t);
     return t;
+}
+
+/* Installed driver catalog v2 (contract routing02 C5): one row per selected driver package, from manifest.json
+ * "drivers" (kind, match ids, service image) plus the package's descriptor file (Path/Bytes/Sha256, hashed on the way
+ * in and re-read from the target by verify_system). Builtin rows are drivers compiled into KERNEL64S.BIN, whose sha256
+ * comes from the ESP closure that verify_esp_files re-hashed. Refuses (NULL, C->fail set) instead of writing a catalog
+ * the Kernel64 importer would reject. */
+static int hexn(const char *s, unsigned n)
+{
+    unsigned i;
+    for (i = 0; i < n; ++i)
+        if (!((s[i] >= '0' && s[i] <= '9') || (s[i] >= 'a' && s[i] <= 'f') || (s[i] >= 'A' && s[i] <= 'F'))) return 0;
+    return 1;
+}
+
+static int match_ok(const char *m)        /* "vvvv:dddd" | "vvvv:dddd-dddd" | "class cc:ss" | "class cc:ss:pp" */
+{
+    const size_t n = strlen(m);
+    if (!sncmp(m, "class ", 6))
+        return (n == 11 && hexn(m + 6, 2) && m[8] == ':' && hexn(m + 9, 2)) ||
+               (n == 14 && hexn(m + 6, 2) && m[8] == ':' && hexn(m + 9, 2) && m[11] == ':' && hexn(m + 12, 2));
+    return (n == 9 && hexn(m, 4) && m[4] == ':' && hexn(m + 5, 4)) ||
+           (n == 14 && hexn(m, 4) && m[4] == ':' && hexn(m + 5, 4) && m[9] == '-' && hexn(m + 10, 4));
+}
+
+static int service_ok(const char *s)
+{
+    size_t i;
+    for (i = 0; s[i]; ++i)
+        if (i >= 31 || !((s[i] >= 'A' && s[i] <= 'Z') || (s[i] >= 'a' && s[i] <= 'z') || (s[i] >= '0' && s[i] <= '9') || s[i] == '_'))
+            return 0;
+    return i != 0;
+}
+
+static char *build_driver_catalog(ctx_t *C, uint64_t *len)
+{
+    const jnode_t *drivers = json_get(C->man.root, "drivers"), *sfiles = json_get(json_get(C->man.root, "system"), "files");
+    const jnode_t *k64 = list_find(json_get(json_get(C->man.root, "esp"), "files"), "/SHZDOS/KERNEL64S.BIN"), *x, *d, *f, *m;
+    const char *ksha = k64 ? json_str(k64, "sha256") : 0;
+    const size_t cap = DRIVER_CATALOG_MAX_BYTES + 1;
+    unsigned n = 0;
+    char *t, *o, *end, num[24], pkgname[64];
+    if (!drivers || drivers->type != J_ARR) { failf(C, "manifest.json: \"drivers\" metadata (driver catalog v2) missing"); return 0; }
+    if (!ksha || strlen(ksha) != 64 || !hexn(ksha, 64)) { failf(C, "driver catalog: KERNEL64S.BIN is not in the ESP closure"); return 0; }
+    /* every selected driver-* package file must be described by exactly one drivers row */
+    for (x = sfiles->kid; x; x = x->next) {
+        const char *pkg = json_str(x, "package");
+        unsigned rows = 0;
+        if (!pkg || sncmp(pkg, "driver-", 7) || !package_selected(C, pkg)) continue;
+        for (d = drivers->kid; d; d = d->next)
+            if (json_str(d, "package") && !strcmp(json_str(d, "package"), pkg)) ++rows;
+        if (rows != 1) { failf(C, "manifest.json: driver package %s has %u \"drivers\" rows (need 1)", pkg, rows); return 0; }
+    }
+    if (!(t = C->P->alloc(C->P->ctx, cap))) { failf(C, "driver catalog: out of memory"); return 0; }
+    o = t;
+    end = t + cap - 1;
+    o = append(o, end, "; ShizukuOS installed driver catalog, written and read back by " SETUP_VERSION "\r\n[Catalog]\r\nSchema="
+               DRIVER_CATALOG_SCHEMA "\r\nSelection=");
+    o = append(o, end, C->cfg.drivers);
+    setup_snprintf(num, sizeof num, "%llu", (unsigned long long)C->bman_gen);
+    o = append(o, end, "\r\nInstallGeneration=");
+    o = append(o, end, num);
+    o = append(o, end, "\r\nKernel64Sha256=");
+    o = append(o, end, ksha);
+    o = append(o, end, "\r\n");
+    for (d = drivers->kid; d; d = d->next) {
+        const char *name = json_str(d, "name"), *pkg = json_str(d, "package"), *kind = json_str(d, "kind");
+        const char *start = json_str(d, "start"), *isha = json_str(d, "image_sha256");
+        const jnode_t *pf = 0;
+        unsigned files = 0, nm = 0;
+        uint64_t bytes = 0;
+        int service;
+        setup_snprintf(pkgname, sizeof pkgname, "driver-%s", name ? name : "");
+        if (!name || !pkg || strcmp(pkg, pkgname) || !kind || (strcmp(kind, "builtin") && strcmp(kind, "service")) || !start ||
+            (strcmp(start, "boot") && strcmp(start, "system") && strcmp(start, "demand")) || !isha || strlen(isha) != 64 ||
+            !hexn(isha, 64)) {
+            failf(C, "manifest.json: malformed \"drivers\" row %s", name ? name : "(no name)");
+            goto bad;
+        }
+        if (!package_selected(C, pkg)) continue;
+        if (n >= DRIVER_CATALOG_MAX_ROWS) { failf(C, "driver catalog: more than %u rows", DRIVER_CATALOG_MAX_ROWS); goto bad; }
+        service = !strcmp(kind, "service");
+        for (f = sfiles->kid; f; f = f->next)
+            if (json_str(f, "package") && !strcmp(json_str(f, "package"), pkg)) { pf = pf ? pf : f; ++files; }
+        if (files != 1) { failf(C, "driver catalog: package %s has %u descriptor files (need 1)", pkg, files); goto bad; }
+        if (!service && !text_ieq(isha, ksha)) { failf(C, "driver catalog: builtin %s image is not KERNEL64S.BIN", name); goto bad; }
+        setup_snprintf(num, sizeof num, "%u", n++);
+        o = append(o, end, "\r\n[Driver.");
+        o = append(o, end, num);
+        o = append(o, end, "]\r\nPackage=");
+        o = append(o, end, pkg);
+        o = append(o, end, "\r\nKind=");
+        o = append(o, end, kind);
+        o = append(o, end, "\r\nMatch=");
+        m = json_get(d, "match");
+        for (x = m && m->type == J_ARR ? m->kid : 0; x; x = x->next) {
+            if (x->type != J_STR || !match_ok(x->s) || ++nm > DRIVER_MATCH_MAX) {
+                failf(C, "manifest.json: driver %s has a malformed or too long match list", name);
+                goto bad;
+            }
+            if (nm > 1) o = append(o, end, ",");
+            o = append(o, end, x->s);
+        }
+        if (!nm) { failf(C, "manifest.json: driver %s has no match ids", name); goto bad; }
+        if (service) {
+            const char *svc = json_str(d, "service"), *img = json_str(d, "image");
+            const jnode_t *imf = img ? list_find(sfiles, img) : 0;
+            if (!svc || !service_ok(svc) || !img || sncmp(img, "/SHZ/DRIVERS/", 13) || strlen(img) > 200 || !imf ||
+                !json_str(imf, "package") || strcmp(json_str(imf, "package"), pkg) || !text_ieq(json_str(imf, "sha256"), isha)) {
+                failf(C, "manifest.json: service driver %s needs a valid Service and an Image in its own package with that sha256", name);
+                goto bad;
+            }
+            o = append(o, end, "\r\nService=");
+            o = append(o, end, svc);
+            o = append(o, end, "\r\nImage=");
+            for (; *img && o < end; ++img) *o++ = *img == '/' ? '\\' : *img;
+            o = append(o, end, "\r\nImageSha256=");
+            o = append(o, end, isha);
+        }
+        o = append(o, end, "\r\nStart=");
+        o = append(o, end, start);
+        json_u64(pf, "bytes", &bytes);
+        o = append(o, end, "\r\nPath=");
+        o = append(o, end, json_str(pf, "path"));
+        setup_snprintf(num, sizeof num, "%llu", (unsigned long long)bytes);
+        o = append(o, end, "\r\nBytes=");
+        o = append(o, end, num);
+        o = append(o, end, "\r\nSha256=");
+        o = append(o, end, json_str(pf, "sha256"));
+        o = append(o, end, "\r\n");
+    }
+    setup_snprintf(num, sizeof num, "%u", n);
+    o = append(o, end, "\r\n[Summary]\r\nCount=");
+    o = append(o, end, num);
+    o = append(o, end, "\r\n");
+    if (o >= end) { failf(C, "driver catalog exceeds %u bytes", DRIVER_CATALOG_MAX_BYTES); goto bad; }
+    *len = (uint64_t)(o - t);
+    say(C, "driver catalog %s (%s): %u row(s), InstallGeneration %llu", DRIVER_CATALOG_PATH, DRIVER_CATALOG_SCHEMA, n,
+        (unsigned long long)C->bman_gen);
+    return t;
+bad:
+    C->P->free(C->P->ctx, t);
+    return 0;
+}
+
+/* ---------------------------------------------------------------- install record (see the header comment) */
+static void put32le(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24); }
+static void put64le(uint8_t *p, uint64_t v) { put32le(p, (uint32_t)v); put32le(p + 4, (uint32_t)(v >> 32)); }
+
+/* Layout (512 bytes, little endian): 0 magic "SHZINSR1", 8 u32 version, 12 u32 state (1 writing, 2 failed,
+ * 3 complete), 16 u32 stage, 20 u32 partitions, 24 u64 started, 32 u64 updated, 40 u64 disk sectors, 48 u64 p1 LBA,
+ * 56 u64 p2 LBA, 64 sha256 ESP image, 96 sha256 manifest.json, 128 char reason[160] (NUL padded),
+ * 288 char setup[32], 320 u64 install_generation (stamped into SHZBOOT.MAN), 328 u8 install_id[16], 344 sha256
+ * SHZBOOT.MAN entries_sha256, 376 u32 install_id source (1 platform RNG, 2 weak clock/disk hash), 380..507 zero,
+ * 508 u32 CRC32 (gpt_crc32) of bytes 0..507. Fields 320..379 are additive in version 1 (previously zero). */
+static int write_record(ctx_t *C, uint32_t state)
+{
+    uint8_t rec[512], rb[512];
+    size_t n;
+    memset(rec, 0, sizeof rec);
+    memcpy(rec, INSTALL_RECORD_MAGIC, 8);
+    put32le(rec + 8, INSTALL_RECORD_VERSION);
+    put32le(rec + 12, state);
+    put32le(rec + 16, (uint32_t)C->stage);
+    put32le(rec + 20, (uint32_t)C->nparts);
+    put64le(rec + 24, C->started);
+    put64le(rec + 32, C->P->now(C->P->ctx));
+    put64le(rec + 40, C->di.sectors);
+    put64le(rec + 48, C->pfirst[0]);
+    put64le(rec + 56, C->pfirst[1]);
+    memcpy(rec + 64, C->esp_sha, 32);
+    memcpy(rec + 96, C->manifest_sha, 32);
+    if (state == REC_FAILED) {
+        n = strlen(C->fail[0] ? C->fail : "(unknown)");
+        memcpy(rec + 128, C->fail[0] ? C->fail : "(unknown)", n < 159 ? n : 159);
+    }
+    memcpy(rec + 288, SETUP_VERSION, sizeof SETUP_VERSION < 32 ? sizeof SETUP_VERSION : 31);
+    put64le(rec + 320, C->bman_gen);
+    memcpy(rec + 328, C->bman_id, 16);
+    memcpy(rec + 344, C->bman_entries, 32);
+    put32le(rec + 376, C->bman_id_source);
+    put32le(rec + 508, gpt_crc32(rec, 508));
+    if (C->P->disk_write(C->P->ctx, C->disk, C->record_lba, 1, rec) || C->P->disk_flush(C->P->ctx, C->disk) ||
+        C->P->disk_read(C->P->ctx, C->disk, C->record_lba, 1, rb) || memcmp(rb, rec, 512))
+        return -1;
+    return 0;
 }
 
 static int write_log(ctx_t *C, sfsw_t *w, uint32_t handle)
@@ -1017,18 +1768,20 @@ static int write_log(ctx_t *C, sfsw_t *w, uint32_t handle)
     return 0;
 }
 
-void setup_run(const plat_t *P, const char *answer, const char *payload_dir, setup_result_t *res)
+static void run_engine(const plat_t *P, const char *answer, const char *payload_dir,
+                       const setup_plan_t *plan, const setup_control_t *control, setup_result_t *res)
 {
     ctx_t ctx, *C = &ctx;
     sfsw_t *w = 0;
     uint32_t *handles = 0, log_handle = 0;
     gen_file_t gen[MAX_GEN];
-    char *sysini = 0, when[24];
+    char *sysini = 0, *catalog = 0, when[24];
+    uint8_t prefs[16];
     int st = -1;
     memset(C, 0, sizeof *C);
     memset(res, 0, sizeof *res);
     memset(gen, 0, sizeof gen);
-    C->P = P;
+    C->P = P; C->reviewed_plan=plan; C->control=control;
     copy_str(C->payload, sizeof C->payload, payload_dir);
     C->log = P->alloc(P->ctx, LOG_CAP);
     C->buf = P->alloc(P->ctx, IOBUF);
@@ -1036,9 +1789,26 @@ void setup_run(const plat_t *P, const char *answer, const char *payload_dir, set
     C->started = P->now(P->ctx);
     iso_time(C->started, when);
     if (!C->log || !C->buf || !C->buf2) { failf(C, "out of memory"); goto out; }
-    say(C, "%s (ShizukuDOS installer), started %s", SETUP_VERSION, when);
+    say(C, "%s (ShizukuOS installer), started %s", SETUP_VERSION, when);
+    phase(C,STAGE_PREFLIGHT,1);
     if (read_answer(C, answer) || read_manifest(C) || load_mbr_code(C)) goto out;
-    if (select_target(C) || check_blank(C) || plan_layout(C) || open_archive(C)) goto out;
+    if (plan) {
+        plat_disk_t current;
+        if (plan->version!=SETUP_PLAN_VERSION || !control || !control->check ||
+            control->check(control->ctx,plan) ||
+            P->disk_info(P->ctx,plan->target.index,&current) ||
+            memcmp(&current,&plan->target.disk,sizeof current) ||
+            memcmp(C->manifest_sha,plan->image.manifest_sha256,32)) {
+            failf(C,"reviewed source or target changed; return to target selection"); goto out;
+        }
+        C->disk=plan->target.index; C->di=current; C->ss=current.sector_size;
+        C->payload_files=plan->image.payload_files;
+    } else if (select_target(C)) goto out;
+    if (check_blank(C) || plan_layout(C) || open_archive(C) || esp_pass(C,0) || plan_install_identity(C)) goto out;
+    if (plan && (C->nparts!=(int)plan->partitions ||
+        memcmp(C->pfirst,plan->first,sizeof C->pfirst) || memcmp(C->plast,plan->last,sizeof C->plast))) {
+        failf(C,"reviewed installation layout changed; nothing was written"); goto out;
+    }
     make_guid(C, "disk", C->disk_guid);
     make_guid(C, "p1", C->part_guid[0]);
     make_guid(C, "p2", C->part_guid[1]);
@@ -1058,13 +1828,35 @@ void setup_run(const plat_t *P, const char *answer, const char *payload_dir, set
     gen[2].path = "/SHZ/SETUP/manifest.json";
     gen[2].data = C->manifest_text;
     gen[2].len = C->manifest_len;
+    catalog = build_driver_catalog(C, &gen[3].len);
+    if (!catalog) goto out;                          /* build_driver_catalog set the reason */
+    gen[3].path = DRIVER_CATALOG_PATH;
+    gen[3].data = catalog;
+    put32le(prefs,SETUP_PREFS_MAGIC); put32le(prefs+4,1);
+    put32le(prefs+8,plan?plan->language:SETUP_LANGUAGE_KO); put32le(prefs+12,SETUP_KEYBOARD_US);
+    gen[4].path=SETUP_PREFS_PATH; gen[4].data=(const char *)prefs; gen[4].len=sizeof prefs;
+    if (cancellation(C)) { failf(C,"installation cancelled before disk writes"); goto out; }
+    /* Final check after all payload validation, immediately before destruction. */
+    if (plan && control->check(control->ctx,plan)) {
+        failf(C,"reviewed target or source changed before first write"); goto out;
+    }
     say(C, "destructive phase: erasing %s", C->di.name);
-    if (wipe_tables(C) || write_esp(C)) goto out;
-    if (plan_system(C, &w, &handles, &log_handle, gen, MAX_GEN) || write_system_data(C, w, handles, gen, MAX_GEN) ||
-        verify_system(C, gen, MAX_GEN))
-        goto out;
+    phase(C,STAGE_WIPE,0);
+    C->record_armed = 1;          /* the record is the first destructive write; any later failure leaves FAILED */
+    if (write_record(C, REC_WRITING)) { failf(C, "install record at LBA %llu did not read back", (unsigned long long)C->record_lba); goto out; }
+    say(C, "install record WRITING at LBA %llu", (unsigned long long)C->record_lba);
+    if (wipe_tables(C)) goto out;
+    phase(C,STAGE_ESP,1);
+    if (write_esp(C) || verify_esp_files(C) || stamp_boot_manifest(C)) goto out;
+    phase(C,STAGE_SYSTEM,1);
+    if (plan_system(C, &w, &handles, &log_handle, gen, MAX_GEN) || write_system_data(C, w, handles, gen, MAX_GEN)) goto out;
+    phase(C,STAGE_SYSTEM_VERIFY,1);
+    if (verify_system(C, gen, MAX_GEN)) goto out;
+    phase(C,STAGE_WIN98,0);
     if (C->nparts == 3 && format_win98(C)) goto out;
+    phase(C,STAGE_GPT,0);
     if (write_gpt(C)) goto out;
+    phase(C,STAGE_LOG,0);
     iso_time(P->now(P->ctx), when);
     say(C, "finished %s; %s installed on %s", when, json_str(C->man.root, "product") ? json_str(C->man.root, "product") : "ShizukuDOS",
         C->di.name);
@@ -1074,8 +1866,28 @@ void setup_run(const plat_t *P, const char *answer, const char *payload_dir, set
         goto out;
     }
     say(C, "install log written to p2 /SHZ/SETUP/log/install.log (%u bytes) and read back", (unsigned)C->log_len);
+    phase(C,STAGE_DONE,0);
+    if (write_record(C, REC_COMPLETE)) {
+        failf(C, "install record COMPLETE at LBA %llu did not read back", (unsigned long long)C->record_lba);
+        goto out;
+    }
+    P->out(P->ctx, "SHZSETUP: install record COMPLETE written and read back\n");
     st = 0;
 out:
+    C->cleanup=1; C->can_cancel=0;
+    if (st && C->record_armed) {
+        if (write_record(C, REC_FAILED))
+            P->out(P->ctx, "SHZSETUP: the FAILED install record could not be written or read back\n");
+        else
+            P->out(P->ctx, "SHZSETUP: install record FAILED (stage and reason) written before p1 and read back\n");
+    }
+    /* A verified-complete UI is impossible until the final record and the
+     * device cache flush actually succeed. A flush failure retains FAILED. */
+    if (!st && P->disk_flush(P->ctx,C->disk)) {
+        st=-1; failf(C,"final device cache flush failed");
+        if (C->record_armed) write_record(C,REC_FAILED);
+    }
+    notify(C,st==0);
     res->ok = st == 0;
     res->power = C->cfg.power;
     copy_str(res->reason, sizeof res->reason, st == 0 ? "" : C->fail);
@@ -1089,6 +1901,7 @@ out:
     if (w) sfsw_destroy(w);
     if (C->arc) P->file_close(P->ctx, C->arc);
     if (sysini) P->free(P->ctx, sysini);
+    if (catalog) P->free(P->ctx, catalog);
     if (handles) P->free(P->ctx, handles);
     if (C->arc_e) P->free(P->ctx, C->arc_e);
     if (C->arc_names) P->free(P->ctx, C->arc_names);
@@ -1099,4 +1912,121 @@ out:
     if (C->log) P->free(P->ctx, C->log);
     if (C->buf) P->free(P->ctx, C->buf);
     if (C->buf2) P->free(P->ctx, C->buf2);
+}
+
+void setup_run(const plat_t *P,const char *answer,const char *payload,setup_result_t *r)
+{ run_engine(P,answer,payload,0,0,r); }
+void setup_run_planned(const plat_t *P,const char *answer,const char *payload,
+                       const setup_plan_t *plan,const setup_control_t *control,setup_result_t *r)
+{ run_engine(P,answer,payload,plan,control,r); }
+
+/* Read-only planning reuses the manifest parser, partition planner and actual
+ * SFS writer's no-I/O layout. Reserved generated-file maxima are installation
+ * policy, not a payload-size guess. 8 MiB of free SFS workspace is mandatory. */
+#define PLAN_WORKSPACE (8ull*MIB)
+static void quiet(void *ctx,const char *text) { (void)ctx; (void)text; }
+static void plan_cleanup(ctx_t *C)
+{
+    if(C->manifest_text)C->P->free(C->P->ctx,C->manifest_text);
+    json_free(C->P,&C->man);
+    if(C->buf)C->P->free(C->P->ctx,C->buf);
+}
+static int plan_init(ctx_t *C,const plat_t *P,const char *payload)
+{
+    memset(C,0,sizeof *C); C->P=P;
+    copy_str(C->payload,sizeof C->payload,payload);
+    strcpy(C->cfg.hostname,"SHIZUKUOS"); strcpy(C->cfg.drivers,"all");
+    C->cfg.bios_boot_code=1; C->cfg.allow_nonempty=1;
+    C->buf=P->alloc(P->ctx,IOBUF);
+    if(!C->buf)return failf(C,"out of memory");
+    return read_manifest(C);
+}
+static int dry_system(ctx_t *C,uint64_t mib,sfsw_info *info)
+{
+    sfsw_t *w=0; uint32_t *handles=0,logh=0;
+    gen_file_t gen[MAX_GEN]; int rc;
+    memset(gen,0,sizeof gen);
+    gen[0].path="/SHZ/SYSTEM.INI"; gen[0].len=4096;
+    gen[1].path="/SHZ/SETUP/shzsetup.ini"; gen[1].len=1024;
+    gen[2].path="/SHZ/SETUP/manifest.json"; gen[2].len=C->manifest_len;
+    gen[3].path=DRIVER_CATALOG_PATH; gen[3].len=DRIVER_CATALOG_MAX_BYTES;
+    gen[4].path=SETUP_PREFS_PATH; gen[4].len=16;
+    C->pfirst[1]=0; C->plast[1]=mib*(MIB/512)-1; C->ss=512;
+    C->layout_error=0;
+    rc=plan_system(C,&w,&handles,&logh,gen,MAX_GEN);
+    if(!rc){sfsw_get_info(w,info);if(info->free_blocks<PLAN_WORKSPACE/4096){C->layout_error=SFSW_ENOSPC;rc=-1;}}
+    if(w)sfsw_destroy(w);
+    if(handles)C->P->free(C->P->ctx,handles);
+    return rc;
+}
+static int image_details(ctx_t *C,setup_image_t *image)
+{
+    const jnode_t *x; uint64_t bytes=0,rounded=0,high=MIN_SYSTEM_MIB,low=MIN_SYSTEM_MIB;
+    sfsw_info info; int rc;
+    memset(image,0,sizeof *image);
+    if(!json_str(C->man.root,"product")||!json_str(C->man.root,"product")[0]||strlen(json_str(C->man.root,"product"))>=sizeof image->product)
+        return failf(C,"installation image product/version metadata missing or too long");
+    copy_str(image->product,sizeof image->product,json_str(C->man.root,"product"));
+    memcpy(image->manifest_sha256,C->manifest_sha,32);
+    json_u64(json_get(C->man.root,"esp"),"bytes",&image->esp_bytes);
+    for(x=json_get(json_get(C->man.root,"system"),"files")->kid;x;x=x->next){
+        if(!package_selected(C,json_str(x,"package")))continue;
+        json_u64(x,"bytes",&bytes);
+        if(bytes>UINT64_MAX-4095 || image->payload_bytes>UINT64_MAX-bytes ||
+           rounded>UINT64_MAX-((bytes+4095)/4096)*4096)return failf(C,"payload size overflow");
+        image->payload_bytes+=bytes; ++image->payload_files;
+        rounded+=((bytes+4095)/4096)*4096;
+    }
+    if(rounded>UINT64_MAX-PLAN_WORKSPACE-MIB+1)return failf(C,"payload capacity overflow");
+    high=(rounded+PLAN_WORKSPACE+MIB-1)/MIB;
+    if(high<MIN_SYSTEM_MIB)high=MIN_SYSTEM_MIB;
+    for(;;){
+        memset(&info,0,sizeof info);rc=dry_system(C,high,&info);
+        if(!rc)break;
+        if(C->layout_error!=SFSW_ENOSPC)return -1;
+        if(high>=(1ull<<24))return failf(C,"payload cannot fit supported SFS geometry");
+        high*=2;
+    }
+    while(low<high){uint64_t mid=low+(high-low)/2;
+        memset(&info,0,sizeof info);if(!dry_system(C,mid,&info))high=mid;
+        else if(C->layout_error==SFSW_ENOSPC)low=mid+1;else return -1;
+    }
+    C->fail[0]=0;
+    if(image->esp_bytes>UINT64_MAX-low*MIB-4*MIB)return failf(C,"installation size overflow");
+    image->required_bytes=image->esp_bytes+low*MIB+4*MIB;
+    return 0;
+}
+int setup_image_inspect(const plat_t *P,const char *payload,setup_image_t *image,setup_result_t *r)
+{
+    ctx_t C; plat_t silent=*P; int rc;
+    memset(r,0,sizeof *r);silent.out=quiet;
+    rc=plan_init(&C,&silent,payload);
+    if(!rc)rc=image_details(&C,image);
+    r->ok=!rc; copy_str(r->reason,sizeof r->reason,rc?C.fail:"");plan_cleanup(&C);return rc;
+}
+int setup_plan_build(const plat_t *P,const char *payload,const setup_target_t *target,
+                     uint32_t language,setup_plan_t *plan,setup_result_t *r)
+{
+    ctx_t C; plat_t silent=*P; sfsw_info info; int rc; unsigned i; uint8_t any=0;
+    memset(plan,0,sizeof *plan);memset(r,0,sizeof *r);silent.out=quiet;
+    rc=plan_init(&C,&silent,payload);if(rc)goto done;
+    for(i=0;i<16;++i)any|=target->whole_id[i];
+    if(!any||!target->generation||(language!=SETUP_LANGUAGE_KO&&language!=SETUP_LANGUAGE_EN)||
+       target->disk.flags&(PLAT_DISK_PARTITION|PLAT_DISK_READONLY)||target->disk.sector_size!=512||
+       target->disk.sectors>UINT64_MAX/512){rc=failf(&C,"target authority or geometry unavailable");goto done;}
+    rc=image_details(&C,&plan->image);if(rc)goto done;
+    if(target->disk.sectors*512<plan->image.required_bytes){rc=failf(&C,"insufficient target capacity");goto done;}
+    C.di=target->disk;C.disk=target->index;C.ss=512;
+    rc=plan_layout(&C);if(rc)goto done;
+    memcpy(plan->first,C.pfirst,sizeof plan->first);memcpy(plan->last,C.plast,sizeof plan->last);
+    memset(&info,0,sizeof info);
+    rc=dry_system(&C,(plan->last[1]-plan->first[1]+1)/2048,&info);if(rc){failf(&C,"system tree or workspace cannot fit");goto done;}
+    plan->version=SETUP_PLAN_VERSION;plan->language=language;plan->keyboard=SETUP_KEYBOARD_US;
+    plan->target=*target;plan->partitions=(uint32_t)C.nparts;
+    plan->required_bytes=plan->image.required_bytes;
+    plan->system_used_bytes=(info.blocks-info.free_blocks)*4096;
+    plan->workspace_bytes=PLAN_WORKSPACE;plan->bios_boot=(uint32_t)C.bios_boot;
+    plan->erase_whole_disk=1;
+done:
+    r->ok=!rc;copy_str(r->reason,sizeof r->reason,rc?C.fail:"");plan_cleanup(&C);return rc;
 }

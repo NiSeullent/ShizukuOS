@@ -33,7 +33,14 @@ long shz_standalone_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_out)
         break;
     }
     case SHZ_HC_EXIT:
-        if (a <= 1) { extern void vfs_shutdown(void); vfs_shutdown(); }   /* normal exit: commit + flush write-back volumes */
+        if (a <= 1) {   /* normal exit: commit + flush write-back volumes, then the driver quiesce, before the power action */
+            extern void vfs_shutdown(void);
+            extern int shz_driver_bringup_quiesce(void);
+            int q;
+            vfs_shutdown();
+            q = shz_driver_bringup_quiesce();   /* IRP_MJ_SHUTDOWN to hosted drivers + whole-device flush; runs once */
+            if (q) kprintf("K64 exit: driver quiesce reported %d flush failure(s)\n", q);
+        }
         sa_exit((unsigned)a);
     case SHZ_HC_TIMER_SET: st = sa_timer_set((unsigned)a, (uint32_t)b); break;
     case SHZ_HC_WAIT: __asm__ volatile("sti; hlt"); break;

@@ -1,6 +1,10 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * Standalone Kernel64 boot stub, C part (32-bit protected mode, paging off, flat segments).
  * Multiboot modules: [0] KERNEL64 image (copied to 1 MiB), [1] initial RAM archive (copied to 32 MiB).
+ * Kernel64 only: a module among the first three whose first 8 bytes are SHZ_BMAN_MAGIC is the installed-target
+ * manifest \SHZDOS\SHZBOOT.MAN (syslinux `--- /SHZDOS/SHZBOOT.MAN`, routing02 C3). It is never the initrd; it is
+ * snapshotted (<= 4096 bytes) before any copy and verified against the relocated kernel and initrd bytes. Any
+ * mismatch refuses the boot; without it the historical unattested route continues and `install` stays zero.
  * Diagnostics go to COM1; on error the stub reports and asks QEMU to exit (isa-debug-exit).
  */
 #include <stdint.h>
@@ -10,22 +14,23 @@
 #include "module_relocation.h"
 #ifdef STUB_K32
 #include "k32_cmdline.h"
+#else
+#define SHZ_INSTID_WANT_VERIFIER
+#include "../install_identity.h"
+#define STUB_MAX_MODS 3u                           /* kernel, initrd, manifest; later modules keep being ignored */
+#endif
+#ifndef STUB_MAX_MODS
+#define STUB_MAX_MODS 2u
 #endif
 
 #ifdef STUB_K32                                    /* Kernel32: 32-bit Protected Mode, paging off, EBX = bootinfo */
 #define STUB_DOMAIN SHZ_DOM_KERNEL32
 #define MAX_RAM (128u << 20)                       /* Kernel32's page allocator limit (mem.c MAX_PAGES) */
-#define KERNEL_WINDOW_END SHZ_STUB_K32_KERNEL_END  /* Kernel32: unchanged [1 MiB, 3 MiB) window, 1 MiB file */
-#define KERNEL_FILE_MAX SHZ_STUB_K32_FILE_MAX
-#define KERNEL_SIZE_WHY "kernel image size (file + bss must stay below 3 MiB), "
 #else
 #define STUB_DOMAIN SHZ_DOM_KERNEL64
 #define MAX_RAM 0xE0000000u                        /* 3.5 GiB: the most a QEMU pc guest has below 4 GiB; mem.c manages up to 4 GiB */
-#define KERNEL_WINDOW_END SHZ_K64_KERNEL_END        /* Kernel64: memholes.h [1 MiB, 4 MiB) window, heap from 4 MiB */
-#define KERNEL_FILE_MAX SHZ_K64_KERNEL_FILE_MAX
-#define KERNEL_SIZE_WHY "kernel image size (file + bss must stay below 4 MiB), "
 #endif
-#define KERNEL_GPA SHZ_STUB_KERNEL_GPA
+#define KERNEL_GPA 0x100000u
 #define INITRD_GPA 0x2000000u
 #define MB_MAGIC 0x2BADB002u
 #define MB_INFO_MEM_MAP 0x40u
@@ -132,8 +137,13 @@ static uint32_t memory_layout(uint32_t isize)
 void stub_prepare(uint32_t magic, const struct mbi *mbi)
 {
     static char cmdline[SHZ_CMDLINE_MAX];          /* stub .bss (above 4 MiB), untouched by the copies below */
-    struct mod mods[2];                           /* Snapshot descriptors before kernel zero/initrd relocation. */
-    uint32_t ksize, isize = 0, ram, i, cmdline_len = 0, has_initrd;
+    struct mod mods[STUB_MAX_MODS];               /* Snapshot descriptors before kernel zero/initrd relocation. */
+    uint32_t ksize, isize = 0, ram, i, cmdline_len = 0, has_initrd, nmods;
+#ifndef STUB_K32
+    static uint64_t manifest[SHZ_BMAN_MAX_BYTES / 8];  /* stub .bss snapshot of SHZBOOT.MAN */
+    static shz_install_identity_t install;
+    uint32_t msize = 0, manifest_index = 0;
+#endif
     volatile shz_bootinfo_t *bi = (volatile shz_bootinfo_t *)SHZ_BOOTINFO_GPA;
     volatile uint32_t *pml4 = (volatile uint32_t *)0x1000, *pdpt_lo = (volatile uint32_t *)0x2000,
                       *pd = (volatile uint32_t *)0x3000, *pdpt_hi = (volatile uint32_t *)0x4000;
@@ -149,27 +159,47 @@ void stub_prepare(uint32_t magic, const struct mbi *mbi)
     }
     if (!(mbi->flags & 8) || mbi->mods_count < 1) fail("need module 0 = KERNEL64 image, flags=", mbi->flags);
     memory_ranges(mbi);
-    has_initrd = mbi->mods_count > 1;
+    nmods = mbi->mods_count < STUB_MAX_MODS ? mbi->mods_count : STUB_MAX_MODS;
     {
-        const uint64_t descriptors_end = (uint64_t)mbi->mods_addr + (has_initrd ? 2u : 1u) * sizeof(struct mod);
+        const uint64_t descriptors_end = (uint64_t)mbi->mods_addr + nmods * sizeof(struct mod);
         const volatile struct mod *source = (const volatile struct mod *)mbi->mods_addr;
         if (!mbi->mods_addr || descriptors_end > UINT32_MAX ||
             !shz_memplan_covers(&runs, mbi->mods_addr, descriptors_end))
             fail("module descriptors outside usable RAM", mbi->mods_addr);
-        for (i = 0; i < (has_initrd ? 2u : 1u); ++i) {
+        for (i = 0; i < nmods; ++i) {
             mods[i].start = source[i].start; mods[i].end = source[i].end;
             mods[i].string = source[i].string; mods[i].reserved = source[i].reserved;
         }
     }
+#ifndef STUB_K32
+    /* Classify modules 1..2 by content, before any copy can overwrite them. Exactly one manifest at most. */
+    for (i = 1; i < nmods; ++i) {
+        const uint32_t n = mods[i].end > mods[i].start ? mods[i].end - mods[i].start : 0;
+        uint32_t k;
+        if (n < 8 || !shz_memplan_covers(&runs, mods[i].start, (uint64_t)mods[i].start + 8u) ||
+            !shz_instid_is_manifest((const volatile uint8_t *)mods[i].start, n))
+            continue;
+        if (manifest_index) fail("more than one SHZBOOT.MAN module, second at", mods[i].start);
+        if (n > SHZ_BMAN_MAX_BYTES || mods[i].start < (uint32_t)stub_end ||
+            !shz_memplan_covers(&runs, mods[i].start, mods[i].end))
+            fail("SHZBOOT.MAN module outside the 4096-byte bound or usable RAM, size", n);
+        for (k = 0; k < n; ++k)
+            ((uint8_t *)manifest)[k] = ((const volatile uint8_t *)mods[i].start)[k];
+        msize = n;
+        manifest_index = i;
+    }
+    has_initrd = nmods > 1 && manifest_index != 1;  /* the manifest is never the initial RAM image */
+#else
+    has_initrd = nmods > 1;
+#endif
     if (mods[0].end <= mods[0].start || (has_initrd && mods[1].end < mods[1].start))
         fail("reversed or empty kernel module extent", mods[0].start);
     ksize = mods[0].end - mods[0].start;
     if (has_initrd) isize = mods[1].end - mods[1].start;
     ram = memory_layout(isize);
     if (ram < (64u << 20)) fail("need at least 64 MiB, have ", ram);
-    if (ksize == 0 || ksize > KERNEL_FILE_MAX) fail(KERNEL_SIZE_WHY, ksize);
-    if (!shz_stub_relocation_valid(&runs, ram, KERNEL_WINDOW_END, KERNEL_FILE_MAX, (uint32_t)stub_end,
-                mods[0].start, mods[0].end,
+    if (ksize == 0 || ksize > SHZ_STUB_KERNEL_FILE_MAX) fail("kernel image size (file + bss must stay below 3 MiB), ", ksize);
+    if (!shz_stub_relocation_valid(&runs, ram, (uint32_t)stub_end, mods[0].start, mods[0].end,
                 has_initrd ? mods[1].start : 0, has_initrd ? mods[1].end : 0, has_initrd))
         fail("module relocation outside safe usable RAM", mods[0].start);
     if (mbi->flags & 4) {                          /* Capture before module copies. K64 retains its historical raw,
@@ -192,11 +222,25 @@ void stub_prepare(uint32_t magic, const struct mbi *mbi)
 #endif
     }
 
-    /* bss of the kernel image reads as zero, as after the Supervisor's memset: the whole window up to its exclusive
-     * end, which is at or below this stub's own image (module_relocation.h asserts it). */
-    zero(KERNEL_GPA, KERNEL_WINDOW_END - KERNEL_GPA);
+    zero(KERNEL_GPA, 0x300000u - KERNEL_GPA);      /* bss of the kernel image reads as zero, as after the Supervisor's memset */
     copy(KERNEL_GPA, mods[0].start, ksize);
     if (isize) copy(INITRD_GPA, mods[1].start, isize);
+#ifndef STUB_K32
+    if (msize) {                                   /* hash the relocated bytes Kernel64 will actually run */
+        const char *why = 0;
+        if (shz_instid_verify(manifest, msize, (const volatile uint8_t *)KERNEL_GPA, ksize,
+                              isize ? (const volatile uint8_t *)INITRD_GPA : 0, isize,
+                              SHZ_INSTID_MULTIBOOT, &install, &why)) {
+            say("SHZ-STUB: SHZBOOT.MAN binds this installed target and verification failed: "); say(why);
+            say("\nSHZ-STUB: an attested target never boots a different kernel or RAM image\n");
+            fail("installed-target manifest refused, module", manifest_index);
+        }
+        say("SHZ-STUB: installed target attested by SHZBOOT.MAN, generation ");
+        hex((uint32_t)(install.install_generation >> 32)); hex((uint32_t)install.install_generation); say("\n");
+    } else {
+        say("SHZ-STUB: no SHZBOOT.MAN module; historical unattested route\n");
+    }
+#endif
 
 #ifndef STUB_K32
     zero(0x1000, 0x4000);
@@ -237,6 +281,10 @@ void stub_prepare(uint32_t magic, const struct mbi *mbi)
     for (i = 0; i < cmdline_len; ++i)              /* ABI 1.1 tail; the framebuffer fields stay zero (no GOP here) */
         bi->cmdline[i] = cmdline[i];
     bi->cmdline_size = cmdline_len;
+#ifndef STUB_K32
+    for (i = 0; i < sizeof install; ++i)           /* zero unless verified above; bi->size covers it */
+        ((volatile uint8_t *)&bi->install)[i] = ((const uint8_t *)&install)[i];
+#endif
     say("SHZ-STUB: kernel ");  hex(ksize);
     say(" initrd ");           hex(isize);
     say(" ram ");              hex(ram);

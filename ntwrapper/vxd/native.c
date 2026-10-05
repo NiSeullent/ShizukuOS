@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-only -- original native callback binding. */
 #include "bridge.h"
 #include "pma_endpoint.h"
-#ifdef NTWV_W64_DERIVED_OWNER
-#include "w64_owner.h"
-#endif
+/* shz_w64_owner.h revoke reasons (DEVICE_CLOSE = 1, PROCESS_DEPARTURE = 2); bridge.c validates them. */
+#define SHZ_W64_REVOKE_DEVICE_CLOSE_ID 1u
+#define SHZ_W64_REVOKE_PROCESS_DEPARTURE_ID 2u
 extern uintptr_t ntwv_irq_enter(void *opaque);
 extern void ntwv_irq_leave(void *opaque, uintptr_t saved);
 extern uint32_t ntwv_vmm_check(uint32_t, uint32_t, uint32_t);
@@ -12,7 +12,6 @@ extern uint32_t ntwv_vmm_unlock(uint32_t, uint32_t, uint32_t);
 extern uint32_t ntwv_vmm_ptes(uint32_t, uint32_t, uint32_t *, uint32_t);
 extern uint32_t ntwv_vmm_map_phys(uint32_t, uint32_t, uint32_t);
 extern int32_t ntwv_vmcall(uint32_t op, uint32_t a, uint32_t b, uint32_t *ebx_out, uint32_t *ecx_out);
-extern int32_t ntwv_vmcall3(uint32_t op, uint32_t a, uint32_t b, uint32_t c, uint32_t *ebx_out, uint32_t *ecx_out);
 extern void ntwv_cpuid(uint32_t leaf, uint32_t regs[4]);
 extern uint32_t ntwv_vmm_system_vm(void), ntwv_vmm_current_vm(void), ntwv_vmm_current_thread(void), ntwv_vmm_now_ms(void);
 extern uint32_t ntwv_vmm_open_event(uint32_t), ntwv_vmm_schedule_event(uint32_t), ntwv_vmm_schedule_timeout(uint32_t,uint32_t);
@@ -55,7 +54,7 @@ static void *map_phys(uint32_t phys, uint32_t bytes)
 {
     return (void *)(uintptr_t)ntwv_vmm_map_phys(phys, bytes, 0);
 }
-static const struct ntwv_hv native_hv = { hypervisor_present, ntwv_vmcall, map_phys, ntwv_vmcall3 };
+static const struct ntwv_hv native_hv = { hypervisor_present, ntwv_vmcall, map_phys };
 static const struct ntwv_pma_services native_services = {
     ntwv_vmm_system_vm, ntwv_vmm_current_vm, ntwv_vmm_current_thread, ntwv_vmm_now_ms,
     ntwv_vmm_open_event, ntwv_vmm_set_event, ntwv_vmm_close_event,
@@ -88,10 +87,6 @@ int ntwv_native_init(void)
     if(image_locked) return 0;
     if (!ntwv_initialize(&ops))
         return 0;
-#ifdef NTWV_W64_DERIVED_OWNER
-    ntwv_w64_owner_bind_lock(ntwv_irq_enter, ntwv_irq_leave);
-    ntwv_w64_owner_bind_system_vm(ntwv_vmm_system_vm());
-#endif
     runtime_stopped=0;
     if (!lock_image()) {
         (void)ntwv_shutdown();
@@ -136,27 +131,25 @@ uint32_t ntwv_native_dioc(const struct ntwv_dioc *request)
 {
     const struct ntwv_pages ops = { ntwv_vmm_check, ntwv_vmm_lock,
         ntwv_vmm_unlock, ntwv_vmm_ptes, ntwv_irq_enter, ntwv_irq_leave, write_alias, read_alias };
-    uint32_t result;
     if (request && request->code == UINT32_MAX) {
         ntwv_pma_owner_departed(request->vm, 0, request->device, request->process);
-#ifdef NTWV_W64_DERIVED_OWNER
-        ntwv_w64_owner_handle_close(request->process);   /* last DIOC_CLOSEHANDLE retires the tagProcess identity */
-#endif
+        /* DIOC_CLOSEHANDLE (also issued by VWIN32 when a process exits with the handle open): revoke the
+         * generational W64 endpoint owner bound to exactly this VM/hDevice/tagProcess context. */
+        if (request->vm && request->device && request->process)
+            ntwv_w64_owner_departed(&native_hv, request->vm, request->device, request->process,
+                                    SHZ_W64_REVOKE_DEVICE_CLOSE_ID);
     }
-    result = ntwv_dioc_ex(request, &ops, &native_hv);
-#ifdef NTWV_W64_DERIVED_OWNER
-    /* DIOC_OPEN accepted: count the new handle. An unrecordable open still opens (PMA unchanged) but that process
-     * gets no derived W64 identity, so its W64 SENDs are refused rather than stamped. */
-    if (request && request->code == 0 && result == 0)
-        (void)ntwv_w64_owner_handle_open(request->vm, request->process);
-#endif
-    return result;
+    return ntwv_dioc_ex(request, &ops, &native_hv);
 }
 
 void ntwv_native_lifecycle(uint32_t code, uint32_t vm, uint32_t thread)
 {
     if (code == 0x20u || code == 0x21u)
         ntwv_pma_owner_departed(0, thread, 0, 0);
-    else
+    else {
         ntwv_pma_owner_departed(vm, 0, 0, 0);
+        /* VM departure: every native owner bound in that VM has departed. Owners are not thread-bound. */
+        if (vm)
+            ntwv_w64_owner_departed(&native_hv, vm, 0, 0, SHZ_W64_REVOKE_PROCESS_DEPARTURE_ID);
+    }
 }

@@ -5,14 +5,12 @@
 #include "domain.h"
 #include "bios.h"
 #include "console.h"
+#include "core.h"
 #include "cpu.h"
 #include "devices.h"
 #include "pool.h"
 #include "video.h"
 #include "../native_win98/win98.h"
-#include "../../abi/shz_clock.h"
-#include "../../abi/shz_ipc.h"
-#include "chan_attest.h"
 
 domain_t g_dom[SHZ_MAX_DOMAINS];
 shz_info_t *g_info;
@@ -98,15 +96,6 @@ static uint64_t elapsed_ns(void)
 {
     const uint64_t t = rdtsc() - g_start_tsc, sec = t / g_tsc_hz, rem = t % g_tsc_hz;
     return sec * 1000000000ull + rem * 1000000000ull / g_tsc_hz;
-}
-
-static int32_t clock_sample(void *opaque, uint64_t *value)
-{
-    (void)opaque;
-    /* One read of the existing Core authority, using its boot origin/frequency.
-     * The independently versioned call checks arithmetic; HC_TIME stays intact. */
-    if (!g_tsc_hz) return SHZ_E_INVALID;
-    return shz_clock_ticks_ns(rdtsc() - g_start_tsc, g_tsc_hz, value);
 }
 
 /* ------------------------------------------------------------------ CPUID */
@@ -262,40 +251,41 @@ static void kernel_handle_io(domain_t *d)
     dom_advance_rip();
 }
 
+/* Host-private publications own routes. Shared channel headers and the
+ * diagnostic info->domains mirror cannot grant notification authority. */
+static int notify_owner_live(const domain_t *d)
+{
+    dom_kind_t kind;
+    switch (d->id) {
+    case SHZ_DOM_DOS16: kind = DK_DOS16; break;
+    case SHZ_DOM_KERNEL32: kind = DK_KERNEL32; break;
+    case SHZ_DOM_KERNEL64: kind = DK_KERNEL64; break;
+    case SHZ_DOM_WIN98: kind = DK_WIN98; break;
+    default: return 0;
+    }
+    return d == &g_dom[d->id] && d->kind == kind && d->generation &&
+           (d->state == SHZ_DS_RUNNABLE || d->state == SHZ_DS_WAITING);
+}
+
+static int notify_route(const domain_t *sender, const domain_t *target)
+{
+    unsigned c;
+    const uint64_t bytes = (uint64_t)SHZ_MAX_CHANNELS * SHZ_IPC_REGION_SIZE;
+    if (sender == target || !notify_owner_live(sender) || !notify_owner_live(target) ||
+        !g_info->ipc_base || (g_info->ipc_base & 4095) || (g_info->ipc_size & 4095) ||
+        g_info->ipc_size < bytes || g_info->ipc_base > UINT64_MAX - g_info->ipc_size)
+        return 0;
+    for (c = 0; c < SHZ_MAX_CHANNELS; ++c) {
+        const uint64_t hpa = g_info->ipc_base + (uint64_t)c * SHZ_IPC_REGION_SIZE;
+        if (sender->chan[c].mapped && target->chan[c].mapped &&
+            sender->chan[c].peer == target->id && target->chan[c].peer == sender->id &&
+            sender->chan[c].hpa == hpa && target->chan[c].hpa == hpa)
+            return 1;
+    }
+    return 0;
+}
+
 /* ------------------------------------------------------------------ hypercalls */
-/* Channel attestation (abi/shz_abi.h SHZ_HC_CHANNEL_ATTEST/ATTESTED): Supervisor-owned record, never the shared page.
- * Only the Win98 domain's ring-0 VxD may attest the channel it shares with Kernel64, for the generation currently in the
- * channel header, once per generation. Kernel64 reads it back; it is void once the attester's domain generation changes. */
-static shz_chan_attest_rec_t chan_attest[SHZ_MAX_CHANNELS];
-
-static int64_t chan_attest_set(domain_t *d, uint64_t c, uint64_t gen, uint64_t bits, uint64_t *out)
-{
-    const uint64_t ss_ar = vmread(VMCS_GUEST_SS_AR), rflags = vmread(VMCS_GUEST_RFLAGS), cr0 = vmread(VMCS_GUEST_CR0);
-    const int mapped = c < SHZ_MAX_CHANNELS && d->chan[c].mapped;
-    const uint32_t peer = mapped ? d->chan[c].peer : SHZ_MAX_DOMAINS;
-    const int caller_ok = d->kind == DK_WIN98 && (cr0 & 1) && ((ss_ar >> 5) & 3) == 0 && !(rflags & (1ull << 17));
-    const int peer_ok = peer < SHZ_MAX_DOMAINS && g_dom[peer].kind == DK_KERNEL64;
-    const uint32_t header_gen = mapped ? ((const volatile shz_channel_hdr_t *)(uintptr_t)d->chan[c].hpa)->generation : 0;
-    int64_t st;
-    if (!mapped) { *out = 0; return SHZ_E_NOENT; }
-    st = shz_chan_attest_decide(&chan_attest[c], 1, caller_ok, peer_ok, gen, header_gen, bits, (uint32_t)(d - g_dom),
-                                d->generation, out);
-    if (st == SHZ_OK)
-        kprintf("SHZ: channel %u generation %u attested by %s: bits %llx\n", (unsigned)c, (unsigned)gen, d->name,
-                (unsigned long long)*out);
-    return st;
-}
-
-static int64_t chan_attest_get(domain_t *d, uint64_t c, uint64_t *bits, uint64_t *gen)
-{
-    const int mapped = c < SHZ_MAX_CHANNELS && d->chan[c].mapped;
-    const shz_chan_attest_rec_t *r = mapped ? &chan_attest[c] : 0;
-    const domain_t *a = r && r->generation && r->attester < SHZ_MAX_DOMAINS ? &g_dom[r->attester] : 0;
-    const int alive = a && shz_chan_attester_alive(r, 1, a->generation, a->state);
-    if (!mapped) { *bits = *gen = 0; return SHZ_E_NOENT; }
-    return shz_chan_attest_lookup(r, 1, alive, bits, gen);
-}
-
 int hcall_vmcall(domain_t *d)
 {
     uint64_t *r = d->vc.gpr;
@@ -337,6 +327,10 @@ int hcall_vmcall(domain_t *d)
             status = SHZ_E_NOENT;
             break;
         }
+        if (!notify_route(d, &g_dom[target])) {
+            status = SHZ_E_DENIED;
+            break;
+        }
         g_dom[target].doorbell_pending |= (uint32_t)r[GPR_RCX];
         g_dom[target].doorbell_signaled = 0;
         break;
@@ -347,13 +341,12 @@ int hcall_vmcall(domain_t *d)
         if (!d->doorbell_pending)
             d->state = SHZ_DS_WAITING;
         break;
-    case SHZ_HC_TIME:
-        r[GPR_RBX] = elapsed_ns();
+    case SHZ_HC_TIME: {
+        const uint64_t ns = elapsed_ns();
+        r[GPR_RBX] = ns;
+        r[GPR_RCX] = ns >> 32;   /* Same sample's high word for protected-mode guests. */
         break;
-    case SHZ_HC_CLOCK_SPLIT:
-        status = shz_clock_split(r[GPR_RBX], r[GPR_RCX], clock_sample, 0,
-                                 &r[GPR_RBX], &r[GPR_RCX]);
-        break;
+    }
     case SHZ_HC_SET_DOORBELL_VECTOR:
         if (r[GPR_RBX] < 32 || r[GPR_RBX] > 255) status = SHZ_E_INVALID;
         else d->doorbell_vector = (uint8_t)r[GPR_RBX];
@@ -384,25 +377,25 @@ int hcall_vmcall(domain_t *d)
         r[GPR_RCX] = d->chan[c].peer;
         break;
     }
-    case SHZ_HC_CHANNEL_ATTEST: {
-        uint64_t bits = 0;
-        /* The Win98 domain is a 32-bit guest: only EBX/ECX/EDX are its arguments; stale upper halves never count. */
-        const uint64_t m32 = d->kind == DK_WIN98 ? 0xffffffffull : ~0ull;
-        status = chan_attest_set(d, r[GPR_RBX] & m32, r[GPR_RCX] & m32, r[GPR_RDX] & m32, &bits);
-        r[GPR_RBX] = bits;
-        break;
-    }
-    case SHZ_HC_CHANNEL_ATTESTED: {
-        uint64_t bits = 0, gen = 0;
-        status = chan_attest_get(d, r[GPR_RBX] & (d->kind == DK_WIN98 ? 0xffffffffull : ~0ull), &bits, &gen);
-        r[GPR_RBX] = bits;
-        r[GPR_RCX] = gen;
-        break;
-    }
     case SHZ_HC_NATIVE_GOP_EPOCH: {
         uint32_t word=0;
         status=win98_native_gop_epoch_word(d,r[GPR_RBX],r[GPR_RCX],&word);
         r[GPR_RBX]=status==SHZ_OK?word:0;r[GPR_RCX]=status==SHZ_OK?40:0;
+        break;
+    }
+    case SHZ_HC_DRIVER_REPORT: {
+        /* Kernel64-only, RAM-only (never a shared IPC window), copied once
+         * into Supervisor memory before any validation. */
+        shz_drvrep_t report;
+        const uint64_t gpa = r[GPR_RBX], len = r[GPR_RCX];
+        if (d->id != SHZ_DOM_KERNEL64 || d->kind != DK_KERNEL64) { status = SHZ_E_DENIED; r[GPR_RBX] = (uint64_t)status; break; }
+        if (len != sizeof report) { status = SHZ_E_INVALID; r[GPR_RBX] = (uint64_t)status; break; }
+        if (gpa > d->ram_size || len > d->ram_size - gpa || d->ram_base > UINT64_MAX - d->ram_size) {
+            status = SHZ_E_RANGE; r[GPR_RBX] = (uint64_t)status; break;
+        }
+        memcpy(&report, (const void *)(uintptr_t)(d->ram_base + gpa), sizeof report);
+        status = shz_core_driver_report(d->id, d->generation, &report);
+        r[GPR_RBX] = (uint64_t)status;
         break;
     }
     case SHZ_HC_WALLTIME: {

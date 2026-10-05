@@ -40,9 +40,7 @@ enum {
     SFS_ENAMETOOLONG = -13,
     SFS_EFBIG = -14,
     SFS_EBUSY = -15,
-    SFS_ERANGE = -16,
-    SFS_EACCES = -17,       /* caller's credential lacks the requested permission (sfs_access.h) */
-    SFS_EPERM = -18         /* operation reserved to the owner or a privileged credential (sfs_access.h) */
+    SFS_ERANGE = -16
 };
 
 /* Mount flags. */
@@ -174,6 +172,20 @@ int sfs_set_times(sfs_fs *fs, uint32_t ino, const int64_t *atime, const int64_t 
 int sfs_set_mode(sfs_fs *fs, uint32_t ino, uint16_t mode);
 /* Resolves a '/'-separated absolute path (host tools; symlinks are not followed). */
 int sfs_path_lookup(sfs_fs *fs, const char *path, uint32_t *ino, uint32_t *parent, const char **leaf, size_t *leaf_len);
+
+/* Atomic record store (sfs_record.c): small named records in directory `dir`, stored as regular files whose
+ * contents carry a CRC-checked header (no on-disk layout change). sfs_record_put() writes "<name>.~nw", syncs,
+ * reads it back, renames it over <name> in one journaled operation, syncs and reads the committed record back;
+ * *seq receives the record's sequence number (1, then +1 per replacement). sfs_record_get() returns SFS_ENOENT,
+ * SFS_ECORRUPT (header/CRC/size mismatch), SFS_ERANGE (cap too small; *len holds the size) or 0.
+ * sfs_record_recover() deletes uncommitted staging files left by a crash (returns how many, or < 0). */
+#define SFS_RECORD_MAX 65536u
+int sfs_record_put(sfs_fs *fs, uint32_t dir, const char *name, size_t len, const void *data, uint32_t dlen,
+                   uint64_t *seq);
+int sfs_record_get(sfs_fs *fs, uint32_t dir, const char *name, size_t len, void *buf, uint32_t cap, uint32_t *dlen,
+                   uint64_t *seq);
+int sfs_record_delete(sfs_fs *fs, uint32_t dir, const char *name, size_t len);
+int sfs_record_recover(sfs_fs *fs, uint32_t dir);
 
 /* Diagnostics: what the media says right now (read from the device, not the cache): the superblock's
  * needs_recovery flag / VALID_FS state and the journal superblock's s_start (0 = empty log). */

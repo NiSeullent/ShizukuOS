@@ -4,6 +4,7 @@
  * and the single-monitor display queries. Window DCs come from gdi32 (ShzGdiWindowDC); every DC obtained here is flushed to
  * the kernel window manager when it is released. */
 #include "user32_int.h"
+#include "user32_text_layout.h"
 
 /* ---------------------------------------------------------------- DCs and paint cycle */
 DLLAPI HDC WINAPI GetDC(HWND hwnd)
@@ -278,115 +279,170 @@ DLLAPI BOOL WINAPI DrawFocusRect(HDC hdc, const RECT *rc)
     return TRUE;
 }
 
-/* DrawText: DT_LEFT/CENTER/RIGHT/TOP/VCENTER/BOTTOM, SINGLELINE, WORDBREAK, EXPANDTABS, NOCLIP, NOPREFIX, CALCRECT and
- * END_ELLIPSIS. Every width is measured with GetTextExtentPoint32W, the same per-character advances ExtTextOutW draws
- * with (ASCII 8 px, Hangul and other full-width glyphs 16 px at scale 1). '&' prefixes are removed but no underline is
- * drawn. */
-static int dt_width(HDC hdc, const WCHAR *s, int n)
+/* DrawText: variable-width layout over the DC's current font. All widths come from GetTextExtentPoint32W /
+ * GetTextExtentExPointW (the same metrics ExtTextOutW draws with), not from count * tmAveCharWidth; the algorithm is the
+ * portable user32_text_layout.c (also compiled into the host controls). Honoured: DT_LEFT/CENTER/RIGHT, TOP/VCENTER/BOTTOM
+ * (VCENTER/BOTTOM with SINGLELINE only, as Windows documents), SINGLELINE, WORDBREAK, EXPANDTABS/TABSTOP, NOCLIP, NOPREFIX,
+ * HIDEPREFIX, PREFIXONLY, CALCRECT, END/PATH/WORD_ELLIPSIS, MODIFYSTRING, EDITCONTROL, EXTERNALLEADING,
+ * NOFULLWIDTHCHARBREAK, INTERNAL (system stock font is selected for the call). DT_RTLREADING and undefined bits fail with
+ * ERROR_NOT_SUPPORTED (no bidi reordering exists). See user32_text_layout.h for the documented simplifications. A failed
+ * measurement or draw call makes DrawTextW return 0 with that call's last error. */
+#define DT_ASSERT(a, b) _Static_assert((a) == (b), "DT_* value drifted from user32_text_layout.h")
+DT_ASSERT(DT_CENTER, SHZ_TL_DT_CENTER); DT_ASSERT(DT_RIGHT, SHZ_TL_DT_RIGHT); DT_ASSERT(DT_VCENTER, SHZ_TL_DT_VCENTER);
+DT_ASSERT(DT_BOTTOM, SHZ_TL_DT_BOTTOM); DT_ASSERT(DT_WORDBREAK, SHZ_TL_DT_WORDBREAK); DT_ASSERT(DT_SINGLELINE, SHZ_TL_DT_SINGLELINE);
+DT_ASSERT(DT_EXPANDTABS, SHZ_TL_DT_EXPANDTABS); DT_ASSERT(DT_TABSTOP, SHZ_TL_DT_TABSTOP); DT_ASSERT(DT_NOCLIP, SHZ_TL_DT_NOCLIP);
+DT_ASSERT(DT_EXTERNALLEADING, SHZ_TL_DT_EXTERNALLEADING); DT_ASSERT(DT_CALCRECT, SHZ_TL_DT_CALCRECT);
+DT_ASSERT(DT_NOPREFIX, SHZ_TL_DT_NOPREFIX); DT_ASSERT(DT_INTERNAL, SHZ_TL_DT_INTERNAL); DT_ASSERT(DT_EDITCONTROL, SHZ_TL_DT_EDITCONTROL);
+DT_ASSERT(DT_PATH_ELLIPSIS, SHZ_TL_DT_PATH_ELLIPSIS); DT_ASSERT(DT_END_ELLIPSIS, SHZ_TL_DT_END_ELLIPSIS);
+DT_ASSERT(DT_MODIFYSTRING, SHZ_TL_DT_MODIFYSTRING); DT_ASSERT(DT_RTLREADING, SHZ_TL_DT_RTLREADING);
+DT_ASSERT(DT_WORD_ELLIPSIS, SHZ_TL_DT_WORD_ELLIPSIS); DT_ASSERT(DT_NOFULLWIDTHCHARBREAK, SHZ_TL_DT_NOFULLWIDTHCHARBREAK);
+DT_ASSERT(DT_HIDEPREFIX, SHZ_TL_DT_HIDEPREFIX); DT_ASSERT(DT_PREFIXONLY, SHZ_TL_DT_PREFIXONLY);
+
+typedef struct { HDC hdc; DWORD err; } dt_ctx_t;
+
+static int dt_fail(dt_ctx_t *c)
 {
-    SIZE sz;
-    return n > 0 && GetTextExtentPoint32W(hdc, s, n, &sz) ? sz.cx : 0;
+    const DWORD e = GetLastError();
+    c->err = e ? e : ERROR_GEN_FAILURE;
+    return 0;
 }
 
-/* Menus and message boxes measure before they have a DC; they draw with the default font, so a private memory DC
- * that keeps the default font gives the same per-character advances (ASCII 8, Hangul 16) gdi32 draws with. */
-int u32_text_px(LPCWSTR s, int n)
+static int dt_measure(void *ctx, const uint16_t *s, int n, int *w)
 {
-    static HDC measure_dc;
-    HDC dc = measure_dc;
-    if (!dc) {
-        HDC fresh = CreateCompatibleDC(0);
-        if (!fresh) return n * 8;                                  /* no GDI: the built-in font's ASCII advance */
-        if (InterlockedCompareExchangePointer((PVOID *)&measure_dc, fresh, 0) != 0) DeleteDC(fresh);
-        dc = measure_dc;
+    dt_ctx_t *c = ctx;
+    SIZE sz;
+    SetLastError(0);
+    if (!GetTextExtentPoint32W(c->hdc, (LPCWSTR)s, n, &sz)) return dt_fail(c);
+    *w = (int)sz.cx;
+    return 1;
+}
+
+static int dt_fit(void *ctx, const uint16_t *s, int n, int maxw, int *fit, int *w)
+{
+    dt_ctx_t *c = ctx;
+    SIZE sz;
+    int f = 0;
+    SetLastError(0);
+    if (!GetTextExtentExPointW(c->hdc, (LPCWSTR)s, n, maxw, &f, NULL, &sz)) return dt_fail(c);
+    if (f < 0 || f > n) { SetLastError(ERROR_INVALID_DATA); return dt_fail(c); }
+    *fit = f;
+    return dt_measure(ctx, s, f, w);
+}
+
+static void *dt_alloc(void *ctx, size_t bytes) { (void)ctx; return HeapAlloc(GetProcessHeap(), 0, bytes); }
+static void dt_free(void *ctx, void *p) { (void)ctx; if (p) HeapFree(GetProcessHeap(), 0, p); }
+
+static LONG dt_clamp(LONGLONG v) { return v > 0x7fffffffLL ? 0x7fffffff : v < -0x7fffffffLL ? -0x7fffffff : (LONG)v; }
+
+static BOOL dt_underline(HDC hdc, const RECT *rc, UINT fmt, int x, int w, int y, int lh, int ascent)
+{
+    RECT u;
+    HBRUSH br;
+    int thick = lh / 16 > 1 ? lh / 16 : 1, ret;
+    u.left = dt_clamp((LONGLONG)rc->left + x);
+    u.right = dt_clamp((LONGLONG)u.left + w);
+    u.top = dt_clamp((LONGLONG)rc->top + y + ascent + 1);
+    if (u.top + thick > dt_clamp((LONGLONG)rc->top + y + lh)) u.top = dt_clamp((LONGLONG)rc->top + y + lh - thick);
+    u.bottom = u.top + thick;
+    if (!(fmt & DT_NOCLIP)) {
+        if (u.left < rc->left) u.left = rc->left;
+        if (u.right > rc->right) u.right = rc->right;
+        if (u.top < rc->top) u.top = rc->top;
+        if (u.bottom > rc->bottom) u.bottom = rc->bottom;
     }
-    return dt_width(dc, s, n);
+    if (u.left >= u.right || u.top >= u.bottom) return TRUE;
+    br = CreateSolidBrush(GetTextColor(hdc));
+    if (!br) return FALSE;
+    ret = FillRect(hdc, &u, br);
+    DeleteObject(br);
+    return ret != 0;
 }
 
 DLLAPI int WINAPI DrawTextW(HDC hdc, LPCWSTR text, int len, LPRECT rc, UINT fmt)
 {
     TEXTMETRICW tm;
-    WCHAR *buf, *lines[64];
-    int lens[64], nl = 0, i, n, cw, lh, maxw = 0, y, rw;
-    if (!text || !rc || !GetTextMetricsW(hdc, &tm)) { SetLastError(ERROR_INVALID_PARAMETER); return 0; }
-    n = len < 0 ? (int)wcslen(text) : len;
-    buf = HeapAlloc(GetProcessHeap(), 0, (size_t)(n + 1) * sizeof(WCHAR) * 2);
-    if (!buf) return 0;
-    cw = tm.tmAveCharWidth;
-    lh = tm.tmHeight;
-    rw = rc->right - rc->left;
-    {
-        WCHAR *o = buf;
-        lines[0] = o;
-        for (i = 0; i < n && nl < 63; ++i) {
-            WCHAR c = text[i];
-            if (c == '&' && !(fmt & DT_NOPREFIX)) {
-                if (i + 1 < n && text[i + 1] == '&') { *o++ = '&'; ++i; }
-                continue;
-            }
-            if (c == '\r') continue;
-            if (c == '\n' && !(fmt & DT_SINGLELINE)) {
-                lens[nl] = (int)(o - lines[nl]);
-                lines[++nl] = o;
-                continue;
-            }
-            if (c == '\t' && (fmt & DT_EXPANDTABS)) {
-                int col = (int)(o - lines[nl]), pad = 8 - (col & 7);
-                while (pad--) *o++ = ' ';
-                continue;
-            }
-            if (c == '\t' || c == '\n') c = ' ';
-            *o++ = c;
-            if ((fmt & DT_WORDBREAK) && !(fmt & DT_SINGLELINE) && rw >= cw && dt_width(hdc, lines[nl], (int)(o - lines[nl])) > rw) {
-                WCHAR *sp = o - 1;
-                while (sp > lines[nl] && *sp != ' ') --sp;
-                if (sp > lines[nl]) {                              /* wrap after the last blank */
-                    const int keep = (int)(sp - lines[nl]), tail = (int)(o - sp - 1);
-                    WCHAR *nx = lines[nl] + keep + 1;
-                    lens[nl] = keep;
-                    lines[nl + 1] = nx;
-                    ++nl;
-                    o = nx + tail;
-                } else {                                           /* one long word: break inside it */
-                    lens[nl] = (int)(o - 1 - lines[nl]);
-                    lines[nl + 1] = o - 1;
-                    ++nl;
+    shz_tl_params_t p;
+    shz_tl_layout_t L;
+    dt_ctx_t cx;
+    HGDIOBJ oldfont = 0;
+    LONGLONG rw, rh;
+    int st, i, ret = 0, drawn_ok = 1;
+    DWORD err = 0;
+    cx.hdc = hdc; cx.err = 0;
+    if (!text || !rc) { SetLastError(ERROR_INVALID_PARAMETER); return 0; }
+    if (fmt & DT_INTERNAL) {
+        HGDIOBJ sys = GetStockObject(SYSTEM_FONT);
+        if (!sys || !(oldfont = SelectObject(hdc, sys))) return 0;
+    }
+    if (!GetTextMetricsW(hdc, &tm)) { err = GetLastError(); goto restore; }
+    memset(&p, 0, sizeof p);
+    p.measure = dt_measure; p.fit = dt_fit; p.alloc = dt_alloc; p.release = dt_free; p.ctx = &cx;
+    p.line_height = tm.tmHeight; p.external_leading = tm.tmExternalLeading; p.ascent = tm.tmAscent;
+    p.avg_char_width = tm.tmAveCharWidth;
+    rw = (LONGLONG)rc->right - rc->left; rh = (LONGLONG)rc->bottom - rc->top;
+    rw = rw < 0 ? 0 : rw > 0x7fffffffLL ? 0x7fffffffLL : rw;
+    rh = rh < 0 ? 0 : rh > 0x7fffffffLL ? 0x7fffffffLL : rh;
+    st = shz_tl_layout(&p, (const uint16_t *)text, len, (int)rw, (int)rh, fmt, &L);
+    if (st != SHZ_TL_OK) {
+        switch (st) {
+        case SHZ_TL_E_NOMEM: err = ERROR_NOT_ENOUGH_MEMORY; break;
+        case SHZ_TL_E_MEASURE: err = cx.err ? cx.err : ERROR_GEN_FAILURE; break;
+        case SHZ_TL_E_TOOBIG: err = ERROR_BUFFER_OVERFLOW; break;
+        case SHZ_TL_E_UNSUPPORTED: err = ERROR_NOT_SUPPORTED; break;
+        default: err = ERROR_INVALID_PARAMETER; break;
+        }
+        goto restore;
+    }
+    if (fmt & DT_CALCRECT) {
+        rc->right = dt_clamp((LONGLONG)rc->left + L.max_width);
+        rc->bottom = dt_clamp((LONGLONG)rc->top + L.height);
+        ret = L.height;
+        shz_tl_free(&L);
+        goto restore;
+    }
+    for (i = 0; i < L.nlines && drawn_ok; ++i) {
+        const shz_tl_line_t *ln = &L.lines[i];
+        shz_tl_iter_t it;
+        shz_tl_run_t run;
+        int ux = 0, uw = 0;
+        if (!ln->visible) continue;
+        if (!(fmt & DT_PREFIXONLY)) {
+            shz_tl_iter_begin(&L, i, &it);
+            while ((st = shz_tl_iter_next(&it, &run)) > 0) {
+                if (!ExtTextOutW(hdc, dt_clamp((LONGLONG)rc->left + run.x), dt_clamp((LONGLONG)rc->top + ln->y),
+                                 (fmt & DT_NOCLIP) ? 0 : ETO_CLIPPED, (fmt & DT_NOCLIP) ? NULL : rc, (LPCWSTR)run.p,
+                                 (UINT)run.n, NULL)) {
+                    err = GetLastError(); if (!err) err = ERROR_GEN_FAILURE;
+                    drawn_ok = 0;
+                    break;
                 }
             }
+            if (drawn_ok && st < 0) { err = cx.err ? cx.err : ERROR_GEN_FAILURE; drawn_ok = 0; }
         }
-        lens[nl] = (int)(o - lines[nl]);
-        ++nl;
-    }
-    for (i = 0; i < nl; ++i) { const int w = dt_width(hdc, lines[i], lens[i]); if (w > maxw) maxw = w; }
-    if (fmt & DT_CALCRECT) {
-        rc->right = rc->left + maxw;
-        if (fmt & DT_SINGLELINE) rc->bottom = rc->top + lh; else rc->bottom = rc->top + nl * lh;
-        HeapFree(GetProcessHeap(), 0, buf);
-        return nl * lh;
-    }
-    y = rc->top;
-    if (fmt & DT_SINGLELINE) {
-        if (fmt & DT_VCENTER) y = rc->top + (rc->bottom - rc->top - lh) / 2;
-        else if (fmt & DT_BOTTOM) y = rc->bottom - lh;
-    }
-    for (i = 0; i < nl; ++i, y += lh) {
-        int x = rc->left, w = dt_width(hdc, lines[i], lens[i]);
-        WCHAR dots[3] = { '.', '.', '.' };
-        const int dw = dt_width(hdc, dots, 3);
-        if ((fmt & DT_END_ELLIPSIS) && (fmt & DT_SINGLELINE) && w > rw && rw >= dw) {
-            int keep = lens[i];
-            while (keep > 0 && dt_width(hdc, lines[i], keep) + dw > rw) --keep;
-            ExtTextOutW(hdc, x, y, (fmt & DT_NOCLIP) ? 0 : ETO_CLIPPED, rc, lines[i], (UINT)keep, 0);
-            ExtTextOutW(hdc, x + dt_width(hdc, lines[i], keep), y, (fmt & DT_NOCLIP) ? 0 : ETO_CLIPPED, rc, dots, 3, 0);
-            continue;
+        if (drawn_ok && L.ul_index >= 0) {
+            if (shz_tl_underline(&L, i, &ux, &uw)) {
+                if (!dt_underline(hdc, rc, fmt, ux, uw, ln->y, L.line_h, tm.tmAscent)) {
+                    err = GetLastError(); if (!err) err = ERROR_GEN_FAILURE;
+                    drawn_ok = 0;
+                }
+            } else if (cx.err) { err = cx.err; drawn_ok = 0; }
         }
-        if ((fmt & DT_CENTER) == DT_CENTER) x = rc->left + (rw - w) / 2;
-        else if ((fmt & DT_RIGHT)) x = rc->right - w;
-        ExtTextOutW(hdc, x, y, (fmt & DT_NOCLIP) ? 0 : ETO_CLIPPED, rc, lines[i], (UINT)lens[i], 0);
-        if (!(fmt & DT_SINGLELINE) && y + lh > rc->bottom && !(fmt & DT_NOCLIP)) break;
     }
-    HeapFree(GetProcessHeap(), 0, buf);
-    return nl * lh;
+    if (drawn_ok && (fmt & DT_MODIFYSTRING) && (fmt & (DT_END_ELLIPSIS | DT_PATH_ELLIPSIS)) && L.modified && L.nlines == 1) {
+        /* the caller's buffer is never grown: it is rewritten only when the displayed text fits the original length */
+        const int orig = len < 0 ? (int)wcslen(text) : len;
+        const int need = shz_tl_displayed_text(&L, NULL, 0);
+        if (need >= 0 && need <= orig) {
+            shz_tl_displayed_text(&L, (uint16_t *)(ULONG_PTR)text, need);
+            if (need < orig || len < 0) ((WCHAR *)(ULONG_PTR)text)[need] = 0;
+        }
+    }
+    if (drawn_ok) ret = L.height;
+    shz_tl_free(&L);
+restore:
+    if (oldfont && !SelectObject(hdc, oldfont) && ret) { err = GetLastError(); ret = 0; }
+    if (!ret && err) SetLastError(err);
+    return ret;
 }
 
 /* ---------------------------------------------------------------- metrics */
@@ -441,6 +497,34 @@ int u32_metric(int index)
 
 DLLAPI int WINAPI GetSystemMetrics(int index) { return u32_metric(index); }
 
+/* 1 when a font created from lf is realised by gdi32 as a "Noto Sans*" face (GetTextFaceW reports the ACTUAL face);
+ * otherwise 0 with ERROR_FILE_NOT_FOUND (or the failing call's error). Never reports the requested name as the actual one. */
+static int u32_system_font_realised(const LOGFONTW *lf)
+{
+    static const WCHAR want[] = { 'N', 'o', 't', 'o', ' ', 'S', 'a', 'n', 's' };
+    WCHAR face[LF_FACESIZE];
+    HDC dc;
+    HFONT f;
+    HGDIOBJ old;
+    DWORD err = 0;
+    int ok = 0, n;
+    dc = CreateCompatibleDC(0);
+    if (!dc) return 0;
+    f = CreateFontIndirectW(lf);
+    if (!f) { err = GetLastError(); DeleteDC(dc); if (err) SetLastError(err); return 0; }
+    old = SelectObject(dc, f);
+    if (old) {
+        memset(face, 0, sizeof face);
+        n = GetTextFaceW(dc, LF_FACESIZE, face);
+        ok = n > 0 && memcmp(face, want, sizeof want) == 0;
+        SelectObject(dc, old);
+    } else err = GetLastError();
+    DeleteObject(f);
+    DeleteDC(dc);
+    if (!ok) SetLastError(err ? err : ERROR_FILE_NOT_FOUND);
+    return ok;
+}
+
 DLLAPI BOOL WINAPI SystemParametersInfoW(UINT action, UINT param, PVOID pv, UINT winini)
 {
     shz_display_info_t di;
@@ -463,9 +547,14 @@ DLLAPI BOOL WINAPI SystemParametersInfoW(UINT action, UINT param, PVOID pv, UINT
         NONCLIENTMETRICSW *m = pv;
         LOGFONTW lf;
         if (!m || m->cbSize < sizeof *m) { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }
+        /* System default: Noto Sans, regular weight 400 (Hangul and other scripts fall back to Noto Sans KR inside the one
+         * font provider). The values are the REQUESTED font; they are returned only after the DC font realisation proves the
+         * face was really created, so a missing asset fails visibly instead of reporting a fixed-cell fallback. The pixel
+         * height (-16) is the current 16 px cell contract of gdi32; arbitrary pixel sizes need the GDI lane's provider API. */
         memset(&lf, 0, sizeof lf);
-        lf.lfHeight = -16; lf.lfWeight = FW_NORMAL; lf.lfCharSet = ANSI_CHARSET; lf.lfPitchAndFamily = FIXED_PITCH | FF_MODERN;
-        memcpy(lf.lfFaceName, L"Shizuku Fixed 8x16", sizeof L"Shizuku Fixed 8x16");
+        lf.lfHeight = -16; lf.lfWeight = FW_NORMAL; lf.lfCharSet = DEFAULT_CHARSET; lf.lfPitchAndFamily = VARIABLE_PITCH | FF_SWISS;
+        memcpy(lf.lfFaceName, L"Noto Sans", sizeof L"Noto Sans");
+        if (!u32_system_font_realised(&lf)) return FALSE;
         m->iBorderWidth = 1; m->iScrollWidth = 17; m->iScrollHeight = 17; m->iCaptionWidth = 18; m->iCaptionHeight = 18;
         m->lfCaptionFont = lf; m->iSmCaptionWidth = 15; m->iSmCaptionHeight = 15; m->lfSmCaptionFont = lf;
         m->iMenuWidth = 18; m->iMenuHeight = 19; m->lfMenuFont = lf; m->lfStatusFont = lf; m->lfMessageFont = lf;

@@ -163,6 +163,14 @@ static void section_write_back(section_t *s, uint64_t first, uint64_t count)
     }
 }
 
+/* Same actual node-owner release as the file object path. Section/view teardown
+ * has no synchronous file NtClose caller to receive a deferred volume error. */
+extern int32_t file_node_release_status(fsnode_t *node);
+static void section_node_release(fsnode_t *node)
+{
+    const int32_t status=file_node_release_status(node);
+    if(status)kprintf("K64 section: deferred file deletion failed status=%x; namespace retained\n",(uint32_t)status);
+}
 void section_free(kobject_t *o)
 {
     section_t *s = o->u.file.file;
@@ -178,8 +186,7 @@ void section_free(kobject_t *o)
         pmm_free(s->dir[d]);
     }
     if (s->node) {
-        if (s->node->open_count) --s->node->open_count;
-        if (s->node->delete_pending && s->node->open_count == 0) fs_remove(s->node);
+        section_node_release(s->node);
     }
     kfree(s->dir);
     kfree(s);
@@ -361,7 +368,7 @@ static int32_t sys_create_section(process_t *p, struct regs *r, uint64_t ph, uin
         return STATUS_INVALID_PARAMETER_4;
     }
     if ((uint64_t)size > MAX_SECTION_BYTES) {
-        if (s->node) --s->node->open_count;
+        if (s->node) section_node_release(s->node);
         kfree(sd); kfree(s);
         return STATUS_SECTION_TOO_BIG;
     }
@@ -372,7 +379,7 @@ static int32_t sys_create_section(process_t *p, struct regs *r, uint64_t ph, uin
     s->dir = kzalloc(((s->npages + 511) / 512) * sizeof(uint64_t));
     o = s->dir ? ob_create(OB_SECTION, name) : 0;
     if (!o) {
-        if (s->node) --s->node->open_count;
+        if (s->node) section_node_release(s->node);
         kfree(s->dir); kfree(sd); kfree(s);
         return STATUS_INSUFFICIENT_RESOURCES;
     }

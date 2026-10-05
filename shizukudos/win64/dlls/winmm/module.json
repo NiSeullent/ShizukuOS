@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "playsnd.c",
+    "wavefile.c",
+    "wavout.c",
+    "wavxp.c",
+    "winmm.c"
+  ],
+  "description": "Multimedia Audio API"
+}

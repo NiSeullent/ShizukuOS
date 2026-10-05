@@ -13,7 +13,6 @@ extern void ds_test_outb(uint16_t,uint8_t);
 extern uint64_t ds_test_cr2(void),ds_test_cr3(void),ds_test_flags(void);
 extern void ds_test_halt(void) __attribute__((noreturn));
 extern void ds_test_iteration(const ds_state *);
-extern uint64_t ds_test_sp(void),ds_test_boot_stack_top(void),ds_test_task_stack_top(void);
 #define k_inb ds_test_inb
 #define k_outb ds_test_outb
 #define read_cr2 ds_test_cr2
@@ -23,16 +22,21 @@ extern uint64_t ds_test_sp(void),ds_test_boot_stack_top(void),ds_test_task_stack
 
 static ds_state state;
 static ds_surface framebuffer;
-static unsigned initialised,keyboard_ready,timer_ready,capturing,force_text;
+static unsigned initialised,keyboard_ready,timer_ready,capturing,force_text,force_nyan,audio_limit=3;
+static uint32_t context_cpu,context_pid,context_tid,context_valid;
 static char panic_reason[DS_REASON];
 static unsigned panic_length;
 static unsigned fallback_depth;
-static volatile unsigned secondary_cpus_started;
+/* One physical CPU owns every shared fatal write. Other CPUs stop locally;
+ * this is first-record protection, not peer-CPU stop or SMP recovery. */
+static uint32_t fatal_owner; /* 0 unclaimed, physical CPU identity + 1 */
+_Static_assert(__atomic_always_lock_free(sizeof(uint32_t),0),"fatal owner must be lock-free");
 #ifdef SHZ_STANDALONE
-static unsigned serial_ready;
+static unsigned serial_ready,serial_failed;
 #endif
 
 static void halt(void) __attribute__((noreturn));
+static void fallback(void) __attribute__((noreturn));
 static void halt(void) {
 #ifdef DS_NATIVE_HOST_TEST
     ds_test_halt();
@@ -40,10 +44,25 @@ static void halt(void) {
     for(;;) __asm__ volatile("cli; hlt" ::: "memory");
 #endif
 }
+static uint32_t fatal_enter(unsigned capture_continuation)
+{
+    const uint32_t cpu=sched_cpu_identity();
+    uint32_t expected=0;
+    if(cpu==UINT32_MAX)halt(); /* No verified physical owner: touch no shared record. */
+    if(!__atomic_compare_exchange_n(&fatal_owner,&expected,cpu+1,0,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)) {
+        if(expected!=cpu+1)halt(); /* Secondary CPU never renders or changes fallback depth. */
+        if(state.latched)fallback();
+        /* Only capture_begin -> panic is a valid pre-latch continuation.
+         * Recursive formatting/capture/exception entry must not replace it. */
+        if(!capture_continuation || !capturing)halt();
+    }
+    return cpu;
+}
 static int console(void *context,const char *bytes,size_t count)
 {
     (void)context;
 #ifdef SHZ_STANDALONE
+    if(serial_failed)return -1;
     if(!serial_ready) {
         if(k_inb(0x3fd)==0xff) return -1;
         k_outb(0x3f9,0);k_outb(0x3fb,0x80);k_outb(0x3f8,1);k_outb(0x3f9,0);
@@ -52,7 +71,7 @@ static int console(void *context,const char *bytes,size_t count)
     for(size_t i=0;i<count;++i) {
         unsigned n;
         for(n=0;n<1000000 && !(k_inb(0x3fd)&0x20);++n) __asm__ volatile("pause");
-        if(n==1000000) return -1;
+        if(n==1000000) {serial_failed=1;return -1;}
         k_outb(0x3f8,(uint8_t)bytes[i]);
     }
     return 0;
@@ -84,44 +103,53 @@ void ds_native_bind(volatile uint32_t *pixels,uint32_t width,uint32_t height,
 void ds_native_keyboard_ready(unsigned ready) {keyboard_ready=!!ready;}
 void ds_native_timer_ready(void) {timer_ready=1;}
 void ds_native_force_text(void) {if(!state.latched)force_text=1;}
-/* Sticky, lock-free: an AP start makes panic-time takeover unproven. The fatal
- * path must not take the scheduler queue lock to ask for the online mask. */
-void ds_native_secondary_cpu_started(void) {secondary_cpus_started=1;}
+void ds_native_context(uint32_t cpu,uint32_t pid,uint32_t tid)
+{ if(!__atomic_load_n(&fatal_owner,__ATOMIC_ACQUIRE) && !state.latched) {context_cpu=cpu;context_pid=pid;context_tid=tid;context_valid=1;} }
+void ds_native_force_nyan(unsigned limit) {if(!state.latched){force_nyan=1;audio_limit=limit>3?3:limit;}}
+/* Strong AC97 hooks use only DMA buffers retained during healthy boot. Never
+ * probe/allocate/schedule or call the normal WinMM/stream service after panic. */
+int __attribute__((weak)) ds_pcm_panic_begin(void) {return -1;}
+int __attribute__((weak)) ds_pcm_panic_poll(void) {return -1;}
+void __attribute__((weak)) ds_pcm_panic_stop(void) { }
+static const uint16_t fatal_notes[]={659,784,988,784,659,523,587,659,784,659,587,523};
 #ifdef SHZ_STANDALONE
-static int within(uint64_t sp,uint64_t top,uint64_t bytes)
-{ return top>bytes && sp>top-bytes && sp<=top; }
-#endif
-/* Measures only already-known facts: RFLAGS after CLI, the live SP and whether
- * it lies in the boot or current-task kernel stack. Unknown => not proven. */
-static void measure(ds_context *c)
+static int speaker_gate(unsigned on)
 {
-    memset(c,0,sizeof *c);
-#ifdef SHZ_STANDALONE
-    uint64_t boot_top,task_top;
-#ifdef DS_NATIVE_HOST_TEST
-    c->flags=ds_test_flags();c->sp=ds_test_sp();
-    boot_top=ds_test_boot_stack_top();task_top=ds_test_task_stack_top();
-#else
-    extern uint8_t kstack_top[];
-    __asm__ volatile("pushfq; popq %0":"=r"(c->flags));
-    __asm__ volatile("mov %%rsp,%0":"=r"(c->sp));
-    boot_top=(uint64_t)kstack_top;task_top=g_kstack_top; /* start.asm: KSTACK_BYTES */
-#endif
-    if(within(c->sp,boot_top,KSTACK_BYTES)) {c->stack_low=boot_top-KSTACK_BYTES;c->stack_high=boot_top;}
-    else if(within(c->sp,task_top,KSTACK_BYTES)) {c->stack_low=task_top-KSTACK_BYTES;c->stack_high=task_top;}
-    c->secondary_cpus_started=secondary_cpus_started;
-    c->fault_depth=fallback_depth;
-    c->proven=1;
-#endif
+    uint8_t v=k_inb(0x61);
+    if(v==0xff)return 0;
+    k_outb(0x61,(uint8_t)((v&~3u)|(on?3u:0u)));
+    return (k_inb(0x61)&3u)==(on?3u:0u);
 }
-static void hexline(char *out,const char *label,unsigned v)
+static int speaker_pitch(unsigned hz)
 {
-    unsigned n=0;
-    while(*label)out[n++]=*label++;
-    for(unsigned i=0;i<8;++i)out[n++]="0123456789abcdef"[(v>>((7-i)*4))&15];
-    out[n++]='\n';out[n]=0;
+    uint16_t d=(uint16_t)(1193182u/hz),now;
+    k_outb(0x43,0xb6);k_outb(0x42,(uint8_t)d);k_outb(0x42,(uint8_t)(d>>8));
+    if(!speaker_gate(1))return 0;
+    /* Verify that the programmed channel counts, not just a writable gate.
+     * No claim of audible output follows from register readback. */
+    for(unsigned i=0;i<20000;i++) {
+        k_outb(0x43,0x80);now=k_inb(0x42);now|=(uint16_t)k_inb(0x42)<<8;
+        if(now && now<d)return 1;
+        __asm__ volatile("pause");
+    }
+    return 0;
 }
-static void fallback(void) __attribute__((noreturn));
+static int speaker_fixed(void)
+{
+    /* A gate write alone cannot prove a timer exists. Require actual channel-2
+     * output transitions; unsupported/lifeless ports remain SILENT. */
+    k_outb(0x43,0xb6);k_outb(0x42,0xa9);k_outb(0x42,4);
+    if(!speaker_gate(1))return 0;
+    const uint8_t first=k_inb(0x61)&0x20;
+    for(unsigned i=0;i<100000;i++) {
+        if((k_inb(0x61)&0x20)!=first)return 1;
+        __asm__ volatile("pause");
+    }
+    (void)speaker_gate(0);return 0;
+}
+static void fatal_pause(void)
+{for(unsigned i=0;i<1500000;i++)__asm__ volatile("pause");} /* bounded coarse pace; not a calibrated clock */
+#endif
 static void fallback(void)
 {
     cli();
@@ -130,17 +158,65 @@ static void fallback(void)
      * stops immediately. The first latched record is never replaced. */
     if(fallback_depth>=2)halt();
     const unsigned depth=fallback_depth++;
-    if(!depth)(void)ds_fallback_framebuffer(&state,&framebuffer);
+    enum ds_fatal_audio audio=DS_AUDIO_SILENT;
+    if(!depth && !force_text) {
+#ifdef SHZ_STANDALONE
+        const unsigned pcm=audio_limit>=3 && ds_pcm_panic_begin()==0;
+        const unsigned pitched=!pcm && audio_limit>=2 && speaker_pitch(659) && speaker_pitch(784);
+        const unsigned fixed=!pcm && !pitched && audio_limit>=1 && speaker_fixed();
+        audio=ds_nyan_audio_select(pcm,pitched,fixed);
+#endif
+        (void)ds_nyan_framebuffer(&state,&framebuffer,audio);
+    } else if(!depth)(void)ds_fallback_framebuffer(&state,&framebuffer);
     (void)ds_fallback(&state,console,0);
+#ifdef SHZ_STANDALONE
+    if(!depth && !force_text) {
+        const char *name=ds_nyan_audio_name(audio);
+        size_t n=0;while(name[n])++n;
+        (void)console(0,"NYAN AUDIO: ",12);(void)console(0,name,n);(void)console(0,"\n",1);
+        for(unsigned note=0;;++note) {
+            if(audio==DS_AUDIO_PCM && ds_pcm_panic_poll()) {
+                ds_pcm_panic_stop();
+                const unsigned pitched=audio_limit>=2 && speaker_pitch(659) && speaker_pitch(784);
+                audio=ds_nyan_audio_select(0,pitched,!pitched && audio_limit>=1 && speaker_fixed());
+                (void)ds_nyan_framebuffer(&state,&framebuffer,audio);
+                name=ds_nyan_audio_name(audio);n=0;while(name[n])++n;
+                (void)console(0,"NYAN AUDIO: ",12);(void)console(0,name,n);(void)console(0,"\n",1);
+            }
+            if(audio==DS_AUDIO_PITCHED && !speaker_pitch(fatal_notes[note%12])) {
+                audio=ds_nyan_audio_select(0,0,speaker_fixed());
+                (void)ds_nyan_framebuffer(&state,&framebuffer,audio);
+                name=ds_nyan_audio_name(audio);n=0;while(name[n])++n;
+                (void)console(0,"NYAN AUDIO: ",12);(void)console(0,name,n);(void)console(0,"\n",1);
+            }
+            if(audio==DS_AUDIO_FIXED && !speaker_gate(note&1)) {
+                (void)speaker_gate(0); /* Best effort only; failed hardware is not claimed silent. */
+                audio=DS_AUDIO_SILENT;
+                (void)ds_nyan_framebuffer(&state,&framebuffer,audio);
+                name=ds_nyan_audio_name(audio);n=0;while(name[n])++n;
+                (void)console(0,"NYAN AUDIO: ",12);(void)console(0,name,n);(void)console(0,"\n",1);
+            }
+            if(audio==DS_AUDIO_SILENT)halt();
+#ifdef DS_NATIVE_HOST_TEST
+            ds_test_iteration(&state);
+#endif
+            fatal_pause();
+        }
+    }
+#endif
     halt();
 }
 void ds_native_capture_begin(void)
 {
-    if(state.latched) fallback();
+    cli();(void)fatal_enter(0);
     panic_length=0;panic_reason[0]=0;capturing=1;
 }
 void ds_native_capture_char(char ch)
 {
+    const uint32_t owner=__atomic_load_n(&fatal_owner,__ATOMIC_ACQUIRE);
+    if(!owner)return; /* Healthy printf must not need a physical-owner lookup. */
+    const uint32_t cpu=sched_cpu_identity();
+    if(cpu==UINT32_MAX || owner!=cpu+1)return;
     if(capturing && panic_length<DS_REASON-1) {panic_reason[panic_length++]=ch;panic_reason[panic_length]=0;}
 }
 static void enter(const ds_fault *f) __attribute__((noreturn));
@@ -151,21 +227,7 @@ static void enter(const ds_fault *f)
     if(ds_latch(&state,DS_KERNEL_FATAL,f)!=1) fallback();
     /* The framebuffer includes the real trace. The exact textual fallback is
      * used when rendering/load prerequisites fail, or on recursive fault. */
-    {
-        ds_context context;
-        measure(&context);
-        (void)ds_admit_games(&state,&context);
-    }
-    if(force_text || ds_render(&state,&framebuffer)) fallback();
-    if(!state.games_allowed) {
-        /* Visual + traceback are on screen; the game loop is refused. Report
-         * the refusal on the console and halt; output failure still halts. */
-        char line[64];
-        hexline(line,"Dead Screen: games refused, unsafe=0x",state.unsafe);
-        size_t n=0;while(line[n])++n;
-        (void)console(0,line,n);
-        halt();
-    }
+    if(force_text || force_nyan || ds_render(&state,&framebuffer)) fallback();
 #ifdef SHZ_STANDALONE
     uint32_t elapsed=0;
     uint16_t previous=0;
@@ -215,8 +277,7 @@ static void enter(const ds_fault *f)
 void ds_native_panic(uint64_t ip,uint64_t sp,uint64_t bp)
 {
     static ds_fault f;
-    cli();capturing=0;
-    if(state.latched) fallback();
+    cli();const uint32_t cpu=fatal_enter(1);capturing=0;
     memset(&f,0,sizeof f);
     f.ip=ip;f.sp=sp;f.bp=bp;f.cr2=read_cr2();f.cr3=read_cr3();
 #ifdef DS_NATIVE_HOST_TEST
@@ -225,14 +286,15 @@ void ds_native_panic(uint64_t ip,uint64_t sp,uint64_t bp)
     __asm__ volatile("pushfq; popq %0":"=r"(f.flags));
 #endif
     f.vector=UINT64_MAX;f.frames[0]=ip;f.frame_count=1;
+    f.cpu=cpu;
+    if(context_valid && context_cpu==cpu) {f.pid=context_pid;f.tid=context_tid;f.context_valid=1;}
     for(unsigned i=0;i<DS_REASON;++i)f.reason[i]=panic_reason[i];
     enter(&f);
 }
 void ds_native_exception(const struct regs *r)
 {
     static ds_fault f;
-    cli();
-    if(state.latched) fallback();
+    cli();const uint32_t cpu=fatal_enter(0);capturing=0;
     memset(&f,0,sizeof f);
     f.ip=r->rip;f.sp=r->rsp;f.bp=r->rbp;f.flags=r->rflags;
     f.vector=r->vector;f.error=r->error;f.cr2=read_cr2();f.cr3=read_cr3();
@@ -240,6 +302,8 @@ void ds_native_exception(const struct regs *r)
         r->r8,r->r9,r->r10,r->r11,r->r12,r->r13,r->r14,r->r15,r->cs};
     for(unsigned i=0;i<DS_REGS;++i)f.reg[i]=values[i];
     f.registers_valid=1;f.frames[0]=r->rip;f.frame_count=1;
+    f.cpu=cpu;
+    if(context_valid && context_cpu==cpu) {f.pid=context_pid;f.tid=context_tid;f.context_valid=1;}
     const char reason[]="Unhandled Shizuku Kernel exception; captured interrupt frame";
     for(unsigned i=0;i<sizeof reason;++i)f.reason[i]=reason[i];
     enter(&f);

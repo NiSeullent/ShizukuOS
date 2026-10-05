@@ -60,6 +60,7 @@
  */
 #include "fs.h"
 #include "auth_policy.h"
+#include "saw.h"
 #include "kwin.h"
 #include "apiset.h"
 #include "ldr_lifetime.h"
@@ -1486,14 +1487,20 @@ int32_t ldr_create_process(process_t *parent, const char *image_path, const char
 int32_t ldr_create_process_ex(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
                               const ldr_create_ex_t *ex, process_t **out_proc, thread_t **out_thread)
 {
-    fsnode_t *node = fs_lookup(image_path);
+    fsnode_t *node;
     process_t *p;
     int32_t st;
+    if(ex&&ex->hold_pending&&
+       (ex->hold_pending!=1||ex->suspended!=1||!out_proc||!out_thread))
+        return STATUS_INVALID_PARAMETER;
+    node=fs_lookup(image_path);
     if (!node || node->is_dir) return STATUS_OBJECT_NAME_NOT_FOUND;
     p = process_create_empty("win64");
     if (!p) return STATUS_NO_MEMORY;
     mutex_init(&p->ldr_lock);
-    p->parent_pid = parent ? (uint64_t)parent->pid : 0;
+    /* W64's existing PID-zero bridge parent transports console state only;
+     * its endpoint/broker owns admission, not a fictional process ancestry. */
+    st = process_attach_parent(parent && parent->pid ? parent : 0, p);
     if (parent) {                                                   /* evidence: which program started which */
         char shortcmd[161];
         size_t k2 = 0;
@@ -1510,7 +1517,7 @@ int32_t ldr_create_process_ex(process_t *parent, const char *image_path, const c
     }
     p->console_sink = parent ? parent->console_sink : 0;       /* bridged console follows the process tree */
     p->console_sink_gen = parent ? parent->console_sink_gen : 0;
-    st = shz_auth_inherit(parent,p);
+    if (!st) st = shz_auth_inherit(parent,p);
     if (!st) st = ldr_create_process_body(parent, image_path, cmdline, cwd, ex, p, out_thread);
     if (st) {
         process_terminate(p, st, 0);
@@ -1520,7 +1527,7 @@ int32_t ldr_create_process_ex(process_t *parent, const char *image_path, const c
         ob_deref(p->object);                                        /* frees the slot (ipc_object_free) */
         return st;
     }
-    shz_auth_process_ready(p);
+    if(!ex||!ex->hold_pending)shz_auth_process_ready(p);
     if (out_proc) *out_proc = p;
     return STATUS_SUCCESS;
 }
@@ -1529,6 +1536,11 @@ static int32_t ldr_create_process_body(process_t *parent, const char *image_path
                                        const ldr_create_ex_t *ex, process_t *p, thread_t **out_thread)
 {
     fsnode_t *node = fs_lookup(image_path);
+    /* A privileged prepare callback may only apply to its pinned immutable archive image.
+     * Compare the loader's actual selected node, never a basename or user command. */
+    if (ex && ex->trusted_image &&
+        (node != ex->trusted_image || !node || node->is_dir || !node->readonly || node->backing != FSB_RAM))
+        return STATUS_ACCESS_DENIED;
     module_t *exe = 0;
     int32_t st;
     char nm[64];

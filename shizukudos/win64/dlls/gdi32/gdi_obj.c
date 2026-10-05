@@ -208,8 +208,8 @@ DLLAPI HFONT WINAPI CreateFontIndirectW(const LOGFONTW *lf)
     f = gdi_alloc(sizeof *f);
     if (!f) return 0;
     f->lf = *lf;
-    hgt = lf->lfHeight < 0 ? -lf->lfHeight : lf->lfHeight;
-    f->scale = hgt == 0 ? 1 : (hgt + 8) / 16;                /* integer scaling of the one 8x16 font */
+    hgt = lf->lfHeight < 0 ? (lf->lfHeight == (-0x7fffffff - 1) ? 0x7fffffff : -lf->lfHeight) : lf->lfHeight;   /* no negation overflow */
+    f->scale = hgt == 0 ? 1 : (int)(((long long)hgt + 8) / 16);                /* legacy 16 * scale contract; the real size is resolved lazily (px) */
     if (f->scale < 1) f->scale = 1;
     if (f->scale > 4) f->scale = 4;
     GDI_ENTER();
@@ -290,8 +290,8 @@ static void make_stock(void)
         LOGFONTW lf;
         for (i = 0; i < sizeof fonts / sizeof fonts[0]; ++i) {
             HFONT f;
-            fill_logfont(&lf, 16, 8, 0, 0, FW_NORMAL, 0, 0, 0, ANSI_CHARSET, 0, 0, DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN);
-            memcpy(lf.lfFaceName, L"Shizuku Fixed 8x16", sizeof L"Shizuku Fixed 8x16");
+            fill_logfont(&lf, -12, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, DEFAULT_QUALITY, VARIABLE_PITCH | FF_SWISS);
+            memcpy(lf.lfFaceName, L"Noto Sans", sizeof L"Noto Sans");   /* a request: the realised face is whatever GetTextFaceW reports */
             f = CreateFontIndirectW(&lf);
             if (f) { obj_slot(f)->stock = 1; g_stock[fonts[i]] = f; }
         }

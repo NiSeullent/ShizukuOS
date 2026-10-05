@@ -6,12 +6,13 @@
 #include "fs.h"
 #include "boot_channel_peer.h"
 #include "gfx_address.h"
+#include "gfx.h"
 #include "../boot_profile/win98_foundation.h"
 #include "cpu_bringup.h"
 #include "boot_storage.h"
 #include "laptop_firmware.h"
-#include "laptop_power.h"
-#include "driver_inventory.h"
+#include "ntdrv.h"
+#include "install_identity.h"
 
 static shz_bootinfo_t bootinfo;
 int initrd_files = -1;                          /* -1: none or rejected; read by the Win64 self-test */
@@ -31,10 +32,6 @@ int k64_boot_framebuffer(k64_boot_fb_t *out)
         (b->fb_pitch & 3) || b->fb_pitch / 4 < b->fb_width ||
         (uint64_t)b->fb_pitch * b->fb_height > b->fb_size)
         return -1;
-#ifndef SHZ_STANDALONE
-    /* Supervised: only an explicit Supervisor grant (validated + EPT-mapped by supervisor/src/display_grant.c). */
-    if (!(b->flags & SHZ_BIF_FB_SUPERVISOR_GRANT) || (b->fb_base & 0xfff)) return -1;
-#endif
     out->base = b->fb_base;
     out->size = b->fb_size;
     out->width = b->fb_width;
@@ -299,21 +296,20 @@ void kmain(uint64_t bootinfo_pa)
             (bootinfo.flags & SHZ_BIF_UEFI_DIRECT) ? ", started directly by the UEFI boot manager (no Supervisor)" : "");
     if (bootinfo.cmdline[0])
         kprintf("%s: command line \"%s\"\n", KVER, bootinfo.cmdline);
-    if(k64_cmdline_has("shz.laptop=probe")) {
-        const int result=k64_laptop_firmware_init(&bootinfo);
+    /* routing02 C3: attested installed-target identity (SHZBOOT.MAN) before driver bring-up; <0 logs MALFORMED
+     * and leaves the target unattested, never attested. */
+    (void)k64_install_identity_init(&bootinfo);
+    {   /* driver bring-up EARLY phase (ntdrv_pnp.c): records the boot route; laptop firmware discovery only on request */
+        const int probe=k64_cmdline_has("shz.laptop=probe");
+        const int result=shz_driver_bringup_init(&bootinfo, SHZ_BRINGUP_PHASE_EARLY, probe ? SHZ_BRINGUP_F_LAPTOP_FIRMWARE : 0);
+        if(probe) {
         const struct shz_laptop_firmware *laptop=k64_laptop_firmware_snapshot();
         if(laptop)
             kprintf("LAPTOP-FIRMWARE: result=%d rsdp=%llx root=%llx fadt=%llx ecdt=%llx tables=%u register_access=0\n",
                     result,laptop->rsdp_pa,laptop->root_pa,laptop->fadt_pa,laptop->ecdt_pa,laptop->entry_count);
         else
             kprintf("LAPTOP-FIRMWARE: result=%d snapshot=absent register_access=0\n",result);
-    }
-    if(k64_cmdline_has("shz.power=fixed")) {
-        /* Standalone profile only; shz.laptop=probe must have produced the FADT snapshot. The cmdline flag is the
-         * explicit decision that the kernel owns the PM1/reset ports (see laptop_power.h). */
-        const struct k64_laptop_power_policy pol={1u,k64_cmdline_has("shz.power.smi=1")?1u:0u,0u};
-        int pr=k64_laptop_power_init(&pol),ar=pr?pr:k64_laptop_power_arm_button();
-        kprintf("LAPTOP-POWER: init=%d arm_button=%d generation=%llu\n",pr,ar,k64_laptop_power_generation());
+        }
     }
     if (!k64_boot_framebuffer(&fb))
         kprintf("%s: UEFI GOP framebuffer %ux%u, pitch %u, %s, at %llx (%llu KiB): available through "
@@ -331,10 +327,11 @@ void kmain(uint64_t bootinfo_pa)
             kprintf("%s: initrd mounted, %d file(s)\n", KVER, files);
         initrd_files = files;
     }
+    if(initrd_files>=0) gfx_caption_cache_init();     /* zero-copy immutable font cache, before any process or scheduler */
+    else kprintf("K64 caption: renderer=legacy-8x16-ASCII fallback archive=absent-or-rejected\n");
     { extern void disk_init(void); disk_init(); }   /* standalone profile: AHCI disk -> FAT32 volume as D:\ (disk.c) */
     if(k64_boot_storage_bind(&bootinfo,initrd_files>=0))
         kprintf("K64 install authority: boot/archive physical mapping unavailable; native claim refused\n");
-    { extern void ntdrv_binding_report(void); ntdrv_binding_report(); }   /* ntdrv_bind.c: PCI -> catalogue -> owner */
     sched_init();
     KASSERT(shz_timer_set(VEC_TIMER, TICK_US) == 0);
 #ifdef SHZ_STANDALONE
@@ -342,6 +339,7 @@ void kmain(uint64_t bootinfo_pa)
 #endif
     sti();
     shz_cpu_bringup_verify();
+    { extern void k64_auth_store_bind(void); k64_auth_store_bind(); }  /* account realm persistence (auth_store_sfs.c) before any user process */
     if (foundation_mode) {
         hcreg_t state = SHZ_DS_UNUSED;
         long status;
@@ -350,6 +348,8 @@ void kmain(uint64_t bootinfo_pa)
          * acceptance workloads and must not delay real Windows requests. */
         ipc64_init(&bootinfo);
         kprintf("%s: native Win98 foundation service active\n", KVER);
+        /* Driver bring-up report for ShizukuCore (C4): foundation profile, native drivers only, no catalog services. */
+        (void)shz_driver_bringup_init(&bootinfo, SHZ_BRINGUP_PHASE_DEVICES, SHZ_BRINGUP_F_FOUNDATION | SHZ_BRINGUP_F_QUIET);
         subsys64_start(&bootinfo);
         status = shz_hcall(SHZ_HC_DOMAIN_STATE, SHZ_DOM_WIN98, 0, &state);
         if (status != SHZ_OK ||
@@ -357,6 +357,12 @@ void kmain(uint64_t bootinfo_pa)
              state != SHZ_DS_EXITED && state != SHZ_DS_FAILED))
             shz_exit(98);
         shz_exit(state == SHZ_DS_FAILED ? 1 : 0);
+    }
+    {   /* Installed driver binding: PCI enumeration -> catalog match -> existing driver-load path,
+         * per-device results logged as DRIVER-BRINGUP (ntdrv_pnp.c). Not reached in foundation mode. */
+        const int bound = shz_driver_bringup_init(&bootinfo, SHZ_BRINGUP_PHASE_DEVICES, SHZ_BRINGUP_F_LOAD_SERVICES);
+        if (bound < 0)
+            kprintf("%s: driver bring-up: %d device(s) failed to start\n", KVER, -bound);
     }
     ds_native_control();
     if (k64_cmdline_has("shz.setup=interactive")) {
@@ -381,14 +387,6 @@ void kmain(uint64_t bootinfo_pa)
      * \SHZ\DRIVERS (only tests/run_k64_ntdrv.py mounts such an image), so default runs are
      * unaffected. See docs/shizukudos10/NTDRV.md and kernel64/ntdrv_*.c. */
     { extern void ntdrv_selftest(void); ntdrv_selftest(); }
-    /* Post-probe driver inventory (driver_inventory.c): every storage/NT-hosted backend has bound by now. Boot thread
-     * context, so the per-backend LBA 0 read may block. Display stays lazy (no START_DISPLAY) and no PnP devnodes are
-     * published here, so default QA evidence keeps its device graph; setupapi reads the rows via the query entry. */
-    /* shz.drvinv=publish (explicit opt-in): native backend functions also become NO-FDO PnP devnodes
-     * (ntdrv_pnp_publish_native) visible through query class 0x103. Off by default: it adds devnodes to the 0x103
-     * graph and consumes NTPNP_PCI#### indices that existing ntdrv/setupapi evidence observes. */
-    driver_inventory_run(DRVINV_RUN_STORAGE_READ | DRVINV_RUN_REPORT |
-                         (k64_cmdline_has("shz.drvinv=publish") ? DRVINV_RUN_PUBLISH_PNP : 0u));
     setup_autostart(&bootinfo);
     { extern void k64_autorun(void); k64_autorun(); }   /* shz.autorun=<control file>: one Win64 program (autorun.c) */
 #ifdef SHZ_STANDALONE

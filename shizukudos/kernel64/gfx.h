@@ -42,13 +42,15 @@ extern const gfx_backend_t gfx_backend_gop;         /* gfx_gop.c: the UEFI boot 
 int gfx_fb_init(void);                              /* idempotent; 0 = display ready, else an NTSTATUS */
 void gfx_fb_present(int x, int y, int w, int h);    /* copy a back-buffer rectangle to the framebuffer (clipped) */
 void gfx_fb_test_pattern(void);
+int gfx_caption_cache_init(void);                   /* boot-only: validated immutable RAM archive cache, no paint-time load */
 /* Page-granular kernel allocator for large pixel buffers (the 4 MiB kernel heap is too small): physical pages from the
  * PMM mapped contiguously at a reserved kernel address range. Zeroed. */
 void *gfx_pages_alloc(uint64_t bytes);
 void gfx_pages_free(void *p, uint64_t bytes);
 uint64_t gfx_pages_in_use(void);
-/* Native 16-pixel grayscale text: ASCII advances 8 pixels, Hangul 16; shared Unifont glyphs and missing-glyph rules.
- * Draws n UTF-16 units inside [cx0,cx1)x[cy0,cy1); gfx_text_width() measures the same advances (gfx_fb.h). */
+/* Captions use the pinned 13px proportional Noto RAM cache when ready; at most
+ * 255 UTF-16 units, unsupported scalar -> one U+FFFD. Old media: 8x16 ASCII
+ * fallback ('?' for non-ASCII). ABI and SHZ_CAPTION_H=19 remain unchanged. */
 #define GFX_FONT_W 8
 #define GFX_FONT_H 16
 void gfx_text(uint32_t *buf, int stride, int bufw, int bufh, int x, int y, const uint16_t *s, unsigned n, uint32_t rgb,

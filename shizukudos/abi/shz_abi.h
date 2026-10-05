@@ -47,7 +47,8 @@ enum shz_hcall {
     SHZ_HC_TIMER_SET = 3,       /* rbx = vector, rcx = period in microseconds (0 = stop) */
     SHZ_HC_NOTIFY = 4,          /* rbx = target domain, rcx = doorbell bit mask */
     SHZ_HC_WAIT = 5,            /* idle until an interrupt or doorbell is pending */
-    SHZ_HC_TIME = 6,            /* rbx <- monotonic nanoseconds since Supervisor start */
+    SHZ_HC_TIME = 6,            /* rbx <- monotonic ns; rcx <- same sample's high32 (additive result).
+                                 * New i386 full-time helpers require an updated Core; legacy RBX is unchanged. */
     SHZ_HC_SET_DOORBELL_VECTOR = 7, /* rbx = interrupt vector used for doorbell delivery */
     SHZ_HC_DOORBELL_ACK = 8,    /* rbx <- pending doorbell mask, atomically cleared */
     SHZ_HC_EVIDENCE = 9,        /* rbx = slot (0..31), rcx = value: harness-visible, guest-generated */
@@ -58,43 +59,10 @@ enum shz_hcall {
                                  * For domains that receive no bootinfo (the Win98 domain's VxD). */
     SHZ_HC_NATIVE_GOP_EPOCH = 14, /* readonly: rbx=word index, rcx=contract version1;
                                   rbx<-word, rcx<-40. Actual guardian/domain only. */
-    SHZ_HC_CLOCK_SPLIT = 15,   /* readonly, independently versioned shz_clock.h:
-                                 rbx=version, rcx=0; EBX<-low32, ECX<-high32 of
-                                 one elapsed-nanosecond sample. Old HC_TIME is unchanged. */
-    SHZ_HC_CHANNEL_ATTEST = 16,  /* Win98 domain CPL0 only: rbx = channel index, rcx = bound channel generation,
-                                  * rdx = SHZ_CHAN_ATTEST_* bits; set-once per (channel, generation); rbx <- bits.
-                                  * Recorded in Supervisor memory with the attester's domain generation. */
-    SHZ_HC_CHANNEL_ATTESTED = 17 /* readonly, any domain mapping the channel: rbx = channel index;
-                                  * rbx <- bits, rcx <- attested generation; E_NOENT when none/attester restarted. */
+    SHZ_HC_DRIVER_REPORT = 15   /* rbx = guest-physical address inside the caller's RAM, rcx = sizeof(shz_drvrep_t);
+                                 * SHZ_DOM_KERNEL64 only, at most once per domain generation;
+                                 * rbx <- SHZ_OK or negative shz_status (same value as rax). */
 };
-
-/* SHZ_HC_CHANNEL_ATTEST feature bits (no ABI minor bump: an old Supervisor answers E_UNSUPPORTED = not attested). */
-#define SHZ_CHAN_ATTEST_W64_DERIVED_OWNER 0x1u  /* VxD stamps capability_id of every user W64 send (DERIVED|token) */
-#define SHZ_CHAN_ATTEST_KNOWN 0x1u
-/* Pure attestation predicate shared by Kernel64 and host checks: the bit must be attested for exactly the
- * channel generation the request arrived on. */
-static inline int shz_chan_attested_for(long status, uint64_t bits, uint64_t attested_gen, uint32_t channel_gen,
-                                        uint64_t need)
-{
-    return status == 0 && need && (bits & need) == need && channel_gen != 0 && attested_gen == channel_gen;
-}
-/* Kernel64 authorization state from ONE fresh SHZ_HC_CHANNEL_ATTESTED answer per authorization; a positive answer is
- * never cached across authorizations (the Supervisor revokes on attester EXITED/FAILED/domain-generation change without
- * touching the channel header). *ever is a fail-closed latch only: once any generation was attested on this channel,
- * every later refusal is REVOKED and never falls back to the legacy unattested rules. Never attested (old Supervisor
- * E_UNSUPPORTED, unattesting VxD) stays LEGACY. */
-#define SHZ_CHAN_AUTH_LEGACY 0
-#define SHZ_CHAN_AUTH_ATTESTED 1
-#define SHZ_CHAN_AUTH_REVOKED 2
-static inline int shz_chan_auth_state(long status, uint64_t bits, uint64_t attested_gen, uint32_t channel_gen,
-                                      uint64_t need, uint32_t *ever)
-{
-    if (shz_chan_attested_for(status, bits, attested_gen, channel_gen, need)) {
-        *ever = 1;
-        return SHZ_CHAN_AUTH_ATTESTED;
-    }
-    return *ever ? SHZ_CHAN_AUTH_REVOKED : SHZ_CHAN_AUTH_LEGACY;
-}
 
 enum shz_status {
     SHZ_OK = 0,
@@ -127,10 +95,6 @@ enum shz_domain_state {
 
 /* shz_bootinfo_t.flags */
 #define SHZ_BIF_UEFI_DIRECT 0x1u        /* started by the UEFI boot manager as the only OS (no Supervisor) */
-/* The fb_* tail is a Supervisor display grant (BOOT.INI k64_display=yes): the Supervisor validated the GOP mode,
- * identity-mapped exactly [fb_base, fb_base + fb_size rounded to 4 KiB) into this domain's EPT (RW, NX, WC) and
- * stopped drawing its console there. A supervised Kernel64 accepts fb_* only with this bit. */
-#define SHZ_BIF_FB_SUPERVISOR_GRANT 0x2u
 
 /* shz_bootinfo_t.fb_format: byte order of one 32-bit pixel in memory */
 enum shz_fb_format {
@@ -140,6 +104,35 @@ enum shz_fb_format {
 };
 
 #define SHZ_CMDLINE_MAX 256
+
+/* Installed-target identity verified by exactly one boot route against the
+ * installed SHZBOOT.MAN (supervisor/src/boot_manifest.h). */
+#define SHZ_INSTID_MAGIC 0x31444953u            /* "SID1" */
+#define SHZ_INSTID_SUPERVISOR 0x1u              /* admitted by ShizukuCore manifest admission (kdom.c) */
+#define SHZ_INSTID_UEFI_DIRECT 0x2u             /* verified by the UEFI loader mode=kernel64 */
+#define SHZ_INSTID_MULTIBOOT 0x4u               /* verified by the BIOS Multiboot stub */
+typedef struct {
+    uint32_t magic;                 /* SHZ_INSTID_MAGIC when present, else whole struct zero */
+    uint32_t flags;                 /* exactly one SHZ_INSTID_* route bit */
+    uint64_t install_generation;    /* nonzero */
+    uint8_t install_id[16];         /* nonzero */
+    uint8_t entries_sha256[32];     /* manifest entry-table digest that was verified */
+} shz_install_identity_t;
+
+/* Kernel64 -> Supervisor driver bring-up report (SHZ_HC_DRIVER_REPORT). */
+#define SHZ_DRVREP_MAGIC 0x31505244u            /* "DRP1" */
+#define SHZ_DRVREP_VERSION 1u
+#define SHZ_DRVREP_MAX_ROWS 32u
+#define SHZ_DRVREP_PASSTHROUGH 0x1u             /* firmware/passthrough profile: devices owned elsewhere */
+#define SHZ_DRVREP_FOUNDATION 0x2u              /* foundation profile: only native in-kernel drivers */
+typedef struct {
+    uint32_t magic, version, size, flags;       /* version 1, size = sizeof */
+    uint64_t install_generation;                /* k64_install_generation(), 0 unattested */
+    uint32_t rows, running, claimed, not_started, failed, unsupported, infrastructure, linked_elsewhere;
+    uint32_t services_considered, services_loaded, services_failed;
+    uint32_t catalog_entries, catalog_matched, catalog_rejected;
+    uint32_t reserved[2];                       /* zero */
+} shz_drvrep_t;
 
 typedef struct {
     uint32_t magic;
@@ -162,8 +155,7 @@ typedef struct {
      * writer's `size` (176) ends before it.
      * Framebuffer: written only by the UEFI boot manager's direct Kernel64 boot
      * (shizukudos/supervisor/loader, BOOT.INI mode = kernel64) from the firmware's GOP
-     * mode at ExitBootServices, or by the Supervisor ONLY as an explicit display grant (SHZ_BIF_FB_SUPERVISOR_GRANT,
- * supervisor/src/display_grant.c); otherwise the Supervisor and the Multiboot stubs write zeros.
+     * mode at ExitBootServices; the Supervisor and the Multiboot stubs write zeros.
      * HOOK for the window manager's GOP backend (kernel64/gfx_fb.c, owned by the gfx
      * work): Kernel64 exposes these fields through k64_boot_framebuffer() (kernel64/main.c).
      * The range is NOT in the kernel's direct map (it lies outside [0, ram_size)), so a
@@ -180,6 +172,10 @@ typedef struct {
     /* Independently versioned additive loader-only tail. Old 472-byte writers
      * leave provenance absent; IPC version remains unchanged. */
     shz_storage_provenance_t storage;
+    /* Additive installed-target identity tail (offset 616). Readers test
+     * SHZ_BOOTINFO_HAS(bi, install); an all-zero tail is the historical
+     * unattested route and must never be reported as attested. */
+    shz_install_identity_t install;
 } shz_bootinfo_t;
 
 /* True when the writer's boot info is long enough to contain `field`. */
@@ -254,6 +250,10 @@ _Static_assert(sizeof(shz_channel_hdr_t) == 128, "channel header layout");
 _Static_assert(__builtin_offsetof(shz_bootinfo_t, fb_base) == 176, "ABI 1.0 boot info prefix is 176 bytes");
 _Static_assert(__builtin_offsetof(shz_bootinfo_t, cmdline) == 216, "boot info 1.1 tail layout");
 _Static_assert(__builtin_offsetof(shz_bootinfo_t, storage) == 472, "old boot info prefix unchanged");
-_Static_assert(sizeof(shz_bootinfo_t) == 616, "boot info layout");
+_Static_assert(sizeof(shz_install_identity_t) == 64, "install identity layout");
+_Static_assert(__builtin_offsetof(shz_bootinfo_t, install) == 616, "boot info storage prefix unchanged");
+_Static_assert(sizeof(shz_bootinfo_t) == 680, "boot info layout");
+_Static_assert(SHZ_BOOTINFO_GPA + sizeof(shz_bootinfo_t) <= 0x8000u, "boot info stays inside its page");
+_Static_assert(sizeof(shz_drvrep_t) == 88, "driver report layout");
 _Static_assert(SHZ_MSG_MAX_INLINE == 192, "inline capacity");
 #endif

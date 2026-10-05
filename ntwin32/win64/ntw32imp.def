@@ -10,9 +10,6 @@ EXPORTS
     NtwCloseConsole64@4
     NtwKillProcess64@8
     NtwCloseProcess64@4
-    NtwQueryGui64@8
-    NtwAcquireGuiFrame64@8
-    NtwReadGuiFrame64@24
-    NtwReleaseGuiFrame64@12
-    NtwSendGuiInput64@12
-    NtwCloseGui64@4
+    Ntw64AuthLogin@16
+    Ntw64AuthRegister@20
+    Ntw64AuthElevateConfirm@16

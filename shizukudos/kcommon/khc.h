@@ -23,7 +23,7 @@ static inline long shz_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_ou
 static inline long shz_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_out)
 {
     hcreg_t status = op, value = a, argument = b;
-    /* DOMAIN_STATE and CHANNEL_INFO also return RCX. The generic helper
+    /* TIME, DOMAIN_STATE and CHANNEL_INFO also return RCX. The generic helper
      * discards that result, but callers' live C values must survive it. */
     __asm__ volatile("vmcall" : "+a"(status), "+b"(value), "+c"(argument) : : "memory", "cc");
     if (value_out)
@@ -35,6 +35,7 @@ static inline long shz_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_ou
 typedef uint32_t hcreg_t;
 #ifdef SHZ_STANDALONE
 long shz_standalone_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_out);      /* kernel32/standalone/standalone32.c */
+uint64_t shz_standalone_time_ns(void); /* coherent full-width standalone clock */
 static inline long shz_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_out)
 {
     return shz_standalone_hcall(op, a, b, value_out);
@@ -72,9 +73,20 @@ static inline void __attribute__((noreturn)) shz_exit(unsigned code)
 }
 static inline uint64_t shz_time_ns(void)
 {
+#if defined(__x86_64__)
     hcreg_t v = 0;
     shz_hcall(SHZ_HC_TIME, 0, 0, &v);
     return v;
+#elif defined(SHZ_STANDALONE)
+    return shz_standalone_time_ns();
+#else
+    uint32_t status = SHZ_HC_TIME, low = 0, high = 0;
+    /* A paired updated Core supplies EBX/ECX from one sample. Old guests
+     * still read their previous RBX result; new i386 guests require this
+     * additive TIME result instead of guessing an epoch from a low word. */
+    __asm__ volatile("vmcall" : "+a"(status), "+b"(low), "+c"(high) : : "memory", "cc");
+    return ((uint64_t)high << 32) | low;
+#endif
 }
 static inline long shz_timer_set(unsigned vector, uint32_t period_us) { return shz_hcall(SHZ_HC_TIMER_SET, vector, period_us, 0); }
 static inline long shz_notify(unsigned domain, uint32_t mask) { return shz_hcall(SHZ_HC_NOTIFY, domain, mask, 0); }

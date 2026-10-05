@@ -163,6 +163,12 @@ static int roles_ok(void)
  if(roles_kind==1)return pin_ok(&boot_role)&&pin_ok(&system_role);
  return roles_kind==2&&!archive_source_origin(&actual)&&!memcmp(&actual,&external_origin,sizeof actual);
 }
+/* Readiness is derived from the existing bound roles under the same lock. */
+int blk_authority_roles_ready(void)
+{
+ int ready;acquire();ready=roles_ok();mutex_unlock(&lock);return ready;
+}
+
 static int target_excluded(blk_dev_t *d)
 {
  const shz_storage_locator_t *a,*b;

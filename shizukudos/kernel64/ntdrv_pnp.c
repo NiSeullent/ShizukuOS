@@ -18,6 +18,8 @@
 #include "registry.h"
 #include "ipc.h"
 #include "../abi/shz_pnp_catalog.h"
+#include "blk.h"
+#include "laptop_firmware.h"
 
 /* provider routines implemented in ntdrv_io.c (prototyped there only for the drivers' import tables) */
 NTSTATUS NTAPI IoCreateDevice(DRIVER_OBJECT *drv, uint32_t ext_size, UNICODE_STRING *name, uint32_t type,
@@ -117,7 +119,8 @@ struct ntdrv_pdo {
     pci_dev_t dev;
     ntdrv_driver_t *fdo_driver;
     int attempted, started;
-    int32_t start_status;
+    int no_add_device;                  /* bound to a legacy (non-PnP) driver: no AddDevice, no start IRP */
+    int32_t start_status;               /* actual AddDevice / IRP_MN_START_DEVICE outcome (driver bring-up report) */
     unsigned index;
     char instance[128];                 /* PCI\VEN_8086&DEV_100E\B00D03F0 */
     uint16_t driverkey[80];             /* Enum "Driver": {ClassGUID}\0000 */
@@ -128,7 +131,6 @@ struct ntdrv_pdo {
     uint8_t iface_guid[4][16];           /* actual registration GUID, retained without reparsing links */
     int iface_enabled[4];
     unsigned niface;
-    char native_service[32];            /* non-empty: devnode of a native Kernel64 backend (no NT function driver) */
 };
 static ntdrv_pdo_t *pdos;
 static unsigned pdo_count;
@@ -183,17 +185,12 @@ void ntdrv_pnp_add(ntdrv_driver_t *d, const pci_dev_t *dev, regkey_t *inst_key, 
     unsigned i;
     for (p = pdos; p; p = p->next)
         if (p->dev.bus == dev->bus && p->dev.dev == dev->dev && p->dev.fn == dev->fn) {
-            if (p->native_service[0]) {                 /* a native backend owns the function: never hand it to an NT FDO */
-                kprintf("K64 ntdrv: PCI %x:%x.%x is driven by native %s; %s not bound\n",
-                        dev->bus, dev->dev, dev->fn, p->native_service, d->name);
-                return;
-            }
             if (p->fdo_driver && p->fdo_driver != d) {
                 kprintf("K64 ntdrv: PCI %x:%x.%x already has a function driver (%s); %s not bound\n",
                         dev->bus, dev->dev, dev->fn, p->fdo_driver->name, d->name);
                 return;
             }
-            p->fdo_driver = d; p->attempted = 0; p->started = 0;
+            p->fdo_driver = d; p->attempted = 0; p->started = 0; p->no_add_device = 0; p->start_status = 0;
             return;
         }
     p = kzalloc(sizeof *p);
@@ -220,62 +217,6 @@ void ntdrv_pnp_add(ntdrv_driver_t *d, const pci_dev_t *dev, regkey_t *inst_key, 
     if (IoCreateDevice(root_driver(), 0, &name, 0x22 /* FILE_DEVICE_UNKNOWN */, 0, 0, &p->pdo) != STATUS_SUCCESS) { kfree(p); return; }
     p->pdo->Flags &= ~DO_DEVICE_INITIALIZING;
     p->next = pdos; pdos = p;
-}
-
-/* Native backend devnode (driver_inventory.c): a PDO with NO function driver, so ntdrv_pnp_start_pending(),
- * remove_devices() and driver_unloading() (all filtered by fdo_driver == d) never touch it, and ntdrv_pnp_add()
- * refuses to bind a hosted driver over it. Only called for a function whose pci_claim() owner is a catalogue
- * backend. Returns 0, or -1 (bad argument, already present, no memory, IoCreateDevice failure). */
-int ntdrv_pnp_publish_native(const pci_dev_t *dev, const char *service, const char *description, const char *hwid)
-{
-    static const char hx[] = "0123456789ABCDEF";
-    ntdrv_pdo_t *p;
-    UNICODE_STRING name;
-    uint16_t wname[32];
-    char aname[32];
-    unsigned i, n;
-    if (!dev || !service || !service[0] || !hwid || !hwid[0]) return -1;
-    for (p = pdos; p; p = p->next)
-        if (p->dev.bus == dev->bus && p->dev.dev == dev->dev && p->dev.fn == dev->fn) return -1;
-    p = kzalloc(sizeof *p);
-    if (!p) return -1;
-    p->dev = *dev;
-    p->index = pdo_count++;
-    for (i = 0; service[i] && i + 1 < sizeof p->native_service; ++i) p->native_service[i] = service[i];
-    n = 0;                                                  /* <hwid>\B<bus>D<dev>F<fn>, as shzpnp names Enum\PCI */
-    for (i = 0; hwid[i] && n + 12 < sizeof p->instance; ++i) p->instance[n++] = hwid[i];
-    p->instance[n++] = '\\';
-    p->instance[n++] = 'B'; p->instance[n++] = hx[dev->bus >> 4]; p->instance[n++] = hx[dev->bus & 15];
-    p->instance[n++] = 'D'; p->instance[n++] = hx[dev->dev >> 4 & 15]; p->instance[n++] = hx[dev->dev & 15];
-    p->instance[n++] = 'F'; p->instance[n++] = hx[dev->fn & 15]; p->instance[n] = 0;
-    if (description) ntdrv_ascii_to_wide(description, p->desc, 128);
-    ntdrv_ascii_to_wide("ShizukuOS", p->mfg, 128);
-    p->started = 1;                                         /* the native backend already drives it (pci_claim) */
-    {
-        static const char pfx[] = "\\Device\\NTPNP_PCI";
-        unsigned k = p->index;
-        n = 0;
-        for (i = 0; pfx[i]; ++i) aname[n++] = pfx[i];
-        aname[n++] = (char)('0' + k / 1000 % 10); aname[n++] = (char)('0' + k / 100 % 10);
-        aname[n++] = (char)('0' + k / 10 % 10); aname[n++] = (char)('0' + k % 10); aname[n] = 0;
-        ntdrv_ascii_to_wide(aname, wname, 32);
-        name.Buffer = wname; name.Length = (uint16_t)(n * 2); name.MaximumLength = (uint16_t)(n * 2 + 2);
-    }
-    if (IoCreateDevice(root_driver(), 0, &name, 0x22 /* FILE_DEVICE_UNKNOWN */, 0, 0, &p->pdo) != STATUS_SUCCESS) { kfree(p); return -1; }
-    p->pdo->Flags &= ~DO_DEVICE_INITIALIZING;
-    p->next = pdos; pdos = p;
-    kprintf("K64 ntdrv: native devnode %s for %s\n", p->instance, service);
-    return 0;
-}
-
-/* -1: no devnode for the function; 0: recorded (not started); 1: started (native, or START_DEVICE succeeded). */
-int ntdrv_pnp_function_state(const pci_dev_t *dev)
-{
-    ntdrv_pdo_t *p;
-    if (!dev) return -1;
-    for (p = pdos; p; p = p->next)
-        if (p->dev.bus == dev->bus && p->dev.dev == dev->dev && p->dev.fn == dev->fn) return p->started ? 1 : 0;
-    return -1;
 }
 
 /* ---------------------------------------------------------------- resources of a function */
@@ -367,6 +308,7 @@ void ntdrv_pnp_start_pending(ntdrv_driver_t *d)
         p->attempted = 1;
         add = d->drv->DriverExtension ? (void *)d->drv->DriverExtension->AddDevice : 0;
         if (!add) {
+            p->no_add_device = 1;
             kprintf("K64 ntdrv: %s has no AddDevice (non-PnP driver): PCI %x:%x.%x is bound, no start IRP\n",
                     d->name, p->dev.bus, p->dev.dev, p->dev.fn);
             continue;
@@ -375,13 +317,16 @@ void ntdrv_pnp_start_pending(ntdrv_driver_t *d)
         ntdrv_set_current_driver(d);
         st = add(d->drv, p->pdo);
         kprintf("K64 ntdrv: %s AddDevice(PCI %x:%x.%x) = %x\n", d->name, p->dev.bus, p->dev.dev, p->dev.fn, (uint32_t)st);
-        if (!NT_SUCCESS(st)) { ntdrv_set_current_driver(0); continue; }
+        if (!NT_SUCCESS(st)) { p->start_status = st; ntdrv_set_current_driver(0); continue; }
         top = IoGetAttachedDevice(p->pdo);
-        if (top == p->pdo) { kprintf("K64 ntdrv: %s AddDevice attached no FDO\n", d->name); ntdrv_set_current_driver(0); continue; }
+        if (top == p->pdo) {
+            kprintf("K64 ntdrv: %s AddDevice attached no FDO\n", d->name);
+            p->start_status = STATUS_DEVICE_CONFIGURATION_ERROR; ntdrv_set_current_driver(0); continue;
+        }
         raw = build_resource_list(&p->dev, 0);
         xlat = build_resource_list(&p->dev, 1);
         irp = raw && xlat ? IoAllocateIrp((uint8_t)top->StackSize, 0) : 0;
-        if (!irp) { kfree(raw); kfree(xlat); ntdrv_set_current_driver(0); continue; }
+        if (!irp) { p->start_status = STATUS_INSUFFICIENT_RESOURCES; kfree(raw); kfree(xlat); ntdrv_set_current_driver(0); continue; }
         log_resources(d->name, raw);
         stk = irp->Tail.Overlay.CurrentStackLocation - 1;
         stk->MajorFunction = IRP_MJ_PNP;
@@ -707,7 +652,6 @@ static void catalog_row(ntdrv_pdo_t *node, shz_pnp_row_t *row, unsigned interfac
     memcpy(row->description,node->desc,sizeof row->description);
     memcpy(row->manufacturer,node->mfg,sizeof row->manufacturer);
     if(node->fdo_driver)for(i=0;node->fdo_driver->name[i]&&i+1<sizeof row->service;++i)row->service[i]=node->fdo_driver->name[i];
-    else for(i=0;node->native_service[i]&&i+1<sizeof row->service;++i)row->service[i]=node->native_service[i];
     if(interface<node->niface){row->enabled=node->iface_enabled[interface]!=0;memcpy(row->interface_guid,node->iface_guid[interface],16);memcpy(row->link,node->iface[interface],sizeof row->link);}
 }
 int32_t shz_query_pnp_catalog(process_t *process,uint64_t output,uint64_t length,uint64_t return_length)
@@ -724,4 +668,389 @@ int32_t shz_query_pnp_catalog(process_t *process,uint64_t output,uint64_t length
         for(k=0;k<node->niface;++k){catalog_row(node,&row,k);if(copy_to_user(process,output+sizeof header+(uint64_t)index++*sizeof row,&row,sizeof row)){status=STATUS_ACCESS_VIOLATION;goto done;}}
     }
 done:irq_restore(flags);return status;
+}
+
+/* ================================================================ boot-time driver bring-up (drivers/common/shz_bringup.h)
+ * Enumeration is the existing PCI scan; the installed driver catalog is the Enum\PCI devnode set this file already turns
+ * into PDOs and publishes through shz_query_pnp_catalog. Init is done by the existing owners only: disk_init() (ahci/nvme/
+ * sdhci cores), the gfx owners, and NtLoadDriver's kernel core for installed services (DriverEntry, devnode binding,
+ * AddDevice, IRP_MN_START_DEVICE with the function's own BARs and line). Nothing here maps memory, connects an interrupt
+ * or hands out DMA; a function a native driver claimed is never offered to a hosted service. The report copies what
+ * the owners actually recorded (pci_claim, blk registration with a hardware locator, PDO start status). */
+static shz_bringup_report_t bringup;
+static int bringup_devices_done;
+static int32_t bringup_laptop = 1;                     /* 1 = discovery not attempted through bring-up */
+static uint32_t bringup_boot_flags, bringup_profile;     /* shz_bootinfo_t.flags; SHZ_BRINGUP_PROFILE_* */
+static int bringup_quiesced, bringup_quiesce_result;
+
+#ifdef SHZ_STANDALONE
+static struct { char name[32]; int32_t status; int attempted; } bringup_svc[SHZ_BRINGUP_SERVICES];
+static unsigned bringup_nsvc;
+
+static void bu_copy(char *dst, unsigned cap, const char *src)
+{
+    unsigned i = 0;
+    if (src) for (; src[i] && i + 1 < cap; ++i) dst[i] = src[i];
+    dst[i] = 0;
+}
+
+/* (bus,dev,fn) -> devnode Service value, from one walk of Enum\PCI under the registry lock */
+typedef struct { uint8_t bus, dev, fn, used; char service[32]; } bu_devnode_t;
+
+static int bu_hex(uint16_t c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    return -1;
+}
+/* "B<2 hex>D<2 hex>F<hex...>", the instance names shzpnp add-driver --install writes (same rule as ntdrv_io.c) */
+static int bu_instance(const uint16_t *w, unsigned n, unsigned *bus, unsigned *dev, unsigned *fn)
+{
+    int a, b, c, d, e;
+    unsigned i, f = 0;
+    if (n < 8 || n > 12 || w[0] != 'B' || w[3] != 'D' || w[6] != 'F') return 0;
+    a = bu_hex(w[1]); b = bu_hex(w[2]); c = bu_hex(w[4]); d = bu_hex(w[5]);
+    if (a < 0 || b < 0 || c < 0 || d < 0) return 0;
+    for (i = 7; i < n; ++i) { e = bu_hex(w[i]); if (e < 0) return 0; f = f * 16 + (unsigned)e; }
+    if (f > 7) return 0;
+    *bus = (unsigned)(a * 16 + b); *dev = (unsigned)(c * 16 + d); *fn = f;
+    return *dev < 32;
+}
+/* A service name that can only name a Services subkey: 1..31 of [A-Za-z0-9_.-], no path separators. */
+static int bu_service_value(regval_t *v, char *out)
+{
+    const uint16_t *w;
+    unsigned n, i;
+    out[0] = 0;
+    if (!v || (v->type != REG_SZ && v->type != REG_EXPAND_SZ)) return 0;
+    w = (const uint16_t *)regval_data(v);
+    n = v->data_len / 2;
+    while (n && !w[n - 1]) --n;
+    if (!n || n > 31) return 0;
+    for (i = 0; i < n; ++i) {
+        const uint16_t c = w[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.' || c == '-'))
+            return 0;
+        out[i] = (char)c;
+    }
+    out[n] = 0;
+    return 1;
+}
+static int bu_dword(regkey_t *k, const uint16_t *name, unsigned chars, uint32_t *out)
+{
+    regval_t *v = reg_find_value(k, name, chars);
+    if (!v || v->type != REG_DWORD || v->data_len < 4) return 0;
+    memcpy(out, regval_data(v), 4);
+    return 1;
+}
+/* Installed kernel service eligible for a present devnode: Type = SERVICE_KERNEL_DRIVER (1), Start 0..3 (boot, system,
+ * auto, demand: a PnP function driver is loaded when its device is enumerated), never Start = 4 (disabled). Called with
+ * the registry lock held. */
+static int bu_service_eligible(const char *svc)
+{
+    static const uint16_t prefix[] = u"Machine\\System\\CurrentControlSet\\Services\\";
+    uint16_t path[sizeof prefix / 2 + 32];
+    unsigned n = sizeof prefix / 2 - 1, i;
+    regkey_t *k;
+    uint32_t type = 0, start = 4;
+    for (i = 0; i < n; ++i) path[i] = prefix[i];
+    for (i = 0; svc[i]; ++i) path[n++] = (uint16_t)svc[i];
+    if (reg_resolve(reg_root(), path, n, 0, 0, 1, 0, 0, &k, 0)) return 0;
+    if (!bu_dword(k, u"Type", 4, &type) || !bu_dword(k, u"Start", 5, &start)) return 0;
+    return type == 1 && start <= 3;
+}
+static unsigned bu_walk_devnodes(bu_devnode_t *out, unsigned cap)
+{
+    static const uint16_t path[] = u"Machine\\System\\CurrentControlSet\\Enum\\PCI";
+    regkey_t *pci, *hw, *inst;
+    uint32_t i, j;
+    unsigned n = 0;
+    reg_lock();
+    if (reg_resolve(reg_root(), path, sizeof path / 2 - 1, 0, 0, 1, 0, 0, &pci, 0)) { reg_unlock(); return 0; }
+    for (i = 0; (hw = reg_nth_child(pci, i)) != 0 && n < cap; ++i)
+        for (j = 0; (inst = reg_nth_child(hw, j)) != 0 && n < cap; ++j) {
+            unsigned bus, dev, fn;
+            char svc[32];
+            if (!bu_instance(regkey_name(inst), inst->name_len, &bus, &dev, &fn)) continue;   /* SHZnnnn: no function */
+            if (!bu_service_value(reg_find_value(inst, u"Service", 7), svc)) continue;
+            out[n].bus = (uint8_t)bus; out[n].dev = (uint8_t)dev; out[n].fn = (uint8_t)fn;
+            out[n].used = (uint8_t)bu_service_eligible(svc);
+            bu_copy(out[n].service, sizeof out[n].service, svc);
+            ++n;
+        }
+    reg_unlock();
+    return n;
+}
+static const bu_devnode_t *bu_devnode_for(const bu_devnode_t *nodes, unsigned n, const pci_dev_t *d)
+{
+    unsigned i;
+    for (i = 0; i < n; ++i)
+        if (nodes[i].bus == d->bus && nodes[i].dev == d->dev && nodes[i].fn == d->fn) return &nodes[i];
+    return 0;
+}
+
+/* The native drivers Kernel64 links, matched exactly as each driver's own probe matches (see the files named). */
+static uint16_t bu_native_match(const pci_dev_t *d)
+{
+    if (d->class_code == 0x01 && d->subclass == 0x06 && d->prog_if == 0x01) return SHZ_BRINGUP_DRV_AHCI;      /* ahci_blk.c */
+    if (d->class_code == 0x01 && d->subclass == 0x08 && d->prog_if == 0x02) return SHZ_BRINGUP_DRV_NVME;      /* nvme.c */
+    if (d->class_code == 0x08 && d->subclass == 0x05) return SHZ_BRINGUP_DRV_SDHCI;                           /* sdhci.c */
+    if (d->vendor == 0x1234 && d->device == 0x1111 && d->class_code == 0x03) return SHZ_BRINGUP_DRV_GFX_BOCHS; /* gfx_fb.c */
+    if (d->vendor == 0x1af4 && d->device == 0x1050) return SHZ_BRINGUP_DRV_GFX_VIRTIO;                       /* gfx_virtio.c */
+    if (d->class_code == 0x03) return SHZ_BRINGUP_DRV_GFX_GOP;                                                /* gfx_gop.c */
+    if (d->vendor == 0x10ec && d->device == 0x8139) return SHZ_BRINGUP_DRV_NET_RTL8139;                      /* net_rtl8139.c */
+    if (d->class_code == 0x0c && d->subclass == 0x03 && d->prog_if == 0x30) return SHZ_BRINGUP_DRV_XHCI_UNLINKED;
+    if (d->class_code == 0x06 || d->class_code == 0x05) return SHZ_BRINGUP_DRV_PLATFORM;
+    return SHZ_BRINGUP_DRV_NONE;
+}
+static uint32_t bu_blk_published(const pci_dev_t *d, uint16_t drv)
+{
+    const blk_dev_t *b;
+    uint32_t n = 0;
+    for (b = blk_first(); b; b = b->next) {
+        if (b->flags & BLK_F_PARTITION) continue;
+        if (b->storage.version) {
+            if (b->storage.bus == d->bus && b->storage.device == d->dev && b->storage.function == d->fn) ++n;
+        } else if (drv == SHZ_BRINGUP_DRV_SDHCI && b->driver && !strcmp(b->driver, "sdhci")) ++n;   /* no locator published */
+    }
+    return n;
+}
+
+/* Load each installed service a present, unclaimed devnode names: NtLoadDriver's own core, under its load mutex. */
+static void bu_load_services(const bu_devnode_t *nodes, unsigned nnodes, const pci_dev_t *all, unsigned nall)
+{
+    static const char prefix[] = "\\Registry\\Machine\\System\\CurrentControlSet\\Services\\";
+    unsigned i, k;
+    for (i = 0; i < nnodes; ++i) {
+        int present = 0, dup = 0;
+        for (k = 0; k < nall; ++k)
+            if (all[k].bus == nodes[i].bus && all[k].dev == nodes[i].dev && all[k].fn == nodes[i].fn) {
+                present = !pci_claimed_by(&all[k]);      /* a native (or already hosted) owner keeps its function */
+                break;
+            }
+        if (!present || !nodes[i].used) continue;
+        for (k = 0; k < bringup_nsvc; ++k)
+            if (!strcmp(bringup_svc[k].name, nodes[i].service)) dup = 1;
+        if (dup) continue;
+        if (bringup_nsvc >= SHZ_BRINGUP_SERVICES) {
+            kprintf("K64 bringup: more than %u installed services; %s not loaded\n", SHZ_BRINGUP_SERVICES, nodes[i].service);
+            continue;
+        }
+        bu_copy(bringup_svc[bringup_nsvc].name, sizeof bringup_svc[0].name, nodes[i].service);
+        ++bringup_nsvc;
+    }
+    for (i = 0; i < bringup_nsvc; ++i) {
+        uint16_t w[sizeof prefix + 32];
+        unsigned n = 0;
+        if (bringup_svc[i].attempted) continue;
+        bringup_svc[i].attempted = 1;
+        if (ntdrv_find_driver(bringup_svc[i].name)) { bringup_svc[i].status = STATUS_SUCCESS; continue; }
+        for (k = 0; prefix[k]; ++k) w[n++] = (uint16_t)prefix[k];
+        for (k = 0; bringup_svc[i].name[k]; ++k) w[n++] = (uint16_t)bringup_svc[i].name[k];
+        w[n] = 0;
+        bringup_svc[i].status = ntdrv_load_service_path(w, n);
+        if (bringup_svc[i].status == STATUS_IMAGE_ALREADY_LOADED) bringup_svc[i].status = STATUS_SUCCESS;
+        kprintf("K64 bringup: installed service %s load = %x\n", bringup_svc[i].name, (uint32_t)bringup_svc[i].status);
+    }
+}
+static const char *bu_state_name(uint16_t s)
+{
+    static const char *const n[] = { "unsupported", "running", "claimed", "not-started", "init-failed", "bound-no-start",
+                                     "infrastructure", "linked-elsewhere" };
+    return s < sizeof n / sizeof n[0] ? n[s] : "?";
+}
+#endif
+
+static void bu_refresh(void)
+{
+    const struct shz_laptop_firmware *lf = k64_laptop_firmware_snapshot();
+    memset(&bringup, 0, sizeof bringup);
+    bringup.version = SHZ_BRINGUP_VERSION;
+    bringup.row_size = sizeof(shz_bringup_row_t);
+    bringup.laptop_firmware = lf ? 0 : bringup_laptop;
+    bringup.laptop_has_ecdt = lf ? lf->has_ecdt != 0 : 0;
+    ntdrv_catalog_report(&bringup);
+    bringup.profile_flags = bringup_profile;
+    bringup.install_generation = ntdrv_install_generation();
+#ifdef SHZ_STANDALONE
+    {
+        static bu_devnode_t nodes[64];
+        pci_dev_t all[SHZ_BRINGUP_ROWS];
+        const unsigned nnodes = bu_walk_devnodes(nodes, 64), n = pci_enumerate(all, SHZ_BRINGUP_ROWS);
+        unsigned i, k;
+        uint64_t flags;
+        bringup.profile_passthrough = 1;
+        bringup.rows = n;
+        for (k = 0; k < bringup_nsvc; ++k) {
+            ++bringup.services_considered;
+            if (bringup_svc[k].attempted && bringup_svc[k].status >= 0) ++bringup.services_loaded;
+            else if (bringup_svc[k].attempted) ++bringup.services_failed;
+        }
+        flags = irq_save();                             /* PDOs: the unload path cannot free one while it is read */
+        for (i = 0; i < n; ++i) {
+            shz_bringup_row_t *r = &bringup.row[i];
+            const pci_dev_t *d = &all[i];
+            const char *owner = pci_claimed_by(d);
+            const bu_devnode_t *node = bu_devnode_for(nodes, nnodes, d);
+            const uint16_t native = bu_native_match(d);
+            r->bus = d->bus; r->dev = d->dev; r->fn = d->fn; r->vendor = d->vendor; r->device = d->device;
+            r->class_code = d->class_code; r->subclass = d->subclass; r->prog_if = d->prog_if; r->irq_line = d->irq_line;
+            bu_copy(r->owner, sizeof r->owner, owner);
+            if (node) bu_copy(r->service, sizeof r->service, node->service);
+            if (owner && !memcmp(owner, "ntdrv:", 6)) {
+                ntdrv_pdo_t *p;
+                r->driver = SHZ_BRINGUP_DRV_HOSTED;
+                r->state = SHZ_BRINGUP_CLAIMED;            /* claimed by MmMapIoSpace/IoConnectInterrupt, no devnode PDO */
+                for (p = pdos; p; p = p->next)
+                    if (p->dev.bus == d->bus && p->dev.dev == d->dev && p->dev.fn == d->fn && p->fdo_driver) {
+                        r->init_status = p->start_status;
+                        if (p->started) { r->state = SHZ_BRINGUP_RUNNING; r->published = 1; }
+                        else if (p->no_add_device) r->state = SHZ_BRINGUP_BOUND_NO_START;
+                        else if (p->attempted && p->start_status < 0) r->state = SHZ_BRINGUP_INIT_FAILED;
+                        break;
+                    }
+            } else if (owner) {
+                r->driver = native;
+                r->published = bu_blk_published(d, native);
+                r->init_status = (int32_t)r->published;
+                r->state = r->published ? SHZ_BRINGUP_RUNNING : SHZ_BRINGUP_CLAIMED;
+            } else {
+                r->driver = node ? SHZ_BRINGUP_DRV_HOSTED : native;
+                if (node) {
+                    r->state = node->used ? SHZ_BRINGUP_NOT_STARTED : SHZ_BRINGUP_UNSUPPORTED;   /* disabled / not a kernel driver */
+                    for (k = 0; k < bringup_nsvc; ++k)
+                        if (!strcmp(bringup_svc[k].name, node->service) && bringup_svc[k].attempted) {
+                            r->init_status = bringup_svc[k].status < 0 ? bringup_svc[k].status : STATUS_DEVICE_NOT_READY;
+                            r->state = SHZ_BRINGUP_INIT_FAILED;   /* loaded or not, the function was not bound */
+                        }
+                } else if (native == SHZ_BRINGUP_DRV_PLATFORM) r->state = SHZ_BRINGUP_INFRASTRUCTURE;
+                else if (native == SHZ_BRINGUP_DRV_XHCI_UNLINKED) r->state = SHZ_BRINGUP_LINKED_ELSEWHERE;
+                else if (native != SHZ_BRINGUP_DRV_NONE) r->state = SHZ_BRINGUP_NOT_STARTED;
+                else r->state = SHZ_BRINGUP_UNSUPPORTED;
+            }
+            switch (r->state) {
+            case SHZ_BRINGUP_RUNNING: ++bringup.running; break;
+            case SHZ_BRINGUP_CLAIMED: case SHZ_BRINGUP_BOUND_NO_START: ++bringup.claimed; break;
+            case SHZ_BRINGUP_NOT_STARTED: ++bringup.not_started; break;
+            case SHZ_BRINGUP_INIT_FAILED: ++bringup.failed; break;
+            case SHZ_BRINGUP_INFRASTRUCTURE: ++bringup.infrastructure; break;
+            case SHZ_BRINGUP_LINKED_ELSEWHERE: ++bringup.linked_elsewhere; break;
+            default: ++bringup.unsupported; break;
+            }
+        }
+        irq_restore(flags);
+    }
+#endif
+}
+
+/* C4 (routing02 contract): Kernel64 -> Supervisor driver bring-up report, once, only as a Supervisor guest. */
+static void bu_send_report(void)
+{
+#if !defined(SHZ_STANDALONE) && defined(SHZ_DRVREP_MAGIC)
+    static shz_drvrep_t rep __attribute__((aligned(64)));
+    static int sent;
+    hcreg_t value = (hcreg_t)-1;
+    long st;
+    if (sent || (bringup_boot_flags & SHZ_BIF_UEFI_DIRECT)) return;
+    sent = 1;
+    memset(&rep, 0, sizeof rep);
+    rep.magic = SHZ_DRVREP_MAGIC; rep.version = 1; rep.size = sizeof rep;
+    /* exactly one profile bit (the Supervisor refuses both): foundation wins over devices-elsewhere */
+    rep.flags = (bringup.profile_flags & SHZ_BRINGUP_PROFILE_FOUNDATION) ? SHZ_DRVREP_FOUNDATION
+              : (bringup.profile_flags & SHZ_BRINGUP_PROFILE_DEVICES_ELSEWHERE) ? SHZ_DRVREP_PASSTHROUGH : 0;
+    rep.install_generation = bringup.install_generation;
+    rep.rows = bringup.rows; rep.running = bringup.running; rep.claimed = bringup.claimed;
+    rep.not_started = bringup.not_started; rep.failed = bringup.failed; rep.unsupported = bringup.unsupported;
+    rep.infrastructure = bringup.infrastructure; rep.linked_elsewhere = bringup.linked_elsewhere;
+    rep.services_considered = bringup.services_considered; rep.services_loaded = bringup.services_loaded;
+    rep.services_failed = bringup.services_failed;
+    rep.catalog_entries = bringup.catalog_entries; rep.catalog_matched = bringup.catalog_matched;
+    rep.catalog_rejected = bringup.catalog_rejected;
+    st = shz_hcall(SHZ_HC_DRIVER_REPORT, kimage_v2p((uint64_t)&rep), sizeof rep, &value);   /* .bss is in the image */
+    if (st != SHZ_OK || (long)value != SHZ_OK)
+        kprintf("DRIVER-REPORT: Supervisor refused the bring-up report: status=%d result=%d (not reported)\n", (int)st, (int)(long)value);
+    else
+        kprintf("DRIVER-REPORT: delivered to ShizukuCore (rows=%u failed=%u services_failed=%u generation=%llu)\n",
+                rep.rows, rep.failed, rep.services_failed, (unsigned long long)rep.install_generation);
+#elif !defined(SHZ_STANDALONE)
+    kprintf("DRIVER-REPORT: SHZ_HC_DRIVER_REPORT not in this ABI header; ShizukuCore keeps the driver state ABSENT\n");
+#endif
+}
+
+int shz_driver_bringup_init(const void *bootinfo, unsigned phase, unsigned flags)
+{
+    if (bootinfo) bringup_boot_flags = ((const shz_bootinfo_t *)bootinfo)->flags;
+#ifndef SHZ_STANDALONE
+    bringup_profile |= SHZ_BRINGUP_PROFILE_DEVICES_ELSEWHERE;   /* Supervisor guest image: no PCI function is passed through */
+#endif
+    if (phase == SHZ_BRINGUP_PHASE_EARLY) {
+        /* Retained-firmware discovery only: copies FADT/ECDT descriptors; grants no EC/SCI/I2C register access. */
+        if (flags & SHZ_BRINGUP_F_LAPTOP_FIRMWARE) {
+            if (!bootinfo) return SHZ_INVALID;
+            bringup_laptop = k64_laptop_firmware_init((const shz_bootinfo_t *)bootinfo);
+            kprintf("K64 bringup: laptop firmware discovery = %d (register_access=0)\n", (int)bringup_laptop);
+            return bringup_laptop;
+        }
+        return 0;
+    }
+    if (phase != SHZ_BRINGUP_PHASE_DEVICES) return SHZ_INVALID;
+    if (bringup_devices_done) { bu_refresh(); return -(int)bringup.failed; }
+    bringup_devices_done = 1;
+    if (flags & SHZ_BRINGUP_F_FOUNDATION) bringup_profile |= SHZ_BRINGUP_PROFILE_FOUNDATION;
+    else if (flags & SHZ_BRINGUP_F_LOAD_SERVICES) ntdrv_catalog_import();   /* registry devnodes before services load */
+#ifdef SHZ_STANDALONE
+    if ((flags & SHZ_BRINGUP_F_LOAD_SERVICES) && !(flags & SHZ_BRINGUP_F_FOUNDATION)) {
+        static bu_devnode_t nodes[64];
+        pci_dev_t all[SHZ_BRINGUP_ROWS];
+        const unsigned nnodes = bu_walk_devnodes(nodes, 64), n = pci_enumerate(all, SHZ_BRINGUP_ROWS);
+        bu_load_services(nodes, nnodes, all, n);
+    }
+#endif
+    bu_refresh();
+#ifdef SHZ_STANDALONE
+    if (!(flags & SHZ_BRINGUP_F_QUIET)) {
+        unsigned i;
+        for (i = 0; i < bringup.rows; ++i) {
+            const shz_bringup_row_t *r = &bringup.row[i];
+            kprintf("K64 bringup: PCI %x:%x.%x %04x:%04x class %02x.%02x.%02x %s status=%x published=%u owner=%s service=%s\n",
+                    r->bus, r->dev, r->fn, r->vendor, r->device, r->class_code, r->subclass, r->prog_if,
+                    bu_state_name(r->state), (uint32_t)r->init_status, r->published, r->owner[0] ? r->owner : "-",
+                    r->service[0] ? r->service : "-");
+        }
+    }
+#endif
+    kprintf("DRIVER-BRINGUP: passthrough=%u functions=%u running=%u claimed=%u not_started=%u failed=%u unsupported=%u "
+            "infrastructure=%u linked_elsewhere=%u services=%u loaded=%u load_failed=%u laptop_firmware=%d ecdt=%u ec_io=0\n",
+            bringup.profile_passthrough, bringup.rows, bringup.running, bringup.claimed, bringup.not_started, bringup.failed,
+            bringup.unsupported, bringup.infrastructure, bringup.linked_elsewhere, bringup.services_considered,
+            bringup.services_loaded, bringup.services_failed, (int)bringup.laptop_firmware, bringup.laptop_has_ecdt);
+    kprintf("DRIVER-BRINGUP: profile=%x catalog=%d entries=%u matched=%u rejected=%u devnodes=%u generation=%llu\n",
+            bringup.profile_flags, (int)bringup.catalog_status, bringup.catalog_entries, bringup.catalog_matched,
+            bringup.catalog_rejected, bringup.catalog_registered, (unsigned long long)bringup.install_generation);
+    bu_send_report();
+    return -(int)bringup.failed;
+}
+
+const shz_bringup_report_t *shz_driver_bringup_report(void)
+{
+    bu_refresh();
+    return &bringup;
+}
+
+int shz_driver_bringup_quiesce(void)
+{
+    blk_dev_t *b;
+    int failed = 0;
+    if (bringup_quiesced) return bringup_quiesce_result;
+    bringup_quiesced = 1;
+    ntdrv_send_shutdown();                              /* hosted drivers first: they may sit above a native volume */
+    for (b = blk_first(); b; b = b->next)
+        if (!(b->flags & BLK_F_PARTITION) && blk_flush(b)) {
+            kprintf("K64 bringup: flush of %s failed during quiesce\n", b->name);
+            ++failed;
+        }
+    kprintf("K64 bringup: quiesce done, %d flush failure(s)\n", failed);
+    bringup_quiesce_result = failed;
+    return failed;
 }

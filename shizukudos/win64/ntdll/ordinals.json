@@ -505,6 +505,12 @@
     "strcmp": 491,
     "strlen": 492,
     "wcscmp": 493,
-    "wcslen": 494
+    "wcslen": 494,
+    "NtShzSound": 506,
+    "ZwShzSound": 507,
+    "NtShzSaw": 508,
+    "ZwShzSaw": 509,
+    "NtShzSetupTarget": 510,
+    "ZwShzSetupTarget": 511
   }
 }

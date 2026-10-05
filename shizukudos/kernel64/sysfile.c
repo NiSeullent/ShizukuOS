@@ -4,7 +4,30 @@
  */
 #include "fs.h"
 #include "auth_policy.h"
-#include "../kcommon/nt_file_rights.h"
+#include "fs_policy.h"
+
+/* Internal status companions; public NT signatures and existing void cleanup
+ * ABI are unchanged. Volume callbacks may block: never under IRQ-off. */
+extern int fs_remove_checked(fsnode_t *n);
+static int32_t file_mutation_status(int rc)
+{
+    if(!rc)return STATUS_SUCCESS;
+    if(rc==-2)return STATUS_DISK_FULL;
+    if(rc==-3)return STATUS_DIRECTORY_NOT_EMPTY;
+    if(rc==-4)return STATUS_ACCESS_DENIED;
+    if(rc==-5)return STATUS_NOT_SUPPORTED;
+    return (int32_t)0xC0000185; /* STATUS_IO_DEVICE_ERROR: volume refused/failed. */
+}
+static int32_t file_truncate_status(fsnode_t *n,uint64_t size)
+{
+    if(!n)return STATUS_INVALID_HANDLE;
+    if(n->is_dir)return STATUS_FILE_IS_A_DIRECTORY;
+    if(n->readonly)return (int32_t)0xC00000A2; /* STATUS_MEDIA_WRITE_PROTECTED */
+    if((n->attrs&FILE_ATTRIBUTE_READONLY)||fs_policy_denied(n,FS_OP_WRITE))return STATUS_ACCESS_DENIED;
+    if(n->view)return STATUS_SHARING_VIOLATION;
+    if(n->backing==FSB_DISK&&(!n->vol||!n->vol->truncate))return STATUS_NOT_SUPPORTED;
+    return file_mutation_status(fs_truncate(n,size));
+}
 
 struct ustr { uint16_t length, maxlen; uint32_t pad; uint64_t buffer; };
 struct objattr { uint32_t length, pad; uint64_t root, name; uint32_t attributes, pad2; uint64_t sd, sqos; };
@@ -136,21 +159,46 @@ static int path_is_nul(const char *path)
     return path[i] == 0;
 }
 
-void file_object_closed(kobject_t *o)
+static file_t *file_of(process_t *p, uint64_t h, kobject_t **obj)
 {
-    file_t *f;
-    if (o->refs != 1) return;                           /* other handles remain */
+    kobject_t *o = handle_lookup(p, h, OB_FILE);
+    if (obj) *obj = o;
+    return o ? (file_t *)o->u.file.file : 0;
+}
+
+/* Consume one actual node owner exactly once. A closing file or section never
+ * reads the node again after dropping a non-last owner. The last owner keeps
+ * the namespace node allocated until the checked callback returns; failure
+ * clears delete_pending and preserves the actual node for an explicit retry. */
+int32_t file_node_release_status(fsnode_t *node)
+{
+    const uint64_t flags=irq_save();int remove;
+    if(!node||!node->open_count){irq_restore(flags);return STATUS_INVALID_HANDLE;}
+    --node->open_count;
+    remove=node->open_count==0&&node->delete_pending;
+    irq_restore(flags);
+    return remove?file_mutation_status(fs_remove_checked(node)):STATUS_SUCCESS;
+}
+int32_t file_object_closed_status(kobject_t *o)
+{
+    file_t *f;fsnode_t *node;int32_t status=STATUS_SUCCESS;
+    const uint64_t flags=irq_save();
+    if (o->refs > 1) {irq_restore(flags);return STATUS_SUCCESS;} /* live handle/I/O pins remain */
     f = o->u.file.file;
-    if (!f) return;
+    if (!f) {irq_restore(flags);return STATUS_SUCCESS;}
+    o->u.file.file=0; /* atomic, idempotent final cleanup ownership */
+    node=f->node;f->node=0;
+    irq_restore(flags);
     k32_locks_release(f);                               /* closing the last handle drops the byte-range locks of the file object */
-    if (f->node) {
-        if (f->node->open_count) --f->node->open_count;
-        if (f->node->delete_pending && f->node->open_count == 0)
-            fs_remove(f->node);
-    }
+    if(node)status=file_node_release_status(node);
     if (f->dir_pattern) kfree(f->dir_pattern);
     kfree(f);
-    o->u.file.file = 0;
+    return status;
+}
+void file_object_closed(kobject_t *o)
+{
+    const int32_t st=file_object_closed_status(o);
+    if(st)kprintf("K64 file: deferred cleanup failed status=%x; namespace retained\n",(uint32_t)st);
 }
 
 /* Status for a path that does not exist: STATUS_OBJECT_PATH_NOT_FOUND when its directory is missing (or is not a directory),
@@ -188,14 +236,9 @@ static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64
     kobject_t *o;
     uint32_t h;
     (void)fattrs;
-    if (a2 >> 32) return STATUS_ACCESS_DENIED;
-    a2 = shz_file_access((uint32_t)a2);
-    /* A disposition or close option cannot add rights to the requested handle.
-     * Check before lookup, creation or truncation can change the filesystem. */
-    if ((disposition == FILE_OVERWRITE || disposition == FILE_OVERWRITE_IF) &&
-        !(a2 & (GENERIC_WRITE | GENERIC_ALL | FILE_WRITE_DATA))) return STATUS_ACCESS_DENIED;
-    if ((disposition == FILE_SUPERSEDE || (options & FILE_DELETE_ON_CLOSE)) &&
-        !(a2 & (GENERIC_ALL | DELETE_ACCESS))) return STATUS_ACCESS_DENIED;
+    if ((options & FILE_DELETE_ON_CLOSE) && !(a2 & (DELETE_ACCESS | GENERIC_ALL))) {
+        set_iosb(p,a4,STATUS_ACCESS_DENIED,0);return STATUS_ACCESS_DENIED;
+    }
     if (copy_from_user(p, &oa, a3, sizeof oa) || oa.length < sizeof oa) return STATUS_ACCESS_VIOLATION;
     if (!oa.name) return STATUS_OBJECT_NAME_INVALID;
     st = read_ustr(p, oa.name, path, sizeof path);
@@ -251,8 +294,9 @@ static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64
         if ((options & FILE_DIRECTORY_FILE) && !n->is_dir) return STATUS_NOT_A_DIRECTORY;
         if ((options & FILE_NON_DIRECTORY_FILE) && n->is_dir) return STATUS_FILE_IS_A_DIRECTORY;
         if (!n->is_dir && (disposition == FILE_OVERWRITE || disposition == FILE_OVERWRITE_IF || disposition == FILE_SUPERSEDE)) {
-            if (node_ro(n)) return STATUS_ACCESS_DENIED;
-            fs_truncate(n, 0);
+            if(!(a2&(GENERIC_WRITE|GENERIC_ALL|FILE_WRITE_DATA))){set_iosb(p,a4,STATUS_ACCESS_DENIED,0);return STATUS_ACCESS_DENIED;}
+            st=file_truncate_status(n,0);
+            if(st){set_iosb(p,a4,st,0);return st;}
             info = disposition == FILE_SUPERSEDE ? IO_SUPERSEDED : IO_OVERWRITTEN;
         }
     }
@@ -281,21 +325,19 @@ static int32_t sys_create_file(process_t *p, struct regs *r, uint64_t a1, uint64
     return STATUS_SUCCESS;
 }
 
-static int32_t sys_rw_file(process_t *p, struct regs *r, uint64_t handle, int write, file_t *f, uint32_t access)
+static int32_t sys_rw_file(process_t *p, struct regs *r, uint64_t handle, int write)
 {
     const uint64_t iosb = (uint64_t)stack_arg(p, r, 5), buf = (uint64_t)stack_arg(p, r, 6);
     const uint64_t len = (uint64_t)(uint32_t)stack_arg(p, r, 7), off_ptr = (uint64_t)stack_arg(p, r, 8);
+    file_t *f = file_of(p, handle, 0);
     uint64_t off, done = 0;
     uint8_t *tmp;
     uint64_t chunk;
-    const int append = write && !(shz_file_access(access) & FILE_WRITE_DATA) &&
-                       (shz_file_access(access) & FILE_APPEND_DATA);
     if (!f) return STATUS_INVALID_HANDLE;
-    /* Duplication can reduce a handle's rights without changing file_t.access.
-     * The captured handle grant, including for consoles and NUL, is decisive. */
-    if (write ? !shz_file_can_write(access) : !shz_file_can_read(access)) return STATUS_ACCESS_DENIED;
     if (f->console == 3) {                                  /* NUL: real access and caller-buffer checks */
         int32_t st = write || !len ? STATUS_SUCCESS : STATUS_END_OF_FILE;
+        if (write ? !(f->access & (GENERIC_WRITE | GENERIC_ALL | FILE_WRITE_DATA | FILE_APPEND_DATA)) :
+                    !(f->access & (GENERIC_READ | GENERIC_ALL | FILE_READ_DATA))) return STATUS_ACCESS_DENIED;
         if (write) {
             uint8_t discard[256];
             uint64_t left = len, at = buf;
@@ -355,13 +397,15 @@ static int32_t sys_rw_file(process_t *p, struct regs *r, uint64_t handle, int wr
         return STATUS_END_OF_FILE;
     }
     if (!f->node || f->node->is_dir) return STATUS_INVALID_PARAMETER;
+    if (write ? !(f->access & (GENERIC_WRITE | GENERIC_ALL | FILE_WRITE_DATA | FILE_APPEND_DATA)) : !(f->access & (GENERIC_READ | GENERIC_ALL | FILE_READ_DATA)))
+        return STATUS_ACCESS_DENIED;
     if (off_ptr) {
         if (copy_from_user(p, &off, off_ptr, 8)) return STATUS_ACCESS_VIOLATION;
-        if ((int64_t)off < 0) off = append ? f->node->size : f->pos;   /* FILE_USE_FILE_POINTER_POSITION */
+        if ((int64_t)off < 0) off = f->append && write ? f->node->size : f->pos;   /* FILE_USE_FILE_POINTER_POSITION */
     } else {
         off = f->pos;
     }
-    if (append) off = f->node->size;
+    if (write && f->append) off = f->node->size;
     if (len && k32_lock_conflict(f, off, len, write)) return STATUS_FILE_LOCK_CONFLICT;      /* byte-range locks held through other handles */
     tmp = kmalloc(len > 65536 ? 65536 : len ? len : 1);
     if (!tmp) return STATUS_NO_MEMORY;
@@ -437,18 +481,12 @@ static int32_t file_name_utf16(const file_t *f, uint16_t *w, uint32_t cap, uint3
     return STATUS_SUCCESS;
 }
 
-static int32_t sys_query_info_file(process_t *p, struct regs *r, uint64_t iosb, uint64_t buf, uint64_t len, file_t *f, uint32_t access)
+static int32_t sys_query_info_file(process_t *p, struct regs *r, uint64_t handle, uint64_t iosb, uint64_t buf, uint64_t len)
 {
     const uint32_t cls = (uint32_t)stack_arg(p, r, 5);
+    file_t *f = file_of(p, handle, 0);
     if (!f) return STATUS_INVALID_HANDLE;
-    access = shz_file_access(access);
     switch (cls) {
-    case 8: {                                            /* FileAccessInformation: this handle's grant */
-        if (len < 4) return STATUS_BUFFER_TOO_SMALL;
-        if (copy_to_user(p, buf, &access, 4)) return STATUS_ACCESS_VIOLATION;
-        set_iosb(p, iosb, STATUS_SUCCESS, 4);
-        return STATUS_SUCCESS;
-    }
     case 4: {                                            /* FileBasicInformation */
         struct basicinfo b;
         if (len < sizeof b) return STATUS_BUFFER_TOO_SMALL;
@@ -476,7 +514,7 @@ static int32_t sys_query_info_file(process_t *p, struct regs *r, uint64_t iosb, 
         struct basicinfo b;
         struct stdinfo sd;
         int64_t idx = f->node ? (int64_t)node_file_id(f->node) : 0;
-        uint32_t nchars = 0, total, room, copy, mode = f->options & 0x183e, zero = 0;
+        uint32_t nchars = 0, total, room, copy, access = f->access, mode = f->options & 0x183e, zero = 0;
         int64_t pos = (int64_t)f->pos;
         int32_t st = STATUS_SUCCESS;
         if (len < sizeof all) return STATUS_INFO_LENGTH_MISMATCH;
@@ -571,14 +609,11 @@ static int32_t sys_query_info_file(process_t *p, struct regs *r, uint64_t iosb, 
     }
 }
 
-static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t iosb, uint64_t buf, uint64_t len, file_t *f, uint32_t access)
+static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t handle, uint64_t iosb, uint64_t buf, uint64_t len)
 {
     const uint32_t cls = (uint32_t)stack_arg(p, r, 5);
+    file_t *f = file_of(p, handle, 0);
     if (!f) return STATUS_INVALID_HANDLE;
-    access = shz_file_access(access);
-    if ((cls == 10 || cls == 13) && !(access & DELETE_ACCESS)) return STATUS_ACCESS_DENIED;
-    if (cls == 20 && !(access & FILE_WRITE_DATA)) return STATUS_ACCESS_DENIED;
-    if (cls == 4 && !(access & FILE_WRITE_ATTRIBUTES)) return STATUS_ACCESS_DENIED;
     switch (cls) {
     case 14: {                                           /* position */
         int64_t pos;
@@ -589,10 +624,12 @@ static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t iosb, ui
         return STATUS_SUCCESS;
     }
     case 20: {                                           /* FileEndOfFileInformation */
-        int64_t eof;
+        int64_t eof;int32_t status;
         if (!f->node || len < 8 || copy_from_user(p, &eof, buf, 8)) return STATUS_ACCESS_VIOLATION;
         if (eof < 0) return STATUS_INVALID_PARAMETER;
-        if (fs_truncate(f->node, (uint64_t)eof)) return STATUS_ACCESS_DENIED;
+        if(!(f->access&(GENERIC_WRITE|GENERIC_ALL|FILE_WRITE_DATA))||!shz_auth_node_access(p,f->node,1))status=STATUS_ACCESS_DENIED;
+        else status=file_truncate_status(f->node,(uint64_t)eof);
+        if(status){set_iosb(p,iosb,status,0);return status;}
         set_iosb(p, iosb, STATUS_SUCCESS, 0);
         return STATUS_SUCCESS;
     }
@@ -664,6 +701,7 @@ static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t iosb, ui
         struct basicinfo b;
         uint32_t a;
         if (!f->node || len < sizeof b || copy_from_user(p, &b, buf, sizeof b)) return STATUS_ACCESS_VIOLATION;
+        if (!(f->access & (FILE_WRITE_ATTRIBUTES | GENERIC_WRITE | GENERIC_ALL))) return STATUS_ACCESS_DENIED;   /* handle lacks FILE_WRITE_ATTRIBUTES */
         if (f->node->readonly) return STATUS_MEDIA_WRITE_PROTECTED;                                 /* initrd files live on read-only media */
         /* The disk volume code (disk.c) has no operation that rewrites a directory entry's attributes or times, and keeping them
          * only in the node would report values the media does not hold: a disk node accepts the request only when it changes nothing. */
@@ -684,6 +722,8 @@ static int32_t sys_set_info_file(process_t *p, struct regs *r, uint64_t iosb, ui
     case 13: {                                           /* FileDispositionInformation */
         uint8_t del;
         if (!f->node || copy_from_user(p, &del, buf, 1)) return STATUS_ACCESS_VIOLATION;
+        if(!(f->access&(DELETE_ACCESS|GENERIC_ALL))||!shz_auth_node_access(p,f->node,1))return STATUS_ACCESS_DENIED;
+        if(!f->node->parent||f->node->view)return STATUS_CANNOT_DELETE;
         if (node_ro(f->node)) return STATUS_ACCESS_DENIED;
         if (del && f->node->backing == FSB_DISK && !(f->node->vol && f->node->vol->remove))
             return STATUS_NOT_SUPPORTED;                                                     /* volume cannot delete */
@@ -767,13 +807,14 @@ static int wild(const uint16_t *p, const uint16_t *n)
     }
 }
 
-static int32_t sys_query_directory(process_t *p, struct regs *r, uint64_t iosb_unused, file_t *f, uint32_t access)
+static int32_t sys_query_directory(process_t *p, struct regs *r, uint64_t handle, uint64_t iosb_unused)
 {
     const uint64_t iosb = (uint64_t)stack_arg(p, r, 5), buf = (uint64_t)stack_arg(p, r, 6);
     const uint64_t len = (uint64_t)(uint32_t)stack_arg(p, r, 7);
     const uint32_t cls = (uint32_t)stack_arg(p, r, 8);
     const int single = (int)(stack_arg(p, r, 9) & 0xff), restart = (int)(stack_arg(p, r, 11) & 0xff);
     const uint64_t name_us = (uint64_t)stack_arg(p, r, 10);
+    file_t *f = file_of(p, handle, 0);
     fsnode_t *c;
     fsnode_t *next_child;
     unsigned dot_phase;
@@ -782,7 +823,6 @@ static int32_t sys_query_directory(process_t *p, struct regs *r, uint64_t iosb_u
     int first_call;
     (void)iosb_unused;
     if (!f || !f->node) return STATUS_INVALID_HANDLE;
-    if (!shz_file_can_read(access)) return STATUS_ACCESS_DENIED;
     if (!f->node->is_dir) return STATUS_NOT_A_DIRECTORY;
     if (!dir_class_layout(cls, &name_off, &len_off)) return STATUS_INVALID_INFO_CLASS;
     if (restart) f->dir_index = 0;
@@ -878,80 +918,41 @@ static int32_t sys_query_directory(process_t *p, struct regs *r, uint64_t iosb_u
     return STATUS_SUCCESS;
 }
 
-/* Kernel-only entry for the I/O router, whose IRP already retains the object.
- * The caller must hold the same referenced object/grant returned by handle_ref. */
-int32_t sysfile_rw_captured(process_t *p, struct regs *r, uint32_t num, uint64_t handle, kobject_t *held, uint32_t access)
+int32_t sysfile_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
+                         int *handled)
 {
-    file_t *f;
-    int32_t dst;
-    const int write = num == SYS_NtWriteFile;
-    if (num != SYS_NtReadFile && num != SYS_NtWriteFile) return STATUS_INVALID_PARAMETER;
-    if (!held || held->type != OB_FILE || !(f = held->u.file.file)) return STATUS_INVALID_HANDLE;
-    if (write ? !shz_file_can_write(access) : !shz_file_can_read(access)) return STATUS_ACCESS_DENIED;
-    if (f->node && !shz_auth_node_access(p, f->node, write)) return STATUS_ACCESS_DENIED;
-    /* Filesystem objects cannot become driver objects if the handle is reused.
-     * Native driver objects retain their existing separate dispatch contract. */
-    if (!f->node && ntdrv_file_dispatch(p, r, num, handle, &dst)) return dst;
-    return sys_rw_file(p, r, handle, write, f, access);
-}
-
-static int32_t sysfile_dispatch_body(process_t *p, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
-                                     kobject_t *held, uint32_t access, int *handled)
-{
-    file_t *f = held ? held->u.file.file : 0;
     *handled = 1;
     if(num==SYS_NtReadFile||num==SYS_NtWriteFile||num==SYS_NtSetInformationFile||num==SYS_NtQueryInformationFile||num==SYS_NtQueryDirectoryFile||num==SYS_NtFlushBuffersFile) {
+        file_t *f=file_of(p,a1,0);
         const int write=num==SYS_NtWriteFile||(num==SYS_NtSetInformationFile&&stack_arg(p,r,5)!=14);
         if(f&&f->node&&!shz_auth_node_access(p,f->node,write))return STATUS_ACCESS_DENIED;
+    }
+    if (num == SYS_NtReadFile || num == SYS_NtWriteFile) {      /* device handle? -> IRP path */
+        int32_t dst;
+        if (ntdrv_file_dispatch(p, r, num, a1, &dst)) return dst;
     }
     switch (num) {
     case SYS_NtCreateFile: return sys_create_file(p, r, a1, a2, a3, a4, 0);
     case SYS_NtOpenFile: return sys_create_file(p, r, a1, a2, a3, a4, 1);
-    case SYS_NtReadFile: case SYS_NtWriteFile: return sysfile_rw_captured(p, r, num, a1, held, access);
-    case SYS_NtQueryInformationFile: return sys_query_info_file(p, r, a2, a3, a4, f, access);
-    case SYS_NtSetInformationFile: return sys_set_info_file(p, r, a2, a3, a4, f, access);
-    case SYS_NtQueryDirectoryFile: return sys_query_directory(p, r, a2, f, access);
+    case SYS_NtReadFile: return sys_rw_file(p, r, a1, 0);
+    case SYS_NtWriteFile: return sys_rw_file(p, r, a1, 1);
+    case SYS_NtQueryInformationFile: return sys_query_info_file(p, r, a1, a2, a3, a4);
+    case SYS_NtSetInformationFile: return sys_set_info_file(p, r, a1, a2, a3, a4);
+    case SYS_NtQueryDirectoryFile: return sys_query_directory(p, r, a1, a2);
     case SYS_NtClose:
         if (a1 == CURRENT_PROCESS_HANDLE || a1 == CURRENT_THREAD_HANDLE) return STATUS_SUCCESS;
         return handle_close(p, a1);
     case SYS_NtFlushBuffersFile: {
+        file_t *f = file_of(p, a1, 0);
         if (!f) return STATUS_INVALID_HANDLE;
-        if (!shz_file_can_write(access)) return STATUS_ACCESS_DENIED;
         if (f->node && fs_flush(f->node)) { set_iosb(p, a2, (int32_t)0xC0000185, 0); return (int32_t)0xC0000185; }  /* STATUS_IO_DEVICE_ERROR */
         set_iosb(p, a2, STATUS_SUCCESS, 0);
         return STATUS_SUCCESS;
     }
     case SYS_NtCancelIoFile:                             /* (FileHandle, IoStatusBlock): every request completes before the call returns, so none is pending */
-        if (!f) return STATUS_INVALID_HANDLE;
+        if (!file_of(p, a1, 0)) return STATUS_INVALID_HANDLE;
         set_iosb(p, a2, STATUS_SUCCESS, 0);
         return STATUS_SUCCESS;
     default: *handled = 0; return 0;
     }
-}
-
-int32_t sysfile_dispatch(process_t *p, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4,
-                         int *handled)
-{
-    kobject_t *held = 0;
-    uint32_t access = 0;
-    int32_t st;
-    switch (num) {
-    case SYS_NtReadFile: case SYS_NtWriteFile: case SYS_NtQueryInformationFile: case SYS_NtSetInformationFile:
-    case SYS_NtQueryDirectoryFile: case SYS_NtFlushBuffersFile: case SYS_NtCancelIoFile:
-        *handled = 1;
-        st = handle_ref(p, a1, OB_FILE, &held, &access);
-        if (st) return st;
-        break;
-    default: break;
-    }
-    /* Keep the object and its handle grant together through user copies and
-     * filesystem callbacks. A concurrent close/reuse cannot switch the target. */
-    st = sysfile_dispatch_body(p, r, num, a1, a2, a3, a4, held, access, handled);
-    if (held) {
-        /* A concurrent last-handle close may have left only this operation's
-         * reference; release the file payload before dropping that last ref. */
-        file_object_closed(held);
-        ob_deref(held);
-    }
-    return st;
 }

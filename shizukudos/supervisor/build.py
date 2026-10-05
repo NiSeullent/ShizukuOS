@@ -29,14 +29,13 @@ OUT = BUILD / "supervisor"
 PAYLOAD_BASE = 0x04002000
 ESP_MIB = 96
 
-PAYLOAD_C = ["main.c", "platform.c", "ap_start.c", "ap_contract.c", "../../kernel64/smp_acpi.c",
+PAYLOAD_C = ["main.c", "core.c", "boot_manifest.c", "platform.c", "ap_start.c", "ap_contract.c", "../../kernel64/smp_acpi.c",
              "console.c", "caps.c", "vmx.c", "ept.c", "devices.c", "video.c", "bios.c",
-             "domain.c", "dos.c", "kdom.c", "display_grant.c", "pool.c", "lib.c",
+             "domain.c", "dos.c", "kdom.c", "pool.c", "lib.c",
              "../../csmwrap/video/cp437.c",
              "../native_win98/ata_pio.c", "../native_win98/string_pio.c", "../native_win98/win98.c", "../native_win98/l1_vga.c",
              "../native_win98/persistent_disk.c", "../native_win98/virtio_blk.c", "../native_win98/virtio_native.c",
              "../native_win98/persistence.c", "../native_win98/native_device_epoch.c", "../native_win98/native_device_gate.c",
-             "../native_win98/pointer_bridge.c", "../native_win98/native_input.c", "../../../drivers/shz_laptop/pointer_adapter.c",
              "../../../drivers/shz_laptop/hid.c", "../../../drivers/shz_laptop/hidi2c.c"]
 PAYLOAD_ASM = ["entry.asm", "vmx_asm.asm"]
 CFLAGS = ["-m64", "-march=x86-64", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror", "-ffreestanding", "-fno-builtin",
@@ -220,7 +219,7 @@ def main():
     esp = build_esp(loader, disk)
     conformance_esp = build_esp(loader, conformance_disk, "esp-conformance.img")
     sources = sorted([p for p in SRC.rglob("*") if p.is_file() and p.suffix in (".c", ".h", ".asm", ".ld")] +
-                     [SHZ / "abi" / "shz_abi.h", SHZ / "abi" / "shz_clock.h", SHZ / "abi" / "shz_ipc.h",
+                     [SHZ / "abi" / "shz_abi.h", SHZ / "abi" / "shz_ipc.h",
                       REPO / "shizukudos/uefi/boot.c", REPO / "shizukudos/uefi/boot.h",
                       REPO / "shizukudos/uefi/efi.h", SHZ / "kernel64/standalone/memholes.h"])
     sources += [SHZ / "kernel64" / name for name in ("smp_acpi.c", "smp_acpi.h")]

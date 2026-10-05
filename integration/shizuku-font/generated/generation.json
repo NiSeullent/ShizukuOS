@@ -1,0 +1,43 @@
+{
+  "face_name": "ShizukuKRBitmap",
+  "source_family": "Noto Sans CJK KR",
+  "source_face_index": 1,
+  "source_copyright": "\u00a9 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.",
+  "source_sha256": {
+    "font": "d3d8256cdec8dbcb3552284bc6b20c734dd60c2ee9df83b5758e34807c4bac32",
+    "license": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2"
+  },
+  "source_stable": true,
+  "pillow_version": "12.2.0",
+  "pixel_size": 16,
+  "weight": 500,
+  "threshold": 96,
+  "cell": [
+    16,
+    22
+  ],
+  "baseline": 17,
+  "ranges": [
+    [
+      32,
+      126
+    ],
+    [
+      4352,
+      4607
+    ],
+    [
+      12593,
+      12686
+    ],
+    [
+      44032,
+      55203
+    ]
+  ],
+  "glyph_count": 11617,
+  "glyphs_sha256": "7df93479f3c886ff786e34ddae44721a8621647eef888dac41df0aa0f2557c32",
+  "license_sha256": "39b4bcbf824a8156b857d48712556c1626f448b30970367f4b085b407e23801d",
+  "runtime_execution": false,
+  "general_font_engine": false
+}

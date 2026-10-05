@@ -1,14 +1,21 @@
 /* SPDX-License-Identifier: GPL-2.0-only
  * Kernel32 "standalone" services: the hypercall ABI served by the kernel itself so the Protected Mode kernel can run
  * under QEMU TCG without the Supervisor (no Intel VMX needed). Bring-up/test profile only; see
- * kernel64/standalone/standalone64.c and kcommon/standalone_dev.h. Time is timer ticks truncated to 32 bits by the
- * 32-bit hypercall ABI (khc.h), so measured intervals are only valid below ~4.29 s.
+ * kernel64/standalone/standalone64.c and kcommon/standalone_dev.h. The full-width
+ * helper uses the scheduler's coherent BSP tick clock; generic 32-bit hypercalls
+ * retain their register-width result. Both express the same clock in nanoseconds.
  */
 #include "k32.h"
 #include "../../kcommon/standalone_dev.h"
 
-extern uint64_t arch_timer_irqs(void);
 void standalone_eoi(void) { sa_eoi(); }
+
+uint64_t shz_standalone_time_ns(void)
+{
+    /* ticks_now masks IRQs and takes the existing runqueue lock, including
+     * AP reads of the BSP-owned 64-bit clock. Preserve the caller's IRQ state. */
+    return ticks_now() * (uint64_t)TICK_US * 1000u;
+}
 
 long shz_standalone_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_out)
 {
@@ -26,7 +33,7 @@ long shz_standalone_hcall(hcreg_t op, hcreg_t a, hcreg_t b, hcreg_t *value_out)
     case SHZ_HC_EXIT: sa_exit((unsigned)a);
     case SHZ_HC_TIMER_SET: st = sa_timer_set((unsigned)a, (uint32_t)b); break;
     case SHZ_HC_WAIT: __asm__ volatile("sti; hlt"); break;
-    case SHZ_HC_TIME: v = (hcreg_t)(arch_timer_irqs() * TICK_US * 1000u); break;
+    case SHZ_HC_TIME: v = (hcreg_t)shz_standalone_time_ns(); break;
     case SHZ_HC_EVIDENCE:
         if (a > 31) { st = SHZ_E_RANGE; break; }
         sa_evidence((unsigned)a, b);

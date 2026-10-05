@@ -9,9 +9,10 @@
  * No ticket is held across a context switch or external wait/object callback.
  * Windows VMM remains authoritative; this is a backend scheduler foundation.
  */
-#include "k64.h"
+#include "proc_internal.h"
 #include "sched_cpu.h"
 #include "smp_boot.h"
+#include "../dead_screen/native.h"
 #ifdef SHZ_STANDALONE
 #include "cpu_arch_bringup.h"
 #include "kernel_ap_work.h"
@@ -353,7 +354,10 @@ static void schedule(int from_tick)
     KASSERT(changed >= 0);
     const int observe = !native_cohort_owner(id) && next != cpu->idle && (pma_sched_trace_enabled || pma_sched_observe_enabled);
     if (changed) {
-        if (!id) current = next;
+        if (!id) {
+            current = next;
+            ds_native_context(id, next->proc ? (uint32_t)next->proc->pid : 0, (uint32_t)next->tid);
+        }
         ++switches;
         if (from_tick) ++preemptions;
     }

@@ -149,13 +149,37 @@ def verify(disk, payload_dir, want_win98=None, rep=None, drivers="all"):
             espf = work / "p1.img"
             extract(f, p1["first"], p1["last"], espf)
             data = espf.read_bytes()
-            rep.check("p1 is byte-identical to esp.img", data == esp_img and sha(data) == manifest["esp"]["sha256"],
-                      f"{len(data)} bytes, sha256 {sha(data)[:16]}")
+            bm = manifest.get("boot_manifest")
+            if bm:
+                # SHZSETUP stamps install_generation [24,32) and install_id [72,88) of SHZBOOT.MAN in place on the target;
+                # every other byte of p1 must equal esp.img, and the stamp must be a nonzero generation and id.
+                off, go, io = bm["image_offset"], bm["stamp"]["generation_offset"], bm["stamp"]["install_id_offset"]
+                stamped = bytearray(data)
+                gen = int.from_bytes(data[off + go:off + go + 8], "little") if len(data) == len(esp_img) else 0
+                inst = bytes(data[off + io:off + io + 16]) if len(data) == len(esp_img) else bytes(16)
+                stamped[off + go:off + go + 8] = esp_img[off + go:off + go + 8]
+                stamped[off + io:off + io + 16] = esp_img[off + io:off + io + 16]
+                rep.check("p1 equals esp.img except the SHZBOOT.MAN stamp (generation, install_id)",
+                          bytes(stamped) == esp_img and sha(bytes(stamped)) == manifest["esp"]["sha256"],
+                          f"{len(data)} bytes")
+                man = bytes(data[off:off + bm["bytes"]])
+                rep.check("p1: SHZBOOT.MAN stamped (generation >= 1, install_id nonzero, entries_sha256 unchanged)",
+                          gen >= 1 and any(inst) and sha(man[96:]) == bm["entries_sha256"] and man[40:72].hex() == bm["entries_sha256"],
+                          f"generation {gen} install_id {inst.hex()}")
+                rec = bytes(f_read(f, (p1["first"] - 1) * 512, 512))
+                rep.check("install record SHZINSR1 carries the stamped generation and install_id",
+                          rec[:8] == b"SHZINSR1" and int.from_bytes(rec[320:328], "little") == gen and rec[328:344] == inst,
+                          rec[320:344].hex())
+            else:
+                rep.check("p1 is byte-identical to esp.img", data == esp_img and sha(data) == manifest["esp"]["sha256"],
+                          f"{len(data)} bytes, sha256 {sha(data)[:16]}")
             fsck = subprocess.run(["fsck.fat", "-n", str(espf)], capture_output=True, text=True)
             rep.check("p1: fsck.fat -n", fsck.returncode == 0, (fsck.stdout + fsck.stderr).strip().splitlines()[-1:])
             env = dict(os.environ, MTOOLS_SKIP_CHECK="1")
             bad = []
             for ent in manifest["esp"]["files"]:
+                if bm and ent["path"].upper() == bm["path"].upper():
+                    continue                    # stamped on the target; checked above against the template
                 dst = work / "esp-out"
                 dst.unlink(missing_ok=True)
                 r = subprocess.run(["mcopy", "-n", "-i", str(espf), f"::{ent['path']}", str(dst)], capture_output=True, env=env)
@@ -192,7 +216,8 @@ def verify(disk, payload_dir, want_win98=None, rep=None, drivers="all"):
                 dirs_missing = [d["path"] for d in sys_dirs if not (tree / d["path"].lstrip("/")).is_dir()]
                 rep.check("p2: every manifest directory exists (\\SHZ\\SYS64, \\SHZ\\DRIVERS, \\SHZ\\SETUP\\log, \\Users ...)",
                           not dirs_missing, dirs_missing)
-                gen = {"SHZ/SYSTEM.INI": b"[System]", "SHZ/SETUP/shzsetup.ini": b"[Setup]", "SHZ/SETUP/manifest.json": None}
+                gen = {"SHZ/SYSTEM.INI": b"[System]", "SHZ/SETUP/shzsetup.ini": b"[Setup]", "SHZ/SETUP/manifest.json": None,
+                       "SHZ/DRIVERS/CATALOG.INI": b"Schema=shizuku-driver-catalog/2"}
                 gen_bad = [g for g, marker in gen.items() if not (tree / g).is_file() or (marker and marker not in (tree / g).read_bytes())]
                 if (tree / "SHZ/SETUP/manifest.json").is_file() and (tree / "SHZ/SETUP/manifest.json").read_bytes() != \
                         (payload_dir / "payload" / "manifest.json").read_bytes():
@@ -243,6 +268,14 @@ def main():
     print("PASS" if rep.ok() else "FAIL")
     return 0 if rep.ok() else 1
 
+
+def f_read(f, offset, size):
+    """Reads `size` bytes at `offset` of the open disk image `f` (install record check)."""
+    pos = f.tell()
+    f.seek(offset)
+    out = f.read(size)
+    f.seek(pos)
+    return out
 
 if __name__ == "__main__":
     sys.exit(main())

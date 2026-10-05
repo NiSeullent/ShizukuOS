@@ -2,12 +2,13 @@
  * Kernel64 installer support (SHZSETUP.EXE): block-device enumeration, raw sector I/O and the post-setup power
  * request (syscalls 0xb0-0xbf, setup_abi.h), and the `shz.setup=auto` autostart run after the boot self-tests.
  */
-#include "laptop_power.h"
 #include "proc_internal.h"
 #include "fs.h"
 #include "blk_compat.h"
 #include "setup_abi.h"
 #include "setup_native_sys.h"
+#include "archive_source.h"
+#include "auth_policy.h"
 
 extern int32_t ldr_create_process(process_t *parent, const char *image_path, const char *cmdline, const char *cwd,
                                   process_t **out_proc, thread_t **out_thread);
@@ -97,8 +98,14 @@ static int32_t blk_io(process_t *p, int write, uint64_t index, uint64_t lba, uin
 int32_t sys_ext_setup(process_t *cur, struct regs *r, uint32_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4)
 {
     (void)r;
+    if ((num==SYS_NtShzSetupBlkRead || num==SYS_NtShzSetupBlkWrite ||
+         num==SYS_NtShzSetupBlkFlush) && !shz_auth_saw_force_allowed(cur))
+        return STATUS_ACCESS_DENIED;
+    if (num==SYS_NtShzSetupPower && !setup_target_prepared(cur) &&
+        !shz_auth_saw_force_allowed(cur)) return STATUS_ACCESS_DENIED;
     switch (num) {
     case 0xb5: return setup_native_syscall(cur,a1,a2);
+    case 0xb6: return setup_target_syscall(cur,a1,a2);
     case SYS_NtShzSetupBlkQuery: return blk_query(cur, a1, a2, a3);
     case SYS_NtShzSetupBlkRead: return blk_io(cur, 0, a1, a2, a3, a4);
     case SYS_NtShzSetupBlkWrite: return blk_io(cur, 1, a1, a2, a3, a4);
@@ -149,9 +156,21 @@ void setup_autostart(const shz_bootinfo_t *bi)
         kprintf("SETUP-RESULT: FAIL (installer missing)\n");
         return;
     }
-    st = ldr_create_process(0, SETUP_EXE,
+    /* Only this actual boot supervisor constructs target authority. The loader
+     * compares its actual readonly accepted-archive image before prepare runs.
+     * Older private producer layouts retain their existing service when the
+     * standard public payload does not exist; no raw fallback in public UI. */
+    fsnode_t *origin=archive_source_bound_node(SETUP_EXE);
+    ldr_create_ex_t ex;
+    memset(&ex,0,sizeof ex);
+    if(origin&&archive_source_bound_node("C:\\SHZ\\SETUP\\PAYLOAD\\manifest.json")&&
+       archive_source_bound_node("C:\\SHZ\\SETUP\\PAYLOAD\\ESP.SIM")&&
+       archive_source_bound_node("C:\\SHZ\\SETUP\\PAYLOAD\\SYSTEM.ARC")) {
+        ex.trusted_image=origin;ex.prepare=setup_target_prepare;ex.prepare_ctx=origin;
+    }
+    st = ldr_create_process_ex(0, SETUP_EXE,
                           interactive ? "SHZSETUP.EXE /interactive" : "SHZSETUP.EXE /unattend C:\\SHZ\\SETUP\\SHZSETUP.INI",
-                          "C:\\SHZ\\SETUP", &p, &t);
+                          "C:\\SHZ\\SETUP", &ex, &p, &t);
     if (st) {
         kprintf("K64 setup: SHZSETUP.EXE failed to start (%x)\n", (uint32_t)st);
         kprintf("SETUP-RESULT: FAIL (installer did not start)\n");
@@ -170,11 +189,13 @@ void setup_autostart(const shz_bootinfo_t *bi)
             power_request == SHZ_SETUP_POWER_REBOOT ? "reboot" : power_request == SHZ_SETUP_POWER_SHUTDOWN ? "shutdown" : "none");
 #ifdef SHZ_STANDALONE
     if (power_request == SHZ_SETUP_POWER_REBOOT) {
-        if (k64_laptop_power_generation()) {                 /* FADT RESET_REG, only if laptop_power was opened */
-            kprintf("K64 setup: rebooting (ACPI FADT reset register)\n");
-            kprintf("K64 setup: ACPI reset did not reset the platform (%d), falling back to the keyboard controller\n",
-                    k64_laptop_power_reset());
-        }
+        extern void vfs_shutdown(void);
+        extern int shz_driver_bringup_quiesce(void);
+        int q;
+        /* Same commit + driver quiesce as the SHZ_HC_EXIT path (standalone64.c): the reset must not discard write-back data. */
+        vfs_shutdown();
+        q = shz_driver_bringup_quiesce();
+        if (q) kprintf("K64 setup: driver quiesce reported %d flush failure(s) before reboot\n", q);
         kprintf("K64 setup: rebooting (keyboard controller reset)\n");
         __asm__ volatile("outb %0, $0x64" :: "a"((uint8_t)0xfe));
         for (;;) __asm__ volatile("hlt");

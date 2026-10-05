@@ -1,0 +1,33 @@
+{
+  "project": "ReactOS",
+  "commit": "ce41f2e98e0450ce624c5fc6155fb671af7cc3b5",
+  "files": [
+    {
+      "path": "base/shell/explorer/traywnd.cpp",
+      "url": "https://raw.githubusercontent.com/reactos/reactos/ce41f2e98e0450ce624c5fc6155fb671af7cc3b5/base/shell/explorer/traywnd.cpp",
+      "sha256": "2e67ba71b27918ef622d6e3e3d3e9478712f8e1cc18f655f20777a8336681312",
+      "bytes": 120587,
+      "local": "upstream/reactos/traywnd.cpp"
+    },
+    {
+      "path": "base/shell/explorer/taskswnd.cpp",
+      "url": "https://raw.githubusercontent.com/reactos/reactos/ce41f2e98e0450ce624c5fc6155fb671af7cc3b5/base/shell/explorer/taskswnd.cpp",
+      "sha256": "0792470480c4e5682bb22d726c9510b3d08c03438f1cfc8f0d87bba28e2727a7",
+      "bytes": 70996,
+      "local": "upstream/reactos/taskswnd.cpp"
+    },
+    {
+      "path": "COPYING.LIB",
+      "url": "https://raw.githubusercontent.com/reactos/reactos/ce41f2e98e0450ce624c5fc6155fb671af7cc3b5/COPYING.LIB",
+      "sha256": "42a43212349af1e133ee4d6c5324f474e79f4214d1a382135a5d78b90c8e88ea",
+      "bytes": 26523,
+      "local": "upstream/reactos/COPYING.LIB"
+    }
+  ],
+  "shorthorn": {
+    "source_used": false,
+    "verified_4074_4083_shell_source": false,
+    "reference": "https://github.com/shorthorn-project/One-Core-API-Source"
+  },
+  "visual_target": "4074 provisional direction, not source version or ABI claim"
+}

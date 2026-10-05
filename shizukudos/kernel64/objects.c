@@ -52,11 +52,12 @@ extern void reg_key_object_free(kobject_t *o);
  * an object was closed (ipc_handle_closed runs for every type, before the handle's reference is dropped). */
 void __attribute__((weak)) ipc_object_free(kobject_t *o) { (void)o; }
 void __attribute__((weak)) ipc_handle_closed(process_t *p, kobject_t *o) { (void)p; (void)o; }
+extern int32_t file_object_closed_status(kobject_t *o);
 
-void ob_deref(kobject_t *o)
+static int32_t ob_deref_status(kobject_t *o)
 {
     uint64_t f = irq_save();
-    int last;
+    int last;int32_t status=STATUS_SUCCESS;
     KASSERT(o->refs > 0);
     last = --o->refs == 0;
     if (last) {
@@ -73,12 +74,21 @@ void ob_deref(kobject_t *o)
     irq_restore(f);
     if (last) {
         extern void token_object_free(kobject_t *o);
+        if(o->type==OB_FILE){
+            status=file_object_closed_status(o);
+        }
         if (o->type == OB_KEY) reg_key_object_free(o);
         else if (o->type == OB_TOKEN) token_object_free(o);
         else ipc_object_free(o);                    /* IPC hook: sections, pipes, ports, jobs, thread/process slots */
         kfree(o->sd);                               /* a stored security descriptor (sysk32_sec.c) */
         kfree(o);
     }
+    return status;
+}
+void ob_deref(kobject_t *o)
+{
+    const int32_t st=ob_deref_status(o);
+    if(st)kprintf("K64 file: final deferred deletion failed status=%x; namespace retained\n",(uint32_t)st);
 }
 
 kobject_t *ob_find_named(uint32_t type, const char *name)
@@ -142,6 +152,7 @@ int32_t handle_ref(process_t *p, uint64_t handle, uint32_t type, kobject_t **out
 int32_t handle_close(process_t *p, uint64_t handle)
 {
     kobject_t *o;
+    int32_t status=STATUS_SUCCESS;
     const uint64_t f = irq_save();
     o = 0;
     if (!(handle & 3) && handle && handle <= (uint64_t)p->handle_cap * 4ull)
@@ -151,8 +162,7 @@ int32_t handle_close(process_t *p, uint64_t handle)
     --p->handle_count;
     irq_restore(f);
     if (o->type == OB_FILE) {
-        extern void file_object_closed(kobject_t *o);
-        file_object_closed(o);
+        status=file_object_closed_status(o);
     } else if (o->type == OB_SOCKET) {
         extern void net_socket_handle_closing(kobject_t *o);   /* net_sock.c: tears the socket down with its last handle */
         net_socket_handle_closing(o);
@@ -161,8 +171,8 @@ int32_t handle_close(process_t *p, uint64_t handle)
         ntdrv_device_handle_closing(o);
     }
     ipc_handle_closed(p, o);
-    ob_deref(o);
-    return STATUS_SUCCESS;
+    {const int32_t last=ob_deref_status(o);if(!status)status=last;}
+    return status; /* Handle is consumed even if final volume cleanup failed. */
 }
 
 void handles_close_all(process_t *p)
@@ -457,6 +467,10 @@ void sched_check_timeouts(uint64_t now)
 
 /* Overridden by the file system layer. */
 void __attribute__((weak)) file_object_closed(kobject_t *o) { (void)o; }
+int32_t __attribute__((weak)) file_object_closed_status(kobject_t *o)
+{
+    file_object_closed(o);return STATUS_SUCCESS;
+}
 
 /* Diagnostic for the autorun timeout report (autorun.c): the objects a blocked thread waits for. */
 void ob_print_wait(thread_t *t)

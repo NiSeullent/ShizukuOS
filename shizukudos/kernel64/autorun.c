@@ -15,8 +15,10 @@
  */
 #include "fs.h"
 #include "auth_policy.h"
+#include "saw.h"
 #include "net.h"
 #include "vfs_mounts.h"
+#include "sfs_mount.h"
 
 extern void k64_dump_threads(process_t *p);
 extern process_t *process_slot(unsigned i);
@@ -64,33 +66,43 @@ static void copy_value(char *dst, size_t cap, const char *src, size_t n)
 /* Production boot profile: keep the real Win64 shell alive until it exits. A
  * kernel-created process retains its creation reference until proc_wait(), which
  * yields to its threads and safely reaps it. Do not use the QA autorun timeout. */
+static int32_t protect_native_desktop(process_t *p,void *unused)
+{
+    (void)unused;
+    process_saw_protect(p,SHZ_SAW_PROTECT_CRITICAL);
+    return STATUS_SUCCESS;
+}
+
 unsigned k64_desktop(void)
 {
-    /* Shell selection: the Korean ShizukuOS shell is the default when its image is packed; `shz.shell=shzdesk`
-     * selects the earlier SHZDESK shell. A named shell that is missing fails visibly (no silent substitution);
-     * only the unnamed default falls back to SHZDESK when the new shell image is absent. */
-    const char *image = "C:\\SHZ\\SYS64\\SHIZUKU_SHELL.EXE";
-    char shell[16];
+    const char *image = "C:\\SHZ\\SYS64\\SHZDESK.EXE";
     process_t *p = 0;
     thread_t *t = 0;
     int64_t code = -1;
     int faulted = 1, pid, reaped, flush;
     int32_t st;
-    if(k64_cmdline_has("shz.accounts=setup")) {
-        const char *enroll="C:\\SHZ\\SYS64\\ELEVATE.EXE";
-        fsnode_t *enrollment=fs_lookup(enroll);
-        ldr_create_ex_t ex;
-        if(!enrollment||!enrollment->readonly||enrollment->backing!=FSB_RAM)return 1;
-        memset(&ex,0,sizeof ex);ex.prepare=shz_auth_bootstrap_prepare;
-        st=ldr_create_process_ex(0,enroll,"ELEVATE.EXE --enroll admin","C:\\SHZ",&ex,&p,&t);
-        if(st)return 1;
-        if(proc_wait(p->pid,&code,&faulted)||code||faulted)return 1;
-        p=0;t=0;
+    ldr_create_ex_t desktop_launch;
+    /* Installed boots use only the kernel-prepared logon helper, then the
+     * actual standard child. Development without installed storage is explicit. */
+    if(sfsk_system_volume(0)||k64_cmdline_has("shz.accounts=setup")) {
+        fsnode_t *origin=fs_lookup(image);ldr_create_ex_t ex;int helper_failure;
+        if(!origin||origin->is_dir||!origin->readonly||origin->backing!=FSB_RAM) {
+            kprintf("K64 firstboot: trusted archive shell missing\n");return 1;
+        }
+        memset(&ex,0,sizeof ex);ex.prepare=shz_auth_logon_prepare;ex.prepare_ctx=origin;ex.trusted_image=origin;
+        st=ldr_create_process_ex(0,image,"SHZDESK.EXE --firstboot","C:\\SHZ",&ex,&p,&t);
+        if(st){kprintf("K64 firstboot: prepared helper refused status=%x\n",(uint32_t)st);return 1;}
+        process_saw_protect(p,SHZ_SAW_PROTECT_CRITICAL);
+        pid=p->pid;kprintf("K64 firstboot: helper pid=%d\n",pid);
+        helper_failure=proc_wait(pid,&code,&faulted)||code||faulted;
+        p=0;t=0;pid=shz_auth_logon_child_pid();
+        if(!pid){kprintf("K64 firstboot: no authenticated session; helper-failed=%d\n",helper_failure);return 1;}
+        kprintf("K64 desktop: authenticated session pid=%d\n",pid);
+        reaped=proc_wait(pid,&code,&faulted);
+        kprintf("K64 desktop: authenticated exit=%x faulted=%d reaped=%d\n",(uint32_t)code,faulted,reaped);
+        flush=vfs_flush_all();kprintf("K64 desktop: volume flush rc %d\n",flush);
+        return helper_failure||reaped||code||faulted||flush?1:0;
     }
-    if (!cmdline_value("shz.shell", shell, sizeof shell)) {
-        if (!strcmp(shell, "shzdesk")) image = "C:\\SHZ\\SYS64\\SHZDESK.EXE";
-        else if (strcmp(shell, "shizuku")) { kprintf("K64 desktop: result unknown-shell %s\n", shell); return 1; }
-    } else if (!fs_lookup(image)) image = "C:\\SHZ\\SYS64\\SHZDESK.EXE";
     kprintf("K64 desktop: production profile (self-tests not run)\n");
     if (net_ensure_init()) {
         kprintf("K64 desktop: result network-init-failed\n");
@@ -99,7 +111,9 @@ unsigned k64_desktop(void)
     /* Display, compositor and input use their normal, lazy initialisation when
      * the shell calls the graphics syscalls. Only the shell can report GUI ready. */
     kprintf("K64 desktop: starting %s\n", image);
-    st = ldr_create_process(0, image, image, "C:\\SHZ", &p, &t);
+    memset(&desktop_launch,0,sizeof desktop_launch);
+    desktop_launch.prepare=protect_native_desktop;
+    st = ldr_create_process_ex(0,image,image,"C:\\SHZ",&desktop_launch,&p,&t);
     if (st) {
         kprintf("K64 desktop: result start-failed status=%x\n", (uint32_t)st);
         return 1;
